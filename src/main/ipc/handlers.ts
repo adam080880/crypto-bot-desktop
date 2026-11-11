@@ -1,4 +1,6 @@
-import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { is } from '@electron-toolkit/utils'
+import { moveDatabase, planMove, storageInfo } from '../storage'
 import { z } from 'zod'
 import { configPatchSchema } from '@shared/config'
 import { SECRET_NAMES, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc'
@@ -30,6 +32,8 @@ export function registerIpcHandlers(deps: {
   secrets: SecretStore
   data: DataController
   isTrustedSender: (wc: WebContents) => boolean
+  dbPath: string
+  beforeRelaunch: () => void
 }): void {
   const { db, state, secrets, data, isTrustedSender } = deps
   const candles = new CandleRepo(db) // main-process reads; the data worker is the only writer
@@ -148,6 +152,44 @@ export function registerIpcHandlers(deps: {
   })
   handle('claude:list', () => ({ runs: claude.runs(30), analyses: claude.analyses(60) }))
   handle('claude:run', () => data.claudeRun())
+  handle('storage:get', () => storageInfo(deps.dbPath))
+  handle('storage:chooseDir', async (_req, event) => {
+    const win = (await import('electron')).BrowserWindow.fromWebContents(event.sender)
+    const r = await (win
+      ? dialog.showOpenDialog(win, { title: 'Pilih folder database', properties: ['openDirectory', 'createDirectory'] })
+      : dialog.showOpenDialog({ title: 'Pilih folder database', properties: ['openDirectory', 'createDirectory'] }))
+    return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+  handle('storage:plan', (req) => planMove(deps.dbPath, z.object({ dir: z.string().min(1).max(1000) }).strict().parse(req).dir))
+  let moving = false
+  handle('storage:move', async (req, event) => {
+    const { dir, mode } = z
+      .object({ dir: z.string().min(1).max(1000), mode: z.enum(['move', 'useExisting']) })
+      .strict()
+      .parse(req)
+    if (moving) throw new Error('pemindahan sedang berjalan')
+    const plan = await planMove(deps.dbPath, dir)
+    if (!plan.ok && !(mode === 'useExisting' && plan.targetHasDb)) throw new Error(plan.error ?? 'folder tidak valid')
+    moving = true
+    const progress = (p: { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }) =>
+      !event.sender.isDestroyed() && event.sender.send('storage:progress', p)
+    progress({ fraction: 0, phase: 'stopping' })
+    await data.stop() // worker owns a DB connection and writes live candles
+    try {
+      await moveDatabase(db, deps.dbPath, dir, mode, (f) => progress({ fraction: f, phase: 'copying' }))
+    } catch (err) {
+      log.error({ err: (err as Error).message }, 'database move failed; restarting on the old location')
+      progress({ fraction: 0, phase: 'error', error: (err as Error).message })
+    }
+    progress({ fraction: 1, phase: 'restarting' })
+    // the main DB handle is closed now: restart to reopen at the (new or unchanged) location
+    setTimeout(() => {
+      deps.beforeRelaunch()
+      if (!is.dev) app.relaunch()
+      app.exit(0)
+    }, 1500)
+    return { restarting: !is.dev }
+  })
   handle('live:setChart', (req) => {
     const { symbol } = z.object({ symbol: symbolSchema.nullable() }).strict().parse(req)
     data.setChart(symbol)

@@ -42,6 +42,16 @@ export interface SyncUiState {
   lastError: string | null
 }
 
+export interface StorageInfo {
+  dbPath: string
+  dataDir: string
+  isDefault: boolean
+  defaultDir: string
+  envOverride: boolean
+  dbBytes: number
+  freeBytes: number | null
+}
+
 /** Invoke channels (renderer → main, request/response). */
 export interface IpcInvokeMap {
   'app:getStatus': { req: void; res: AppStatus }
@@ -72,6 +82,10 @@ export interface IpcInvokeMap {
   'news:setActual': { req: { id: string; value: number | null }; res: void }
   'claude:list': { req: void; res: { runs: ClaudeRun[]; analyses: ClaudeAnalysis[] } }
   'claude:run': { req: void; res: void }
+  'storage:get': { req: void; res: StorageInfo }
+  'storage:chooseDir': { req: void; res: string | null }
+  'storage:plan': { req: { dir: string }; res: { ok: boolean; error?: string; targetHasDb: boolean; needBytes: number; freeBytes: number | null } }
+  'storage:move': { req: { dir: string; mode: 'move' | 'useExisting' }; res: { restarting: boolean } }
 }
 
 export interface SymbolListItem {
@@ -96,6 +110,7 @@ export interface IpcEventMap {
   'live:synced': { symbol: string }
   'news:changed': { at: number }
   'claude:changed': { at: number }
+  'storage:progress': { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }
 }
 
 export type InvokeChannel = keyof IpcInvokeMap
@@ -138,6 +153,10 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'news:refresh',
   'news:setActual',
   'claude:list',
-  'claude:run'
+  'claude:run',
+  'storage:get',
+  'storage:chooseDir',
+  'storage:plan',
+  'storage:move'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'storage:progress']

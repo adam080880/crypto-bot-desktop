@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatTime } from '@/lib/utils'
+import { StorageSettings } from '@/components/StorageSettings'
 
 const SECRET_LABELS: Record<SecretName, string> = {
   'binance.apiKey': 'Binance API Key',
@@ -163,6 +164,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      <StorageSettings />
       {config && <DataSettings config={config} onSaved={setConfig} />}
       {config && <NewsSettings config={config} onSaved={setConfig} />}
       {config && <ClaudeSettings config={config} onSaved={setConfig} />}

@@ -65,6 +65,10 @@ function bootstrap(): void {
     state,
     secrets,
     data,
+    dbPath,
+    beforeRelaunch: () => {
+      quitting = true
+    },
     isTrustedSender: (wc) => wc.id === main.window.webContents.id
   })
 

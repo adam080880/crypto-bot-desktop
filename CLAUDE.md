@@ -101,8 +101,10 @@ strategi perlu backtest di data full dulu.
   dilanjutkan dari titik terakhir.
 - Risk guard ditegakkan di kode (`src/shared/config.ts` + `src/main/risk`), stop-loss tidak bisa dimatikan.
 - Lokasi data: `~/Library/Application Support/smc-trading-assistant/` (macOS); Windows di
-  `%APPDATA%\smc-trading-assistant`. CLI dan app memakai DB yang sama (`src/main/userDataDir.ts`).
-  Bisa diganti lewat env `SMC_DB_PATH` / `SMC_USER_DATA`.
+  `%APPDATA%\smc-trading-assistant`. Urutan path DB (`src/main/userDataDir.ts`, dipakai app & CLI):
+  env `SMC_DB_PATH` → `location.json` (diatur di **Settings → Lokasi database**) → `<userData>/data/trading.db`.
+  Memindahkan DB (`src/main/storage.ts`): hentikan worker → checkpoint WAL → salin + verifikasi →
+  catat lokasi baru → hapus file lama → app relaunch. Kalau gagal, lokasi lama tetap dipakai.
 
 ## Setup di mesin baru (PC)
 ```bash

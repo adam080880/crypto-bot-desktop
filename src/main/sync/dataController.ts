@@ -243,4 +243,19 @@ export class DataController {
     this.disposed = true
     this.child?.kill()
   }
+
+  /** Stop the worker and wait until it has exited (it owns a DB connection). */
+  stop(): Promise<void> {
+    this.disposed = true
+    const child = this.child
+    if (!child) return Promise.resolve()
+    return new Promise((resolve) => {
+      const t = setTimeout(resolve, 10_000)
+      child.once('exit', () => {
+        clearTimeout(t)
+        resolve()
+      })
+      child.kill()
+    })
+  }
 }
