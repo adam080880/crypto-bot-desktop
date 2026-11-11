@@ -44,7 +44,7 @@ strategi perlu backtest di data full dulu.
   `maxTurns`, `maxBudgetUsd` per run, dan batas biaya harian.
 - Output: JSON schema (`outputFormat`) + validasi zod per koin. Yang invalid/hilang → `skip`.
 - API key Anthropic opsional di Settings. Kalau kosong, CLI pakai login Claude Code di mesin itu.
-- Packaging: binary CLI native harus `asarUnpack` (sudah di electron-builder.yml, belum dites dipaket).
+- CLI Claude Code **tidak dibundel**: pakai `claude` yang terinstal (lihat "Build Windows").
 
 ## Keputusan yang sudah diambil (jangan diubah tanpa tanya)
 - Data harga selalu dari endpoint **publik production** Binance (tanpa API key). Testnet harganya
@@ -132,6 +132,17 @@ pnpm data:backfill --verify      # cocokkan resample dengan kline asli Binance
 - Seri sudah diverifikasi cocok dengan "previous" FF: PPI = `WPSFD4`, Core PPI = `WPSFD49104`.
 - Aturan interpretasi ada di config `news.rules` (bisa diedit di Settings). Bias crypto pakai
   `cryptoBiasMode` (default inverse).
+
+## Build Windows
+- Dari Mac: `pnpm dist:win:portable` → `release/SMC Trading Assistant-<versi>-win.zip` (portable, tanpa
+  installer; tanpa Wine). Installer NSIS `.exe` dari Mac butuh Wine, jadi build installer di Windows saja:
+  `pnpm dist:win` di PC Windows, atau workflow GitHub Actions `.github/workflows/build-windows.yml`
+  (manual dispatch / tag `v*`).
+- better-sqlite3 v13 itu **N-API + prebuilt untuk semua OS** (`prebuilds/<os>-<arch>.node`, dipilih
+  otomatis saat runtime), jadi `npmRebuild: false`. Jangan nyalakan lagi, karena cross-compile akan gagal.
+- **Claude Code TIDAK dibundel** (±300 MB). App memakai `claude` yang terinstal (`findClaude()`: path di
+  Settings → PATH → ~/.local/bin dll.). Build belum diberi code signing, jadi Windows SmartScreen akan
+  memperingatkan.
 
 ## Gotchas
 - better-sqlite3 di-build untuk **Electron**, jadi `pnpm test` dan CLI jalan lewat

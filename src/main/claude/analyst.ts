@@ -30,6 +30,8 @@ export interface AnalystDeps {
   getApiKey: () => string | null
   rulesPath: string
   workDir: string
+  /** Installed Claude Code CLI (not bundled with the app). */
+  getExecutable: () => string | null
 }
 
 function systemPrompt(rules: string): string {
@@ -123,6 +125,11 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
       ...ctxs.map((c) => c.text)
     ].join('\n')
 
+    const executable = this.deps.getExecutable()
+    if (!executable) {
+      this.patch({ lastError: 'Claude Code tidak ditemukan. Install Claude Code, atau isi path-nya di Settings → Claude analis.' })
+      return
+    }
     const runId = randomUUID()
     this.repo.startRun(runId, trigger, eventTitles, cfg.model)
     this.patch({ running: true, lastError: null })
@@ -147,6 +154,7 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
           settingSources: [], // ignore ~/.claude and project settings / CLAUDE.md
           persistSession: false,
           cwd: this.deps.workDir,
+          pathToClaudeCodeExecutable: executable,
           maxTurns: cfg.maxTurns,
           maxBudgetUsd: cfg.maxBudgetUsd,
           outputFormat: { type: 'json_schema', schema: OUTPUT_JSON_SCHEMA },

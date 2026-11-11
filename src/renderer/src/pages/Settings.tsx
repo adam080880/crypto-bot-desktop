@@ -375,7 +375,7 @@ function ClaudeSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: A
       <CardHeader>
         <CardTitle>Claude analis</CardTitle>
         <CardDescription>
-          Lewat Claude Agent SDK (Claude Code CLI). Hanya tool data read-only, tanpa tool file/bash/web, tidak bisa kirim order.
+          Lewat Claude Agent SDK, menjalankan Claude Code yang terinstal di komputer ini (tidak dibundel ke app). Hanya tool data read-only, tanpa tool file/bash/web, tidak bisa kirim order.
           Analisis cuma koin di watchlist. Anthropic API Key di atas opsional — kalau kosong, pakai login Claude Code di komputer ini.
         </CardDescription>
       </CardHeader>
@@ -394,6 +394,14 @@ function ClaudeSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: A
         <div className="grid grid-cols-[1fr_auto] items-center gap-3">
           <Label htmlFor="model">Model</Label>
           <Input id="model" className="num w-48" value={c.model} onChange={(e) => setC({ ...c, model: e.target.value })} />
+          <Label htmlFor="exe">Path Claude Code (kosong = otomatis)</Label>
+          <Input
+            id="exe"
+            className="num w-72"
+            placeholder="otomatis: PATH / ~/.local/bin"
+            value={c.executable}
+            onChange={(e) => setC({ ...c, executable: e.target.value })}
+          />
           <Label htmlFor="effort">Effort</Label>
           <select
             id="effort"

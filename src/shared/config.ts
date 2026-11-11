@@ -164,7 +164,9 @@ export const claudeConfigSchema = z.object({
   maxBudgetUsd: z.number().min(0.05).max(10).default(0.5),
   /** Daily spend cap; runs are skipped once reached. */
   dailyBudgetUsd: z.number().min(0.1).max(100).default(3),
-  maxTurns: z.number().int().min(1).max(20).default(8)
+  maxTurns: z.number().int().min(1).max(20).default(8),
+  /** Path to the Claude Code executable; '' = auto (PATH + standard install locations). */
+  executable: z.string().max(500).default('')
 })
 export type ClaudeConfig = z.infer<typeof claudeConfigSchema>
 

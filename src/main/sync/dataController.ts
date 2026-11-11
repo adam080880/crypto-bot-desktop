@@ -5,6 +5,7 @@ import type { AppConfig } from '@shared/config'
 import type { LiveCandleEvent } from '@shared/live'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from '@shared/sync'
 import type { AppStatus, SyncStartRequest, SyncUiState } from '@shared/ipc'
+import { findClaude } from '../claude/findClaude'
 import { logger } from '../logger'
 import type { AppState } from '../state/appState'
 import type { FromWorker, ServiceConfig, ToWorker, WorkerInit } from '../workers/protocol'
@@ -54,7 +55,8 @@ export class DataController {
       smc: c.smc,
       claude: c.claude,
       blsApiKey: this.getBlsKey(),
-      anthropicApiKey: this.getAnthropicKey()
+      anthropicApiKey: this.getAnthropicKey(),
+      claudeExecutable: findClaude(c.claude.executable)
     }
   }
 

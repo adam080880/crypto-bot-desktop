@@ -1,11 +1,15 @@
 appId: dev.local.smc-trading-assistant
 productName: SMC Trading Assistant
+executableName: smc-trading-assistant
 directories:
   buildResources: resources
   output: release
 files:
   - out/**
   - package.json
+  # Claude Code is NOT bundled (~300 MB): the app uses the user's installed `claude`
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+  - "!**/node_modules/better-sqlite3/{build,deps,src}/**"
 extraResources:
   - from: drizzle
     to: drizzle
@@ -13,8 +17,24 @@ extraResources:
     to: docs
 asarUnpack:
   - node_modules/better-sqlite3/**
-  # Claude Code native binary (Agent SDK) must be executable outside the asar archive
-  - node_modules/@anthropic-ai/claude-agent-sdk*/**
+# better-sqlite3 v13 is N-API with bundled prebuilds for every platform → no native rebuild
+npmRebuild: false
 mac:
+  files:
+    - "!**/node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl}-*"
   category: public.app-category.finance
   target: dmg
+win:
+  files:
+    - "!**/node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*"
+    - "!**/node_modules/better-sqlite3/prebuilds/win32-arm64.node"
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}

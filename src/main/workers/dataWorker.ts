@@ -30,7 +30,8 @@ let config: ServiceConfig = {
   smc: smcConfigSchema.parse({}),
   claude: claudeConfigSchema.parse({}),
   blsApiKey: null,
-  anthropicApiKey: null
+  anthropicApiKey: null,
+  claudeExecutable: null
 }
 let positions: string[] = []
 let manual: AbortController | null = null
@@ -63,7 +64,8 @@ const analyst = new ClaudeAnalyst(db, {
   getWatchlist: () => config.watchlist,
   getApiKey: () => config.anthropicApiKey,
   rulesPath: join(init.docsDir, 'smc-rules.md'),
-  workDir: init.claudeWorkDir
+  workDir: init.claudeWorkDir,
+  getExecutable: () => config.claudeExecutable
 })
 analyst.on('state', (state) => send({ type: 'claude-state', state }))
 analyst.on('done', () => send({ type: 'claude-changed' }))

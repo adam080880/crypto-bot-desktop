@@ -18,7 +18,9 @@
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dist:mac": "electron-vite build && electron-builder --mac",
-    "data:backfill": "electron-vite build --logLevel warn && cross-env ELECTRON_RUN_AS_NODE=1 electron out/main/backfill.js"
+    "data:backfill": "electron-vite build --logLevel warn && cross-env ELECTRON_RUN_AS_NODE=1 electron out/main/backfill.js",
+    "dist:win": "electron-vite build && electron-builder --win --x64",
+    "dist:win:portable": "electron-vite build && electron-builder --win zip --x64 -c.win.signAndEditExecutable=false"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.322",
@@ -60,5 +62,6 @@
     "typescript": "~5.9.3",
     "vite": "^8.3.7",
     "vitest": "^5.1.0"
-  }
+  },
+  "productName": "SMC Trading Assistant"
 }

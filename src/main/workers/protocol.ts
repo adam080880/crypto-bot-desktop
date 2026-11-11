@@ -23,6 +23,8 @@ export interface ServiceConfig {
   /** Decrypted in main (safeStorage is main-only); held in memory by the worker. */
   blsApiKey: string | null
   anthropicApiKey: string | null
+  /** Resolved Claude Code executable (installed `claude`), or null when not found. */
+  claudeExecutable: string | null
 }
 
 export type ToWorker =
