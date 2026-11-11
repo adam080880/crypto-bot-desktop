@@ -18,6 +18,7 @@ export interface DataBroadcast {
   liveCandle: (e: LiveCandleEvent) => void
   liveSynced: (symbol: string) => void
   newsChanged: () => void
+  claudeChanged: () => void
 }
 
 /**
@@ -38,14 +39,23 @@ export class DataController {
     private readonly state: AppState,
     private readonly out: DataBroadcast,
     lastSummary: BackfillSummary | null,
-    private readonly getBlsKey: () => string | null
+    private readonly getBlsKey: () => string | null,
+    private readonly getAnthropicKey: () => string | null
   ) {
     this.ui.lastSummary = lastSummary
     state.on('config', () => this.pushConfig())
   }
 
   private serviceConfig(c: AppConfig = this.state.getConfig()): ServiceConfig {
-    return { data: c.data, watchlist: c.watchlist, news: c.news, smc: c.smc, blsApiKey: this.getBlsKey() }
+    return {
+      data: c.data,
+      watchlist: c.watchlist,
+      news: c.news,
+      smc: c.smc,
+      claude: c.claude,
+      blsApiKey: this.getBlsKey(),
+      anthropicApiKey: this.getAnthropicKey()
+    }
   }
 
   /** Re-send config (and secrets the worker needs) after a change. */
@@ -131,6 +141,12 @@ export class DataController {
       case 'news-changed':
         this.out.newsChanged()
         return
+      case 'claude-state':
+        this.state.patch({ claude: m.state })
+        return
+      case 'claude-changed':
+        this.out.claudeChanged()
+        return
     }
   }
 
@@ -191,6 +207,10 @@ export class DataController {
 
   syncNow(): void {
     this.post({ type: 'sync-now' })
+  }
+
+  claudeRun(): void {
+    this.post({ type: 'claude-run' })
   }
 
   newsRefresh(): void {

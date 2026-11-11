@@ -138,6 +138,17 @@ export function Chart() {
     }
   }, [])
 
+  // switching coin: wipe the previous coin's candles/overlay and reset zoom + price scale
+  useEffect(() => {
+    price.current?.setData([])
+    volume.current?.setData([])
+    last.current = null
+    setAnalysis(null)
+    setSetups([])
+    chart.current?.timeScale().resetTimeScale()
+    price.current?.priceScale().applyOptions({ autoScale: true })
+  }, [symbol])
+
   // stream this symbol while the chart is open
   useEffect(() => {
     void window.api.invoke('live:setChart', { symbol })
@@ -153,6 +164,7 @@ export function Chart() {
       volume.current.setData(rows.map(toVol))
       last.current = rows[rows.length - 1] ?? null
       setInfo(rows.length ? null : 'Belum ada data untuk simbol ini — sedang disiapkan (backfill 6 bulan)…')
+      price.current.priceScale().applyOptions({ autoScale: true })
       chart.current?.timeScale().scrollToRealTime()
     })
     return () => {

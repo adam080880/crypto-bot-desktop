@@ -46,7 +46,8 @@ export class SmcService {
     const liquidity = analyses.flatMap((a) => a.liquidity.filter((l) => l.kind === 'swing' && l.sweptT === null))
     const entry = analyses[0]!
     const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg })
-    return { price, trend, pois, liquidity, setups }
+    const lastBreak = Object.fromEntries(analyses.map((a) => [a.timeframe, a.breaks.at(-1) ?? null]))
+    return { price, trend, pois, liquidity, setups, lastBreak }
   }
 
   setups(symbol: string, cfg: SmcConfig): Setup[] {

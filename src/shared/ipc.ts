@@ -2,6 +2,7 @@ import type { AppConfig, ConfigPatch, TradingMode } from './config'
 import type { Candle } from './candles'
 import type { LiveCandleEvent, LiveState } from './live'
 import type { Setup, SmcAnalysis } from './smc'
+import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
 import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
@@ -19,6 +20,7 @@ export interface AppStatus {
   sync: { status: SyncStatus; upToDate: number; total: number }
   live: LiveState
   news: NewsState | null
+  claude: ClaudeState | null
   /** True after the kill switch is pressed; bot stays halted until manually resumed. */
   killSwitch: { active: boolean; at: number | null }
   dbPath: string
@@ -68,6 +70,8 @@ export interface IpcInvokeMap {
   'news:stats': { req: void; res: ReactionStat[] }
   'news:refresh': { req: void; res: void }
   'news:setActual': { req: { id: string; value: number | null }; res: void }
+  'claude:list': { req: void; res: { runs: ClaudeRun[]; analyses: ClaudeAnalysis[] } }
+  'claude:run': { req: void; res: void }
 }
 
 export interface SymbolListItem {
@@ -91,6 +95,7 @@ export interface IpcEventMap {
   'live:candle': LiveCandleEvent
   'live:synced': { symbol: string }
   'news:changed': { at: number }
+  'claude:changed': { at: number }
 }
 
 export type InvokeChannel = keyof IpcInvokeMap
@@ -131,6 +136,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'news:reactions',
   'news:stats',
   'news:refresh',
-  'news:setActual'
+  'news:setActual',
+  'claude:list',
+  'claude:run'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed']

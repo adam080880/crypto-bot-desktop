@@ -151,6 +151,23 @@ export const newsConfigSchema = z.object({
 })
 export type NewsConfig = z.infer<typeof newsConfigSchema>
 
+/** Fase 6: Claude as periodic analyst (Agent SDK). Read-only; never sends orders. */
+export const claudeConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  model: z.string().default('claude-opus-5-5'),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  /** Run after USD news actuals come out (one run per release minute). */
+  triggerOnNews: z.boolean().default(true),
+  /** Optional periodic run in minutes; 0 = off (default: only on news / manual). */
+  intervalMinutes: z.number().int().min(0).max(1440).default(0),
+  /** Hard stop per run (Agent SDK maxBudgetUsd). */
+  maxBudgetUsd: z.number().min(0.05).max(10).default(0.5),
+  /** Daily spend cap; runs are skipped once reached. */
+  dailyBudgetUsd: z.number().min(0.1).max(100).default(3),
+  maxTurns: z.number().int().min(1).max(20).default(8)
+})
+export type ClaudeConfig = z.infer<typeof claudeConfigSchema>
+
 export const appConfigSchema = z.object({
   mode: tradingModeSchema.default('paper'),
   /** ccxt exchange id; Binance USDT-M perpetual by default. */
@@ -160,7 +177,8 @@ export const appConfigSchema = z.object({
   risk: riskConfigSchema.default(riskConfigSchema.parse({})),
   data: dataConfigSchema.default(dataConfigSchema.parse({})),
   smc: smcConfigSchema.default(smcConfigSchema.parse({})),
-  news: newsConfigSchema.default(newsConfigSchema.parse({}))
+  news: newsConfigSchema.default(newsConfigSchema.parse({})),
+  claude: claudeConfigSchema.default(claudeConfigSchema.parse({}))
 })
 
 export type RiskConfig = z.infer<typeof riskConfigSchema>
@@ -170,13 +188,14 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema
-  .omit({ risk: true, data: true, smc: true, news: true })
+  .omit({ risk: true, data: true, smc: true, news: true, claude: true })
   .partial()
   .extend({
     risk: riskConfigSchema.omit({ requireStopLoss: true }).partial().strict().optional(),
     data: dataConfigSchema.partial().strict().optional(),
     smc: smcConfigSchema.partial().strict().optional(),
-    news: newsConfigSchema.partial().strict().optional()
+    news: newsConfigSchema.partial().strict().optional(),
+    claude: claudeConfigSchema.partial().strict().optional()
   })
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>

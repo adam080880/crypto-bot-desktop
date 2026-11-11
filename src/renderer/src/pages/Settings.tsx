@@ -165,6 +165,7 @@ export function Settings() {
 
       {config && <DataSettings config={config} onSaved={setConfig} />}
       {config && <NewsSettings config={config} onSaved={setConfig} />}
+      {config && <ClaudeSettings config={config} onSaved={setConfig} />}
 
       <Card>
         <CardHeader>
@@ -352,6 +353,78 @@ function NewsSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
             }}
           >
             Reset ke default
+          </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ClaudeSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppConfig) => void }) {
+  const [c, setC] = useState(config.claude)
+  const [msg, setMsg] = useState<string | null>(null)
+  const num = (k: 'intervalMinutes' | 'maxBudgetUsd' | 'dailyBudgetUsd' | 'maxTurns', label: string, step: number) => (
+    <>
+      <Label htmlFor={k}>{label}</Label>
+      <Input id={k} type="number" step={step} className="num w-28 text-right" value={c[k]} onChange={(e) => setC({ ...c, [k]: Number(e.target.value) })} />
+    </>
+  )
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Claude analis</CardTitle>
+        <CardDescription>
+          Lewat Claude Agent SDK (Claude Code CLI). Hanya tool data read-only, tanpa tool file/bash/web, tidak bisa kirim order.
+          Analisis cuma koin di watchlist. Anthropic API Key di atas opsional — kalau kosong, pakai login Claude Code di komputer ini.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {(
+          [
+            ['enabled', 'Aktif'],
+            ['triggerOnNews', 'Jalan otomatis setelah actual news USD keluar']
+          ] as const
+        ).map(([k, label]) => (
+          <label key={k} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={c[k]} onChange={(e) => setC({ ...c, [k]: e.target.checked })} />
+            {label}
+          </label>
+        ))}
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          <Label htmlFor="model">Model</Label>
+          <Input id="model" className="num w-48" value={c.model} onChange={(e) => setC({ ...c, model: e.target.value })} />
+          <Label htmlFor="effort">Effort</Label>
+          <select
+            id="effort"
+            className="h-9 w-48 rounded-md border border-input bg-transparent px-2 text-sm"
+            value={c.effort}
+            onChange={(e) => setC({ ...c, effort: e.target.value as typeof c.effort })}
+          >
+            {['low', 'medium', 'high', 'xhigh', 'max'].map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+          {num('intervalMinutes', 'Interval berkala (menit, 0 = mati)', 1)}
+          {num('maxBudgetUsd', 'Batas biaya per run (USD)', 0.05)}
+          {num('dailyBudgetUsd', 'Batas biaya per hari (USD)', 0.5)}
+          {num('maxTurns', 'Maks turn per run', 1)}
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                const next = await window.api.invoke('config:update', { claude: c })
+                onSaved(next)
+                setC(next.claude)
+                setMsg('Tersimpan')
+              } catch {
+                setMsg('Gagal: cek nilai')
+              }
+            }}
+          >
+            Simpan Claude
           </Button>
           {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>

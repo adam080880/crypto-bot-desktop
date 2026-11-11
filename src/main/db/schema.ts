@@ -99,3 +99,40 @@ export const newsCandidates = sqliteTable(
   },
   (t) => [index('news_candidates_created_idx').on(t.createdAt)]
 )
+
+/** Fase 6: one row per Claude analysis run (trigger, cost, status). */
+export const claudeRuns = sqliteTable(
+  'claude_runs',
+  {
+    id: text('id').primaryKey(),
+    createdAt: integer('created_at').notNull(),
+    finishedAt: integer('finished_at'),
+    trigger: text('trigger').notNull(),
+    eventTitles: text('event_titles').notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull(),
+    error: text('error'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    marketNote: text('market_note')
+  },
+  (t) => [index('claude_runs_created_idx').on(t.createdAt)]
+)
+
+/** Fase 6: validated per-symbol output. Payload = AnalysisItem JSON. */
+export const claudeAnalyses = sqliteTable(
+  'claude_analyses',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    symbol: text('symbol').notNull(),
+    bias: text('bias').notNull(),
+    confidence: real('confidence').notNull(),
+    price: real('price'),
+    forcedSkip: integer('forced_skip', { mode: 'boolean' }).notNull(),
+    payload: text('payload').notNull()
+  },
+  (t) => [index('claude_analyses_symbol_idx').on(t.symbol, t.createdAt)]
+)

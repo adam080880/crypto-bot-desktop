@@ -1,4 +1,5 @@
-import type { DataConfig, NewsConfig, SmcConfig } from '@shared/config'
+import type { ClaudeConfig, DataConfig, NewsConfig, SmcConfig } from '@shared/config'
+import type { ClaudeState } from '@shared/claude'
 import type { NewsState } from '@shared/news'
 import type { LiveCandleEvent, LiveState } from '@shared/live'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent } from '@shared/sync'
@@ -7,6 +8,10 @@ export interface WorkerInit {
   dbPath: string
   migrationsFolder: string
   logsDir: string
+  /** docs/ folder (smc-rules.md) — app root in dev, resources in packaged builds. */
+  docsDir: string
+  /** Empty working directory for the Claude Code CLI. */
+  claudeWorkDir: string
 }
 
 export interface ServiceConfig {
@@ -14,8 +19,10 @@ export interface ServiceConfig {
   watchlist: string[]
   news: NewsConfig
   smc: SmcConfig
+  claude: ClaudeConfig
   /** Decrypted in main (safeStorage is main-only); held in memory by the worker. */
   blsApiKey: string | null
+  anthropicApiKey: string | null
 }
 
 export type ToWorker =
@@ -29,6 +36,7 @@ export type ToWorker =
   | { type: 'set-positions'; symbols: string[] }
   | { type: 'news-refresh' }
   | { type: 'news-set-actual'; id: string; value: number | null }
+  | { type: 'claude-run' }
 
 export type FromWorker =
   | { type: 'event'; event: BackfillEvent }
@@ -41,3 +49,5 @@ export type FromWorker =
   | { type: 'autosync'; state: AutoSyncState }
   | { type: 'news-state'; state: NewsState }
   | { type: 'news-changed' }
+  | { type: 'claude-state'; state: ClaudeState }
+  | { type: 'claude-changed' }

@@ -46,16 +46,18 @@ function bootstrap(): void {
   }
   const lastRun = readSetting(db, 'backfill_last_run', z.custom<BackfillSummary>((v) => typeof v === 'object' && v !== null))
   const data = new DataController(
-    { dbPath, migrationsFolder: paths.migrations(), logsDir: paths.logs() },
+    { dbPath, migrationsFolder: paths.migrations(), logsDir: paths.logs(), docsDir: paths.docs(), claudeWorkDir: paths.claudeWorkDir() },
     state,
     {
       syncEvent: (event, ui) => sendAll('sync:event', { event, ui }),
       liveCandle: (event) => sendAll('live:candle', event),
       liveSynced: (symbol) => sendAll('live:synced', { symbol }),
-      newsChanged: () => sendAll('news:changed', { at: Date.now() })
+      newsChanged: () => sendAll('news:changed', { at: Date.now() }),
+      claudeChanged: () => sendAll('claude:changed', { at: Date.now() })
     },
     lastRun,
-    () => secrets.get('bls.apiKey')
+    () => secrets.get('bls.apiKey'),
+    () => secrets.get('anthropic.apiKey')
   )
 
   registerIpcHandlers({

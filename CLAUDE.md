@@ -24,14 +24,27 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
   QM, liquidity (wick OB + swing BSL/SSL), dan setups (POI kena → OB valid → entry/SL/TP, skor,
   status sampai TP/SL). Overlay di Chart (`src/renderer/src/chart/smcOverlay.ts`) dengan toggle layer.
 - Fase 5 ✅ kalender ekonomi (FF feed + actual BLS/FRED/manual), bias USD→crypto, news window,
-  reaksi harga, kandidat trade-on-news, statistik aturan. Fase 6 belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
+  reaksi harga, kandidat trade-on-news, statistik aturan. Fase 6 ✅ (lihat bagian Claude analis). **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
   minta mulai. Detail di PLAN.md.
 
 ## Lanjut di sini
-Fase 5 ✅. OCL sudah diputuskan user: OCL biasa hanya 1d/1w, di 4h ke bawah hanya OCL Break
-(`oclPlainTimeframes`). Hasil 21 hari (net R): BTC −16,8, ETH −7,5, SOL +20,9. **Strategi belum
-tervalidasi.** Jangan dipakai bot (Fase 7) sebelum ada backtest di data full.
-Berikutnya: Fase 6 (Claude analis), menunggu go dari user.
+Fase 6 ✅ dibangun (Claude analis via Agent SDK), **belum pernah dijalankan dengan model asli**. Run
+pertama menunggu persetujuan user, karena memakai kredit/akun Claude-nya. Setelah itu verifikasi hasil di
+halaman Claude Analyses. Berikutnya Fase 7 (bot trading Binance), hanya kalau user minta, dan
+strategi perlu backtest di data full dulu.
+
+## Claude analis (Fase 6, keputusan user)
+- Pakai **Claude Agent SDK** (Claude Code CLI), model **claude-opus-5-5**, effort medium.
+- **Bukan per jam.** Dipicu actual news USD (rilis barengan digabung, debounce 90 detik) + tombol manual.
+  `claude.intervalMinutes` default 0 (mati).
+- **Cuma koin watchlist**, satu run untuk semua koin. Konteksnya ringkasan SMC yang sudah dihitung
+  (±250 token/koin) + `smc-rules.md` di system prompt (kena cache).
+- Dikunci: `tools: []`, 3 tool MCP read-only (`get_candles`, `get_smc_detail`, `get_economic_events`),
+  `permissionMode: 'dontAsk'`, `settingSources: []`, `persistSession: false`, cwd kosong khusus,
+  `maxTurns`, `maxBudgetUsd` per run, dan batas biaya harian.
+- Output: JSON schema (`outputFormat`) + validasi zod per koin. Yang invalid/hilang → `skip`.
+- API key Anthropic opsional di Settings. Kalau kosong, CLI pakai login Claude Code di mesin itu.
+- Packaging: binary CLI native harus `asarUnpack` (sudah di electron-builder.yml, belum dites dipaket).
 
 ## Keputusan yang sudah diambil (jangan diubah tanpa tanya)
 - Data harga selalu dari endpoint **publik production** Binance (tanpa API key). Testnet harganya

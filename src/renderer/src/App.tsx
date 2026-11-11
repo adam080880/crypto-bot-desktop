@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { Analyses } from '@/pages/Analyses'
 import { Calendar } from '@/pages/Calendar'
 import { Chart } from '@/pages/Chart'
 import { Dashboard } from '@/pages/Dashboard'
@@ -26,7 +27,7 @@ export function App() {
           {page === 'dashboard' && <Dashboard />}
           {page === 'chart' && <Chart />}
           {page === 'calendar' && <Calendar />}
-          {page === 'analyses' && <Placeholder title="Claude Analyses" phase="Fase 6" />}
+          {page === 'analyses' && <Analyses />}
           {page === 'sync' && <DataSync />}
           {page === 'settings' && <Settings />}
         </main>

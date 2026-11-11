@@ -3,7 +3,9 @@
  * manual backfills, auto-sync catch-ups and live WebSocket ingest all run here, serialised per
  * symbol by Backfiller.locks. The main process only relays messages and reads.
  */
-import { dataConfigSchema, newsConfigSchema, smcConfigSchema } from '@shared/config'
+import { join } from 'node:path'
+import { claudeConfigSchema, dataConfigSchema, newsConfigSchema, smcConfigSchema } from '@shared/config'
+import { ClaudeAnalyst } from '../claude/analyst'
 import { NewsService } from '../news/newsService'
 import { openDatabase } from '../db/client'
 import { LiveService } from '../live/liveService'
@@ -26,7 +28,9 @@ let config: ServiceConfig = {
   watchlist: [],
   news: newsConfigSchema.parse({}),
   smc: smcConfigSchema.parse({}),
-  blsApiKey: null
+  claude: claudeConfigSchema.parse({}),
+  blsApiKey: null,
+  anthropicApiKey: null
 }
 let positions: string[] = []
 let manual: AbortController | null = null
@@ -51,6 +55,47 @@ const news = new NewsService(db, {
 news.on('state', (state) => send({ type: 'news-state', state }))
 news.on('changed', () => send({ type: 'news-changed' }))
 
+const analyst = new ClaudeAnalyst(db, {
+  getConfig: () => config.claude,
+  getSmc: () => config.smc,
+  getNews: () => config.news,
+  getNewsState: () => news.getState(),
+  getWatchlist: () => config.watchlist,
+  getApiKey: () => config.anthropicApiKey,
+  rulesPath: join(init.docsDir, 'smc-rules.md'),
+  workDir: init.claudeWorkDir
+})
+analyst.on('state', (state) => send({ type: 'claude-state', state }))
+analyst.on('done', () => send({ type: 'claude-changed' }))
+
+// News-triggered analysis: collect simultaneous releases (e.g. CPI + Core CPI) into one run.
+const pendingRelease = new Map<number, { titles: string[]; timer: ReturnType<typeof setTimeout> }>()
+news.on('released', (e) => {
+  if (!config.claude.triggerOnNews) return
+  const p = pendingRelease.get(e.time)
+  if (p) {
+    if (!p.titles.includes(e.title)) p.titles.push(e.title)
+    return
+  }
+  const entry = {
+    titles: [e.title],
+    timer: setTimeout(() => {
+      pendingRelease.delete(e.time)
+      void analyst.run('news', entry.titles)
+    }, 90_000)
+  }
+  pendingRelease.set(e.time, entry)
+})
+
+// Optional periodic analysis (off by default: intervalMinutes = 0).
+let intervalTimer: ReturnType<typeof setInterval> | null = null
+const scheduleInterval = (): void => {
+  if (intervalTimer) clearInterval(intervalTimer)
+  intervalTimer = null
+  if (config.claude.intervalMinutes > 0)
+    intervalTimer = setInterval(() => void analyst.run('interval'), config.claude.intervalMinutes * 60_000)
+}
+
 backfiller.on('event', (event) => send({ type: 'event', event }))
 live.on('state', (state) => send({ type: 'live-state', state }))
 live.on('candle', (event) => send({ type: 'live-candle', event }))
@@ -73,11 +118,17 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
       news.start()
+      scheduleInterval()
+      send({ type: 'claude-state', state: analyst.getState() })
       break
     case 'config':
       config = msg.config
       live.setSources({ watchlist: config.watchlist })
       autoSync.configure()
+      scheduleInterval()
+      break
+    case 'claude-run':
+      void analyst.run('manual')
       break
     case 'news-refresh':
       void news.refreshNow()
@@ -128,5 +179,6 @@ process.on('exit', () => {
   live.dispose()
   autoSync.dispose()
   news.dispose()
+  if (intervalTimer) clearInterval(intervalTimer)
   db.$client.close()
 })

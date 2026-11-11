@@ -11,6 +11,8 @@ export const paths = {
   userData: () => app.getPath('userData'),
   db: defaultDbPath,
   logs: () => join(app.getPath('userData'), 'logs'),
+  docs: () => (app.isPackaged ? join(process.resourcesPath, 'docs') : join(app.getAppPath(), 'docs')),
+  claudeWorkDir: () => join(app.getPath('userData'), 'claude-workdir'),
   migrations: () =>
     app.isPackaged ? join(process.resourcesPath, 'drizzle') : join(app.getAppPath(), 'drizzle')
 }

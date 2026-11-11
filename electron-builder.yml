@@ -9,8 +9,12 @@ files:
 extraResources:
   - from: drizzle
     to: drizzle
+  - from: docs
+    to: docs
 asarUnpack:
   - node_modules/better-sqlite3/**
+  # Claude Code native binary (Agent SDK) must be executable outside the asar archive
+  - node_modules/@anthropic-ai/claude-agent-sdk*/**
 mac:
   category: public.app-category.finance
   target: dmg

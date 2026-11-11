@@ -40,7 +40,7 @@ export interface NewsDeps {
  * Runs inside the data worker. Fetches the calendar, polls official actuals after releases,
  * interprets them, records price reactions and builds trade-on-news candidates.
  */
-export class NewsService extends EventEmitter<{ state: [NewsState]; changed: []; candidate: [NewsCandidate] }> {
+export class NewsService extends EventEmitter<{ state: [NewsState]; changed: []; candidate: [NewsCandidate]; released: [EconomicEvent] }> {
   private readonly repo: NewsRepo
   private readonly candles: CandleRepo
   private readonly smc: SmcService
@@ -90,6 +90,7 @@ export class NewsService extends EventEmitter<{ state: [NewsState]; changed: [];
     if (updated) {
       log.info({ id, title: e.title, value, usdBias: updated.usdBias }, 'manual actual set')
       this.buildCandidates(updated)
+      if (value !== null) this.emit('released', updated)
       this.emit('changed')
     }
     return updated
@@ -162,6 +163,7 @@ export class NewsService extends EventEmitter<{ state: [NewsState]; changed: [];
           if (!updated) continue
           log.info({ title: e.title, actual: value, forecast: e.forecast, usdBias: updated.usdBias, provider }, 'actual received')
           this.buildCandidates(updated)
+          if ((cfg.impacts as string[]).includes(updated.impact)) this.emit('released', updated)
           this.emit('changed')
         }
       } catch (err) {

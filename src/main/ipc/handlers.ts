@@ -12,6 +12,7 @@ import type { AppState } from '../state/appState'
 import type { DataController } from '../sync/dataController'
 import { SmcService } from '../strategy/service'
 import { NewsRepo } from '../news/repo'
+import { ClaudeRepo } from '../claude/repo'
 
 const log = logger('ipc')
 
@@ -34,6 +35,7 @@ export function registerIpcHandlers(deps: {
   const candles = new CandleRepo(db) // main-process reads; the data worker is the only writer
   const smc = new SmcService(db)
   const news = new NewsRepo(db)
+  const claude = new ClaudeRepo(db)
 
   const handle = <C extends InvokeChannel>(channel: C, fn: Handler<C>): void => {
     ipcMain.handle(channel, async (event, req: unknown) => {
@@ -70,13 +72,13 @@ export function registerIpcHandlers(deps: {
       .strict()
       .parse(req)
     secrets.set(name, value)
-    if (name === 'bls.apiKey') data.pushConfig()
+    if (name === 'bls.apiKey' || name === 'anthropic.apiKey') data.pushConfig()
     return secrets.list()
   })
   handle('secrets:delete', (req) => {
     const { name } = z.object({ name: secretNameSchema }).strict().parse(req)
     secrets.delete(name)
-    if (name === 'bls.apiKey') data.pushConfig()
+    if (name === 'bls.apiKey' || name === 'anthropic.apiKey') data.pushConfig()
     return secrets.list()
   })
 
@@ -144,6 +146,8 @@ export function registerIpcHandlers(deps: {
       .parse(req)
     data.newsSetActual(id, value)
   })
+  handle('claude:list', () => ({ runs: claude.runs(30), analyses: claude.analyses(60) }))
+  handle('claude:run', () => data.claudeRun())
   handle('live:setChart', (req) => {
     const { symbol } = z.object({ symbol: symbolSchema.nullable() }).strict().parse(req)
     data.setChart(symbol)

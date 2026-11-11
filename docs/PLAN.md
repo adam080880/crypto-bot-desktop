@@ -1,6 +1,6 @@
 # Rencana — SMC/ICT Trading Assistant
 
-Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 ✅ · Fase 6 berikutnya.
+Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 ✅ · Fase 6 ✅ (menunggu run uji pertama) · Fase 7 hanya jika diminta.
 
 ## Prinsip
 - **Main process = otak.** Exchange, DB, scheduler, Claude, risk guard semuanya di main
@@ -97,8 +97,9 @@ src/
 5. **Kalender ekonomi & news** — adapter sumber (cek investing.com secara wajar, tidak bypass
    proteksi; alternatif disiapkan), `economic_events`, aturan interpretasi di config, news window,
    kandidat setup (bukan auto-order), simpan reaksi harga 5m/15m/1h.
-6. **Claude analis** — Agent SDK, tool read-only, interval configurable, output zod →
-   `claude_analyses`, tampil di UI.
+6. **Claude analis** — Agent SDK, tool read-only, output zod → `claude_runs` / `claude_analyses`,
+   tampil di UI. **Revisi user:** dipicu news + manual (bukan tiap jam), hanya koin watchlist, satu run
+   untuk semua koin dengan konteks ringkas.
 7. **Bot trading Binance** (fase terakhir; dikerjakan hanya setelah user minta mulai)
    - Eksekusi via ccxt (`binanceusdm`). Urutan: **paper → testnet → live**; live butuh
      konfirmasi eksplisit user + toggle terpisah, default mati.
