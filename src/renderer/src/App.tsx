@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { Calendar } from '@/pages/Calendar'
 import { Chart } from '@/pages/Chart'
 import { Dashboard } from '@/pages/Dashboard'
 import { DataSync } from '@/pages/DataSync'
@@ -24,7 +25,7 @@ export function App() {
         <main className="min-w-0 flex-1 overflow-auto p-6">
           {page === 'dashboard' && <Dashboard />}
           {page === 'chart' && <Chart />}
-          {page === 'calendar' && <Placeholder title="Economic Calendar" phase="Fase 5" />}
+          {page === 'calendar' && <Calendar />}
           {page === 'analyses' && <Placeholder title="Claude Analyses" phase="Fase 6" />}
           {page === 'sync' && <DataSync />}
           {page === 'settings' && <Settings />}

@@ -84,26 +84,57 @@ describe('RBS / SBR (§5)', () => {
 })
 
 describe('OCL (§6)', () => {
-  it('marks the close inside a strong 2-candle move and flips to OCL_BREAK', () => {
+  it("OCL Break Buy (user's example): red OCL, green body closes above the red body", () => {
     const c = bars([
-      [10, 11.05, 9.95, 11], // strong green
-      [11, 12.05, 10.95, 12], // strong green, closes higher → OCL at 11
-      [12, 12.2, 11.8, 12.1],
-      [12.1, 12.2, 10.4, 10.5], // close below 11 → OCL_BREAK (bearish)
-      [10.5, 11.2, 10.4, 10.9] // back up to 11 → hit
+      [105, 106, 99, 100], // 0 big red — OCL bearish at its close (100), area = body 100–105
+      [100, 101, 97, 99], // 1 small red continues from that close (same colour)
+      [99, 106, 98.5, 105.5], // 2 green BODY closes above 105 (whole OCL area) → OCL Break Buy @100
+      [105.5, 108.2, 105.3, 108],
+      [108, 108.1, 99.8, 102] // 4 pullback touches 100 → hit
     ])
     const o = analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))!
-    expect(o).toMatchObject({ kind: 'OCL_BREAK', direction: 'bearish', level: 11, breakT: at(3), hitT: at(4) })
+    expect(o).toMatchObject({ kind: 'OCL_BREAK', direction: 'bullish', level: 100, breakT: at(2), hitT: at(4), invalidT: null })
+  })
+
+  it('no break when the green candle only closes inside the OCL area', () => {
+    const c = bars([
+      [105, 106, 99, 100],
+      [100, 101, 97, 99],
+      [99, 104, 98.5, 103.5], // closes above the level but not above 105 → not a break
+      [103.5, 103.8, 101, 101.5]
+    ])
+    const o = analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))!
+    expect(o.kind).toBe('OCL')
+    expect(o.invalidT).toBe(at(2)) // a bearish OCL closed through upward without a qualifying break
+  })
+
+  it('needs the second candle to have the same colour (no body-size rule)', () => {
+    const c = bars([
+      [105, 106, 99, 100],
+      [100, 101, 97, 100.5], // green → not an OCL pair
+      [100.5, 101, 99, 99.5]
+    ])
+    expect(analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))).toBeUndefined()
   })
 })
 
 describe('QM (§7)', () => {
-  it('finds a sell QM at the first mountain after a higher high and a lower low', () => {
-    // H1=13 → L1=11 → H2=14 → L2=10 → back up toward 13
-    const c = path([9, 9.5, 10, 11.5, 13, 12, 11, 12.5, 14, 12.5, 11, 10, 10.8, 11.8, 12.6, 13.1, 12.2, 11.5])
-    const q = analyzeSmc(c, '15m', cfg()).qms.find((x) => x.direction === 'bearish')!
-    expect(q.level).toBeCloseTo(13.1)
+  // H1 body top 13 (wick 13.1) → L1 → H2 body 14 breaks H1's wick → L2 < L1 → back to 13
+  const QM_PATH = [9, 9.5, 10, 11.5, 13, 12, 11, 12.5, 14, 12.5, 11, 10, 10.8, 11.8, 12.6, 13.1, 12.2, 11.5]
+
+  it('sell QM: level = BODY of mountain 1, invalid above mountain 2', () => {
+    const q = analyzeSmc(path(QM_PATH), '15m', cfg()).qms.find((x) => x.direction === 'bearish')!
+    expect(q.level).toBeCloseTo(13) // body, not the 13.1 wick
     expect(q.invalidLevel).toBeCloseTo(14.1)
     expect(q.hitT).toBe(at(14))
+  })
+
+  it("requires mountain 2's body to break mountain 1's wick (configurable)", () => {
+    const weak = [...QM_PATH]
+    weak[8] = 13.05 // mountain 2 body top 13.05 < mountain 1 wick 13.1; wick 13.15 still a higher high
+    const strict = analyzeSmc(path(weak), '15m', cfg()).qms.filter((x) => x.direction === 'bearish')
+    expect(strict).toHaveLength(0)
+    const loose = analyzeSmc(path(weak), '15m', cfg({ qmRequireBodyBreak: false })).qms.filter((x) => x.direction === 'bearish')
+    expect(loose).toHaveLength(1)
   })
 })

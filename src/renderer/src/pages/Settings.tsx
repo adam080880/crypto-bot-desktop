@@ -12,7 +12,8 @@ import { formatTime } from '@/lib/utils'
 const SECRET_LABELS: Record<SecretName, string> = {
   'binance.apiKey': 'Binance API Key',
   'binance.apiSecret': 'Binance API Secret',
-  'anthropic.apiKey': 'Anthropic API Key'
+  'anthropic.apiKey': 'Anthropic API Key',
+  'bls.apiKey': 'BLS API Key (opsional)'
 }
 
 function SecretRow({ s, onChange }: { s: SecretStatus; onChange: (list: SecretStatus[]) => void }) {
@@ -163,6 +164,7 @@ export function Settings() {
       </Card>
 
       {config && <DataSettings config={config} onSaved={setConfig} />}
+      {config && <NewsSettings config={config} onSaved={setConfig} />}
 
       <Card>
         <CardHeader>
@@ -254,6 +256,102 @@ function DataSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
             }}
           >
             Simpan data & sync
+          </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function NewsSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppConfig) => void }) {
+  const n = config.news
+  const [mode, setMode] = useState(n.cryptoBiasMode)
+  const [before, setBefore] = useState(n.windowBeforeMin)
+  const [after, setAfter] = useState(n.windowAfterMin)
+  const [strategy, setStrategy] = useState(n.newsStrategyEnabled)
+  const [rules, setRules] = useState(JSON.stringify(n.rules, null, 2))
+  const [msg, setMsg] = useState<string | null>(null)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>News & interpretasi</CardTitle>
+        <CardDescription>
+          Aturan bias USD per event (regex judul, arah, sumber actual resmi). Konten feed diperlakukan sebagai data, bukan
+          instruksi.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-[1fr_2fr] items-center gap-3">
+          <Label>Bias crypto</Label>
+          <select
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as typeof mode)}
+          >
+            <option value="inverse">inverse — USD bearish → crypto bullish</option>
+            <option value="same">same — ikut arah USD</option>
+            <option value="off">off — tanpa bias crypto</option>
+          </select>
+          <Label htmlFor="nwb">News window sebelum / sesudah (menit)</Label>
+          <div className="flex gap-2">
+            <Input id="nwb" type="number" className="num w-24 text-right" value={before} onChange={(e) => setBefore(Number(e.target.value))} />
+            <Input type="number" className="num w-24 text-right" value={after} onChange={(e) => setAfter(Number(e.target.value))} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={strategy} onChange={(e) => setStrategy(e.target.checked)} />
+          Strategi news aktif (boleh buka posisi selama news window)
+        </label>
+        <Label htmlFor="rules">Aturan interpretasi (JSON)</Label>
+        <textarea
+          id="rules"
+          spellCheck={false}
+          className="num selectable h-64 w-full rounded-md border border-input bg-transparent p-2 text-xs"
+          value={rules}
+          onChange={(e) => setRules(e.target.value)}
+        />
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={async () => {
+              let parsed: unknown
+              try {
+                parsed = JSON.parse(rules)
+              } catch {
+                setMsg('JSON aturan tidak valid')
+                return
+              }
+              try {
+                const next = await window.api.invoke('config:update', {
+                  news: {
+                    cryptoBiasMode: mode,
+                    windowBeforeMin: before,
+                    windowAfterMin: after,
+                    newsStrategyEnabled: strategy,
+                    rules: parsed as AppConfig['news']['rules']
+                  }
+                })
+                onSaved(next)
+                setRules(JSON.stringify(next.news.rules, null, 2))
+                setMsg('Tersimpan')
+              } catch {
+                setMsg('Gagal: cek format aturan (key, match, higherIsGoodForUsd, source)')
+              }
+            }}
+          >
+            Simpan news
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              const { DEFAULT_RULES } = await import('@shared/config')
+              setRules(JSON.stringify(DEFAULT_RULES, null, 2))
+            }}
+          >
+            Reset ke default
           </Button>
           {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>

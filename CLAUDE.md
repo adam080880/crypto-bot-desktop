@@ -23,8 +23,20 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
   swings/structure (BOS = pembalikan), OB (bentuk + **warna** candle), FVG, RBS/SBR, OCL/OCL break,
   QM, liquidity (wick OB + swing BSL/SSL), dan setups (POI kena → OB valid → entry/SL/TP, skor,
   status sampai TP/SL). Overlay di Chart (`src/renderer/src/chart/smcOverlay.ts`) dengan toggle layer.
-- Fase 5–6 belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
+- Fase 5 🚧 hampir selesai (lihat "Lanjut di sini" di bawah). Fase 6 belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
   minta mulai. Detail di PLAN.md.
+
+## Lanjut di sini (pause 2026-11-11, dilanjut user di PC)
+Fase 5 sudah jalan end-to-end dengan data asli. Feed FF menyimpan 106 event. Actual CPI 10 Nov ditarik
+dari BLS (0.4% vs forecast 0.3% → USD bullish → crypto bearish; BTC −0,85% dan ETH −1,6% dalam 1 jam).
+Reaksi harga dan kandidat tercatat. Sisa pekerjaan:
+1. **Dedupe rilis bersamaan:** CPI m/m dan Core CPI m/m rilis di menit yang sama, jadi reaksi dan
+   kandidatnya dobel. Kandidat: 1 per (simbol, waktu rilis, arah). Statistik: dedupe per (waktu rilis,
+   simbol, horizon, bias).
+2. **Cek visual halaman Economic Calendar** (belum di-screenshot) dan Settings → News (editor JSON aturan).
+3. **Cek visual chart** setelah 2 perubahan terakhir. (a) Overlay tanpa background (garis/outline saja).
+   (b) Garis tidak sampai ujung kanan: berhenti di hit/invalid/swept, atau maksimal 30 candle (`EXTEND_BARS`).
+4. Setelah itu: ringkasan Fase 5 ke user, lalu Fase 6 (Claude analis).
 
 ## Keputusan yang sudah diambil (jangan diubah tanpa tanya)
 - Data harga selalu dari endpoint **publik production** Binance (tanpa API key). Testnet harganya
@@ -102,12 +114,25 @@ pnpm data:backfill --all         # FULL (~10 GB, ~1 jam 10 menit, ~5,4 GB downlo
 pnpm data:backfill --verify      # cocokkan resample dengan kline asli Binance
 ```
 
+## Sumber news (Fase 5, keputusan user)
+- investing.com dan halaman forexfactory.com → **403 Cloudflare**. Jangan dicoba bypass.
+- Jadwal/forecast/previous: feed JSON resmi `nfs.faireconomy.media/ff_calendar_thisweek.json` (tanpa
+  actual). Ambil maksimal tiap 60 menit.
+- Actual: **BLS API** (tanpa key 25 request/hari, dicatat di setting `bls_quota`; key opsional di Settings)
+  dan **FRED CSV** `fred.stlouisfed.org/graph/fredgraph.csv?id=…` (tanpa key). Event tanpa sumber resmi
+  (ISM, UoM, ADP) → actual diisi manual di UI.
+- Seri sudah diverifikasi cocok dengan "previous" FF: PPI = `WPSFD4`, Core PPI = `WPSFD49104`.
+- Aturan interpretasi ada di config `news.rules` (bisa diedit di Settings). Bias crypto pakai
+  `cryptoBiasMode` (default inverse).
+
 ## Gotchas
 - better-sqlite3 di-build untuk **Electron**, jadi `pnpm test` dan CLI jalan lewat
   `ELECTRON_RUN_AS_NODE=1 electron ...`. Jangan jalankan dengan `node` biasa (ABI mismatch).
 - Pakai TypeScript 5.9 (bukan 7), demi kompatibilitas tooling.
 - Setelah mengubah `src/main/db/schema.ts`: `pnpm db:generate`. Tabel candle: edit SQL manual.
 - Logger modul (`logger('x')`) boleh dibuat saat import; dia ikut root logger yang aktif saat menulis log.
+- **Jangan `pkill` semua Electron proyek ini**, karena itu ikut mematikan `yarn dev`/`pnpm dev` milik
+  user. Matikan hanya PID yang Claude jalankan sendiri.
 - Klik UI otomatis untuk verifikasi: jalankan `electron . --remote-debugging-port=9333` lalu pakai
   CDP (`Runtime.evaluate`). osascript tidak punya izin accessibility di laptop kerja.
 - Watchlist pakai id Binance (`BTCUSDT`), bukan format ccxt. Mapping ke ccxt baru di Fase 7.

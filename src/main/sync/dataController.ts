@@ -17,9 +17,8 @@ export interface DataBroadcast {
   syncEvent: (e: BackfillEvent, ui: SyncUiState) => void
   liveCandle: (e: LiveCandleEvent) => void
   liveSynced: (symbol: string) => void
+  newsChanged: () => void
 }
-
-const serviceConfig = (c: AppConfig): ServiceConfig => ({ data: c.data, watchlist: c.watchlist })
 
 /**
  * Owns the data utilityProcess (backfill + auto-sync + live WebSocket), restarts it if it
@@ -32,15 +31,26 @@ export class DataController {
   private autoSync: AutoSyncState | null = null
   private ui: SyncUiState = { running: false, progress: null, lastSummary: null, lastError: null }
   private pendingEstimate: { resolve: (e: BackfillEstimate) => void; reject: (e: Error) => void } | null = null
+  private estimatePromise: Promise<BackfillEstimate> | null = null
 
   constructor(
     private readonly init: WorkerInit,
     private readonly state: AppState,
     private readonly out: DataBroadcast,
-    lastSummary: BackfillSummary | null
+    lastSummary: BackfillSummary | null,
+    private readonly getBlsKey: () => string | null
   ) {
     this.ui.lastSummary = lastSummary
-    state.on('config', (c) => this.post({ type: 'config', config: serviceConfig(c) }))
+    state.on('config', () => this.pushConfig())
+  }
+
+  private serviceConfig(c: AppConfig = this.state.getConfig()): ServiceConfig {
+    return { data: c.data, watchlist: c.watchlist, news: c.news, smc: c.smc, blsApiKey: this.getBlsKey() }
+  }
+
+  /** Re-send config (and secrets the worker needs) after a change. */
+  pushConfig(): void {
+    this.post({ type: 'config', config: this.serviceConfig() })
   }
 
   /** Spawn the worker and start auto-sync + live streams. */
@@ -74,7 +84,7 @@ export class DataController {
       setTimeout(() => !this.disposed && this.spawn(), 3000)
     })
     this.child = child
-    child.postMessage({ type: 'start-services', config: serviceConfig(this.state.getConfig()) } satisfies ToWorker)
+    child.postMessage({ type: 'start-services', config: this.serviceConfig() } satisfies ToWorker)
     if (this.chartSymbol) child.postMessage({ type: 'set-chart', symbol: this.chartSymbol } satisfies ToWorker)
     return child
   }
@@ -114,6 +124,12 @@ export class DataController {
         return
       case 'event':
         if (m.event.kind === 'backfill') this.onBackfillEvent(m.event)
+        return
+      case 'news-state':
+        this.state.patch({ news: m.state })
+        return
+      case 'news-changed':
+        this.out.newsChanged()
         return
     }
   }
@@ -177,17 +193,28 @@ export class DataController {
     this.post({ type: 'sync-now' })
   }
 
+  newsRefresh(): void {
+    this.post({ type: 'news-refresh' })
+  }
+
+  newsSetActual(id: string, value: number | null): void {
+    this.post({ type: 'news-set-actual', id, value })
+  }
+
   setChart(symbol: string | null): void {
     this.chartSymbol = symbol
     this.post({ type: 'set-chart', symbol })
   }
 
+  /** Concurrent callers share the in-flight estimate instead of failing. */
   estimate(): Promise<BackfillEstimate> {
-    if (this.pendingEstimate) return Promise.reject(new Error('estimate already running'))
-    return new Promise((resolve, reject) => {
+    this.estimatePromise ??= new Promise<BackfillEstimate>((resolve, reject) => {
       this.pendingEstimate = { resolve, reject }
       this.post({ type: 'estimate', data: this.state.getConfig().data })
+    }).finally(() => {
+      this.estimatePromise = null
     })
+    return this.estimatePromise
   }
 
   dispose(): void {

@@ -31,7 +31,7 @@ export function collectPois(a: SmcAnalysisFull): Poi[] {
     pois.push({ kind: 'QM', timeframe: tf, direction: q.direction, level: q.level, t: q.points.h1, activeFrom: closeTime(q.activeT, tf), invalidT: q.invalidT })
   for (const o of a.ocls) {
     if (o.kind === 'OCL')
-      pois.push({ kind: 'OCL', timeframe: tf, direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.breakT })
+      pois.push({ kind: 'OCL', timeframe: tf, direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.invalidT })
     else if (o.breakT !== null)
       pois.push({ kind: 'OCL_BREAK', timeframe: tf, direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.breakT, tf), invalidT: o.invalidT })
   }

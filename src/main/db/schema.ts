@@ -1,4 +1,4 @@
-import { blob, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { blob, index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /** Generic key/value app settings (JSON-encoded values, validated with zod on read). */
 export const settings = sqliteTable('settings', {
@@ -44,3 +44,58 @@ export const syncState = sqliteTable(
 
 // Candle tables (candles_1m … candles_1w) are created in a hand-written migration because
 // they use WITHOUT ROWID, which drizzle-kit can't express. Accessed via src/main/db/candles.ts.
+
+/** Economic calendar events (Fase 5). Title/raw strings come from an external feed: data only. */
+export const economicEvents = sqliteTable(
+  'economic_events',
+  {
+    id: text('id').primaryKey(),
+    source: text('source').notNull(),
+    title: text('title').notNull(),
+    currency: text('currency').notNull(),
+    impact: text('impact').notNull(),
+    time: integer('time').notNull(),
+    forecastRaw: text('forecast_raw'),
+    previousRaw: text('previous_raw'),
+    actualRaw: text('actual_raw'),
+    forecast: real('forecast'),
+    previous: real('previous'),
+    actual: real('actual'),
+    actualSource: text('actual_source'),
+    actualAt: integer('actual_at'),
+    ruleKey: text('rule_key'),
+    usdBias: text('usd_bias'),
+    cryptoBias: text('crypto_bias'),
+    biasReason: text('bias_reason'),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (t) => [index('economic_events_time_idx').on(t.time)]
+)
+
+/** Price reaction N minutes after an event, to evaluate "bad for USD = good for crypto". */
+export const eventReactions = sqliteTable(
+  'event_reactions',
+  {
+    eventId: text('event_id').notNull(),
+    symbol: text('symbol').notNull(),
+    horizonMin: integer('horizon_min').notNull(),
+    priceBefore: real('price_before').notNull(),
+    priceAfter: real('price_after').notNull(),
+    changePct: real('change_pct').notNull(),
+    computedAt: integer('computed_at').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.symbol, t.horizonMin] })]
+)
+
+/** Trade-on-news candidates (never orders). Payload = NewsCandidate JSON. */
+export const newsCandidates = sqliteTable(
+  'news_candidates',
+  {
+    id: text('id').primaryKey(),
+    eventId: text('event_id').notNull(),
+    symbol: text('symbol').notNull(),
+    createdAt: integer('created_at').notNull(),
+    payload: text('payload').notNull()
+  },
+  (t) => [index('news_candidates_created_idx').on(t.createdAt)]
+)

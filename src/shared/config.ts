@@ -56,10 +56,12 @@ export const smcConfigSchema = z.object({
   fvgMaxOffset: z.number().int().min(0).max(10).default(2),
   /** §4 Q9: minimum FVG size, % of price. */
   fvgMinPct: z.number().min(0).max(10).default(0.05),
-  /** §6 Q11: both OCL candles need body ≥ this share of their range. */
-  oclMinBodyRatio: z.number().min(0).max(1).default(0.6),
+  /** §6: an OCL Break must happen within N candles after the OCL pair ("oleh candle setelahnya"). */
+  oclBreakMaxCandles: z.number().int().min(1).max(50).default(5),
   /** §3 Q7: SL buffer beyond the wick, % of price. */
   slBufferPct: z.number().min(0).max(5).default(0.1),
+  /** §7: mountain 2's body must break mountain 1's wick ("biasanya"; user-confirmed). */
+  qmRequireBodyBreak: z.boolean().default(true),
   /** §8 Q14 */
   poiTimeframes: z.array(z.enum(['5m', '15m', '1h', '4h', '1d'])).default(['4h', '1h']),
   entryTimeframe: z.enum(['1m', '5m', '15m', '1h']).default('15m'),
@@ -77,6 +79,76 @@ export const smcConfigSchema = z.object({
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
+/** Where to fetch the official actual for an event (Fase 5). */
+export const actualSourceSchema = z.object({
+  provider: z.enum(['bls', 'fred']),
+  series: z.string().regex(/^[A-Za-z0-9_]{2,40}$/),
+  /** level = latest value; pct_mom / pct_yoy = % change vs 1 / 12 periods back; diff = change vs previous. */
+  transform: z.enum(['level', 'pct_mom', 'pct_yoy', 'diff']),
+  /** Multiply the result (e.g. 0.001 to turn persons into K). */
+  scale: z.number().default(1),
+  decimals: z.number().int().min(0).max(4).default(1),
+  /** The observation must be at least this recent: start of (event's unit) − n units. */
+  refLag: z.object({ unit: z.enum(['day', 'week', 'month', 'quarter']), n: z.number().int().min(-5).max(12) })
+})
+export type ActualSourceConfig = z.infer<typeof actualSourceSchema>
+
+export const interpretationRuleSchema = z.object({
+  key: z.string().min(1),
+  /** Case-insensitive regex matched against the event title. */
+  match: z.string().min(1),
+  /** true: actual > forecast is good for USD (e.g. CPI). false: inverted (unemployment, claims). */
+  higherIsGoodForUsd: z.boolean(),
+  /** |actual − forecast| must exceed this to count; otherwise neutral. */
+  threshold: z.number().min(0).default(0),
+  source: actualSourceSchema.optional()
+})
+export type InterpretationRule = z.infer<typeof interpretationRuleSchema>
+
+const M1 = { unit: 'month', n: 1 } as const
+export const DEFAULT_RULES: InterpretationRule[] = [
+  { key: 'cpi_mom', match: '^CPI m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CUSR0000SA0', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'core_cpi_mom', match: '^Core CPI m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CUSR0000SA0L1E', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'cpi_yoy', match: '^CPI y/y$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CUUR0000SA0', transform: 'pct_yoy', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'core_cpi_yoy', match: '^Core CPI y/y$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CUUR0000SA0L1E', transform: 'pct_yoy', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'ppi_mom', match: '^PPI m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'WPSFD4', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'core_ppi_mom', match: '^Core PPI m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'WPSFD49104', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'nfp', match: '^Non-Farm Employment Change$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CES0000000001', transform: 'diff', scale: 1, decimals: 0, refLag: M1 } },
+  { key: 'unemployment_rate', match: '^Unemployment Rate$', higherIsGoodForUsd: false, threshold: 0, source: { provider: 'bls', series: 'LNS14000000', transform: 'level', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'ahe_mom', match: '^Average Hourly Earnings m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'bls', series: 'CES0500000003', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'claims', match: '^Unemployment Claims$', higherIsGoodForUsd: false, threshold: 0, source: { provider: 'fred', series: 'ICSA', transform: 'level', scale: 0.001, decimals: 0, refLag: { unit: 'week', n: 1 } } },
+  { key: 'retail_mom', match: '^Retail Sales m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'RSAFS', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'core_retail_mom', match: '^Core Retail Sales m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'RSFSXMV', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'core_pce_mom', match: '^Core PCE Price Index m/m$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'PCEPILFE', transform: 'pct_mom', scale: 1, decimals: 1, refLag: M1 } },
+  { key: 'gdp_adv', match: '^Advance GDP q/q$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'A191RL1Q225SBEA', transform: 'level', scale: 1, decimals: 1, refLag: { unit: 'quarter', n: 1 } } },
+  { key: 'jolts', match: '^JOLTS Job Openings$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'JTSJOL', transform: 'level', scale: 0.001, decimals: 2, refLag: { unit: 'month', n: 2 } } },
+  { key: 'fed_funds', match: '^Federal Funds Rate$', higherIsGoodForUsd: true, threshold: 0, source: { provider: 'fred', series: 'DFEDTARU', transform: 'level', scale: 1, decimals: 2, refLag: { unit: 'day', n: -1 } } },
+  // No free official feed → interpreted only when the actual is entered manually.
+  { key: 'ism_mfg', match: '^ISM Manufacturing PMI$', higherIsGoodForUsd: true, threshold: 0 },
+  { key: 'ism_services', match: '^ISM Services PMI$', higherIsGoodForUsd: true, threshold: 0 },
+  { key: 'uom_sentiment', match: 'UoM Consumer Sentiment$', higherIsGoodForUsd: true, threshold: 0 },
+  { key: 'adp', match: '^ADP Non-Farm Employment Change$', higherIsGoodForUsd: true, threshold: 0 }
+]
+
+export const newsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  currencies: z.array(z.string().length(3)).default(['USD']),
+  impacts: z.array(z.enum(['High', 'Medium', 'Low'])).default(['High', 'Medium']),
+  /** News window around these impacts: no new positions unless the news strategy is on. */
+  windowImpacts: z.array(z.enum(['High', 'Medium', 'Low'])).default(['High']),
+  windowBeforeMin: z.number().int().min(0).max(240).default(15),
+  windowAfterMin: z.number().int().min(0).max(240).default(30),
+  newsStrategyEnabled: z.boolean().default(false),
+  /** inverse: USD bearish → crypto bullish (default). same: follow USD. off: no crypto bias. */
+  cryptoBiasMode: z.enum(['inverse', 'same', 'off']).default('inverse'),
+  /** Symbols analysed for trade-on-news candidates (watchlist is added automatically). */
+  candidateSymbols: z.array(z.string().regex(/^[A-Z0-9]{2,30}$/)).default(['BTCUSDT', 'ETHUSDT']),
+  reactionHorizonsMin: z.array(z.number().int().min(1).max(1440)).default([5, 15, 60]),
+  feedRefreshMinutes: z.number().int().min(15).max(240).default(60),
+  rules: z.array(interpretationRuleSchema).default(DEFAULT_RULES)
+})
+export type NewsConfig = z.infer<typeof newsConfigSchema>
+
 export const appConfigSchema = z.object({
   mode: tradingModeSchema.default('paper'),
   /** ccxt exchange id; Binance USDT-M perpetual by default. */
@@ -85,7 +157,8 @@ export const appConfigSchema = z.object({
   watchlist: z.array(z.string().regex(/^[A-Z0-9]{2,30}$/)).default(['BTCUSDT', 'ETHUSDT']),
   risk: riskConfigSchema.default(riskConfigSchema.parse({})),
   data: dataConfigSchema.default(dataConfigSchema.parse({})),
-  smc: smcConfigSchema.default(smcConfigSchema.parse({}))
+  smc: smcConfigSchema.default(smcConfigSchema.parse({})),
+  news: newsConfigSchema.default(newsConfigSchema.parse({}))
 })
 
 export type RiskConfig = z.infer<typeof riskConfigSchema>
@@ -95,12 +168,13 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema
-  .omit({ risk: true, data: true, smc: true })
+  .omit({ risk: true, data: true, smc: true, news: true })
   .partial()
   .extend({
     risk: riskConfigSchema.omit({ requireStopLoss: true }).partial().strict().optional(),
     data: dataConfigSchema.partial().strict().optional(),
-    smc: smcConfigSchema.partial().strict().optional()
+    smc: smcConfigSchema.partial().strict().optional(),
+    news: newsConfigSchema.partial().strict().optional()
   })
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>

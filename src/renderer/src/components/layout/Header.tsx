@@ -1,4 +1,4 @@
-import { Database, Wifi, WifiOff } from 'lucide-react'
+import { Database, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/stores/appStore'
 import { KillSwitch } from './KillSwitch'
@@ -25,6 +25,11 @@ export function Header() {
             {sync?.upToDate ?? 0}/{sync?.total ?? 0}
           </span>
         </Badge>
+        {status?.news?.window && (
+          <Badge variant="warn" title="Bot tidak membuka posisi baru selama news window">
+            <ShieldAlert /> News: {status.news.window.title}
+          </Badge>
+        )}
         <Badge variant="warn" className="uppercase">
           {status?.mode ?? 'paper'}
         </Badge>

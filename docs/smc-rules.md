@@ -168,22 +168,22 @@ Candle `i` adalah **bullish OB** jika:
 ---
 
 ## 6. OCL (Open Close Candle) & OCL Break
-**Sumber:** [Materi 2 – OCL](<../materi/Screenshot 2026-11-11 at 16.05.58.png>)
+**Sumber:** [Materi 2 – OCL](<../materi/Screenshot 2026-11-11 at 16.05.58.png>) + contoh "OCLBREAK BUY" dari user
+(2026-11-11)
 
-**Definisi dari materi:**
-- **OCL:** "jika ada candle yang baru close dan membuat candle baru setelahnya, maka area tersebut
-  bisa dijadikan area POI." Garis OCL ada di titik close candle 1 = open candle 2.
-- Market biasanya mengambil POI/OCL **yang terdekat dengan harga**.
-- **OCL Break:** OCL yang di-break oleh candle setelahnya. Area ini biasanya direspect **jika ada
-  konfirmasi** (§8). "OCL setelah terbreak itu bisa dijadikan POI yang cukup bagus."
+**Definisi:**
+- **OCL:** candle `i` close lalu candle `i+1` **berwarna sama** melanjutkan dari situ. Level = `close[i]`,
+  area OCL = body candle `i`. Pasangan hijau = OCL bullish (support/buy), pasangan merah = OCL
+  bearish (resistance/sell). **Ukuran body tidak dipakai sebagai syarat.**
+- **OCL Break Buy** (kata user): "jika body candle bullish berhasil menembus dan closing melewati area
+  OCL Bearish". Artinya, setelah OCL bearish ada candle **hijau** yang `close > open[i]` (melewati seluruh
+  body candle merah). POI buy ada di level `close[i]`. **OCL Break Sell** kebalikannya.
+- Break harus terjadi "oleh candle setelahnya": maksimal `oclBreakMaxCandles` (default 5) candle.
+- Hit = harga kembali ke level. Invalid = close menembus level berlawanan arah POI. OCL biasa yang
+  ditembus close tanpa memenuhi syarat break dianggap invalid.
+- Market biasanya mengambil OCL **terdekat** dengan harga, jadi di chart cuma yang terdekat yang digambar.
 
-⚠️ **Belum bisa diprogram tanpa klarifikasi.** Di crypto (24 jam), open candle hampir selalu sama
-dengan close candle sebelumnya, jadi kalau diartikan harfiah **setiap candle adalah OCL**.
-
-❓ **Q11. OCL yang dimaksud yang mana?** Usulan default: OCL = close candle `i` di dalam pergerakan
-   kuat, yaitu candle `i` dan `i+1` searah, body keduanya ≥ 60% range, dan `i+1` melanjutkan arah.
-   Level = `c[i]`. **OCL Break** = setelah itu ada close yang menembus level tersebut ke arah sebaliknya.
-   Kalau maksud lo beda, tolong jelasin (misal pakai screenshot chart).
+✅ Q11 dijawab user lewat contoh gambar (definisi lama "body ≥ 60%" dibuang).
 
 ---
 
@@ -194,16 +194,19 @@ dengan close candle sebelumnya, jadi kalau diartikan harfiah **setiap candle ada
 dan menjadi area entry. Garis QM ditarik di level **gunung satu**. Contoh real: harga kembali ke garis
 QM lalu turun (sell).
 
+**Penjelasan user (2026-11-11):** gunung pertama diukur dari **body**, bukan wick. Body gunung kedua
+biasanya **menembus wick** gunung pertama. Di gunung ketiga, QM kena di **titik body gunung pertama**
+(seperti garis OB).
+
 **Aturan deteksi (QM sell; QM buy kebalikannya):**
 1. Swing high `H1` (gunung 1), swing low `L1`, swing high `H2 > H1` (gunung 2).
-2. Setelah `H2`, harga turun membentuk low `L2 < L1` (struktur patah).
-3. Zona entry sell = level `H1`. Sinyal muncul saat harga naik kembali menyentuh `H1` (gunung 3).
-4. Invalid jika ada close di atas `H2`.
+2. **Body `H2` menembus wick `H1`:** `bodyHi[H2] > h[H1]`. Setting `qmRequireBodyBreak`, default
+   **wajib**. Bisa dimatikan karena di penjelasan user disebut "biasanya".
+3. Setelah `H2`, harga turun membentuk low `L2 < L1` (struktur patah).
+4. **Level entry sell = `bodyHi[H1]`** (body gunung 1). Kena saat harga naik kembali ke level itu (gunung 3).
+5. Invalid jika ada close di atas wick `H2`.
 
-❓ **Q12. Apakah `L2 < L1` wajib?** Di gambar terlihat begitu, tapi tidak ditulis. Usulan default:
-   **wajib**.
-❓ **Q13. Level `H1` pakai ujung wick atau body?** Usulan default: **ujung wick** (`h`), karena di gambar
-   garisnya di puncak gunung satu.
+✅ **Q12** (`L2 < L1` wajib): ya. ✅ **Q13** dijawab user: level QM pakai **body**, bukan wick.
 
 ---
 

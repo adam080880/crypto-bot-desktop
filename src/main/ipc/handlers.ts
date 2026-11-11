@@ -11,6 +11,7 @@ import type { SecretStore } from '../security/secrets'
 import type { AppState } from '../state/appState'
 import type { DataController } from '../sync/dataController'
 import { SmcService } from '../strategy/service'
+import { NewsRepo } from '../news/repo'
 
 const log = logger('ipc')
 
@@ -32,6 +33,7 @@ export function registerIpcHandlers(deps: {
   const { db, state, secrets, data, isTrustedSender } = deps
   const candles = new CandleRepo(db) // main-process reads; the data worker is the only writer
   const smc = new SmcService(db)
+  const news = new NewsRepo(db)
 
   const handle = <C extends InvokeChannel>(channel: C, fn: Handler<C>): void => {
     ipcMain.handle(channel, async (event, req: unknown) => {
@@ -68,11 +70,13 @@ export function registerIpcHandlers(deps: {
       .strict()
       .parse(req)
     secrets.set(name, value)
+    if (name === 'bls.apiKey') data.pushConfig()
     return secrets.list()
   })
   handle('secrets:delete', (req) => {
     const { name } = z.object({ name: secretNameSchema }).strict().parse(req)
     secrets.delete(name)
+    if (name === 'bls.apiKey') data.pushConfig()
     return secrets.list()
   })
 
@@ -123,6 +127,22 @@ export function registerIpcHandlers(deps: {
   handle('smc:setups', (req) => {
     const { symbol } = z.object({ symbol: symbolSchema }).strict().parse(req)
     return smc.setups(symbol, state.getConfig().smc)
+  })
+  handle('news:list', (req) => {
+    const { from, to } = z.object({ from: z.number().int(), to: z.number().int() }).strict().parse(req)
+    if (to - from > 62 * 86_400_000) throw new Error('range too large')
+    return news.list(from, to)
+  })
+  handle('news:candidates', () => news.candidates(50))
+  handle('news:reactions', (req) => news.reactions(z.object({ eventId: z.string().regex(/^[a-f0-9]{16}$/) }).strict().parse(req).eventId))
+  handle('news:stats', () => news.stats(state.getConfig().news.cryptoBiasMode))
+  handle('news:refresh', () => data.newsRefresh())
+  handle('news:setActual', (req) => {
+    const { id, value } = z
+      .object({ id: z.string().regex(/^[a-f0-9]{16}$/), value: z.number().finite().nullable() })
+      .strict()
+      .parse(req)
+    data.newsSetActual(id, value)
   })
   handle('live:setChart', (req) => {
     const { symbol } = z.object({ symbol: symbolSchema.nullable() }).strict().parse(req)

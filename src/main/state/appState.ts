@@ -27,6 +27,7 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       connection: 'unknown',
       sync: { status: 'idle', upToDate: 0, total: 0 },
       live: { status: 'off', streams: 0, connections: 0, latencyMs: null },
+      news: null,
       killSwitch: kill,
       dbPath: meta.dbPath,
       version: meta.version
@@ -52,7 +53,8 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       ...patch,
       risk: { ...this.config.risk, ...(patch.risk ?? {}) },
       data: { ...this.config.data, ...(patch.data ?? {}) },
-      smc: { ...this.config.smc, ...(patch.smc ?? {}) }
+      smc: { ...this.config.smc, ...(patch.smc ?? {}) },
+      news: { ...this.config.news, ...(patch.news ?? {}) }
     })
     this.config = next
     writeSetting(this.db, 'app_config', next)

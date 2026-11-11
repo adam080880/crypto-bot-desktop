@@ -5,7 +5,6 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
-  type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
   type SeriesMarker,
@@ -81,7 +80,6 @@ export function Chart() {
   const last = useRef<Candle | null>(null)
   const overlay = useRef<SmcOverlay | null>(null)
   const markers = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
-  const priceLines = useRef<IPriceLine[]>([])
   const [layers, setLayers] = useState<Layers>(() => {
     try {
       return { ...DEFAULT_LAYERS, ...JSON.parse(recall('chart.layers', '{}')) }
@@ -133,7 +131,6 @@ export function Chart() {
     return () => {
       overlay.current = null
       markers.current = null
-      priceLines.current = []
       c.remove()
       chart.current = null
       price.current = null
@@ -241,21 +238,6 @@ export function Chart() {
     m.sort((p, q) => (p.time as number) - (q.time as number))
     markers.current?.setMarkers(m)
 
-    const series = price.current
-    if (!series) return
-    for (const pl of priceLines.current) series.removePriceLine(pl)
-    priceLines.current = []
-    if (layers.setups) {
-      const live = setups.filter((x) => x.status === 'pending' || x.status === 'triggered').slice(-2)
-      for (const x of live) {
-        const col = x.direction === 'bullish' ? COLORS.bull : COLORS.bear
-        priceLines.current.push(
-          series.createPriceLine({ price: x.entry, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `ENTRY ${x.rr}R` }),
-          series.createPriceLine({ price: x.sl, color: COLORS.bear, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' }),
-          series.createPriceLine({ price: x.tp, color: COLORS.bull, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP' })
-        )
-      }
-    }
   }, [analysis, setups, layers])
 
   const toggle = (k: keyof Layers): void => {

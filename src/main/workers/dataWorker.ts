@@ -3,7 +3,8 @@
  * manual backfills, auto-sync catch-ups and live WebSocket ingest all run here, serialised per
  * symbol by Backfiller.locks. The main process only relays messages and reads.
  */
-import { dataConfigSchema } from '@shared/config'
+import { dataConfigSchema, newsConfigSchema, smcConfigSchema } from '@shared/config'
+import { NewsService } from '../news/newsService'
 import { openDatabase } from '../db/client'
 import { LiveService } from '../live/liveService'
 import { initLogger, logger } from '../logger'
@@ -20,7 +21,13 @@ const db = openDatabase({ path: init.dbPath, migrationsFolder: init.migrationsFo
 const backfiller = new Backfiller(db)
 const send = (m: FromWorker): void => port.postMessage(m)
 
-let config: ServiceConfig = { data: dataConfigSchema.parse({}), watchlist: [] }
+let config: ServiceConfig = {
+  data: dataConfigSchema.parse({}),
+  watchlist: [],
+  news: newsConfigSchema.parse({}),
+  smc: smcConfigSchema.parse({}),
+  blsApiKey: null
+}
 let positions: string[] = []
 let manual: AbortController | null = null
 
@@ -34,6 +41,15 @@ const autoSync = new AutoSync(
   (state) => send({ type: 'autosync', state }),
   () => manual === null
 )
+
+const news = new NewsService(db, {
+  getConfig: () => config.news,
+  getSmc: () => config.smc,
+  getWatchlist: () => config.watchlist,
+  getBlsKey: () => config.blsApiKey
+})
+news.on('state', (state) => send({ type: 'news-state', state }))
+news.on('changed', () => send({ type: 'news-changed' }))
 
 backfiller.on('event', (event) => send({ type: 'event', event }))
 live.on('state', (state) => send({ type: 'live-state', state }))
@@ -56,11 +72,18 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       }
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
+      news.start()
       break
     case 'config':
       config = msg.config
       live.setSources({ watchlist: config.watchlist })
       autoSync.configure()
+      break
+    case 'news-refresh':
+      void news.refreshNow()
+      break
+    case 'news-set-actual':
+      news.setManualActual(msg.id, msg.value)
       break
     case 'set-chart':
       live.setSources({ chart: msg.symbol })
@@ -104,5 +127,6 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
 process.on('exit', () => {
   live.dispose()
   autoSync.dispose()
+  news.dispose()
   db.$client.close()
 })

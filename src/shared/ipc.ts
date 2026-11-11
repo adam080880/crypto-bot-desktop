@@ -2,11 +2,12 @@ import type { AppConfig, ConfigPatch, TradingMode } from './config'
 import type { Candle } from './candles'
 import type { LiveCandleEvent, LiveState } from './live'
 import type { Setup, SmcAnalysis } from './smc'
+import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
 
 /** Names of secrets that may be stored via safeStorage. */
-export const SECRET_NAMES = ['binance.apiKey', 'binance.apiSecret', 'anthropic.apiKey'] as const
+export const SECRET_NAMES = ['binance.apiKey', 'binance.apiSecret', 'anthropic.apiKey', 'bls.apiKey'] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected'
@@ -17,6 +18,7 @@ export interface AppStatus {
   connection: ConnectionStatus
   sync: { status: SyncStatus; upToDate: number; total: number }
   live: LiveState
+  news: NewsState | null
   /** True after the kill switch is pressed; bot stays halted until manually resumed. */
   killSwitch: { active: boolean; at: number | null }
   dbPath: string
@@ -60,6 +62,12 @@ export interface IpcInvokeMap {
   'live:setChart': { req: { symbol: string | null }; res: void }
   'smc:analyze': { req: { symbol: string; timeframe: Timeframe; limit: number }; res: SmcAnalysis | null }
   'smc:setups': { req: { symbol: string }; res: Setup[] }
+  'news:list': { req: { from: number; to: number }; res: EconomicEvent[] }
+  'news:candidates': { req: void; res: NewsCandidate[] }
+  'news:reactions': { req: { eventId: string }; res: EventReaction[] }
+  'news:stats': { req: void; res: ReactionStat[] }
+  'news:refresh': { req: void; res: void }
+  'news:setActual': { req: { id: string; value: number | null }; res: void }
 }
 
 export interface SymbolListItem {
@@ -82,6 +90,7 @@ export interface IpcEventMap {
   'sync:event': { event: BackfillEvent; ui: SyncUiState }
   'live:candle': LiveCandleEvent
   'live:synced': { symbol: string }
+  'news:changed': { at: number }
 }
 
 export type InvokeChannel = keyof IpcInvokeMap
@@ -116,6 +125,12 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'candles:get',
   'live:setChart',
   'smc:analyze',
-  'smc:setups'
+  'smc:setups',
+  'news:list',
+  'news:candidates',
+  'news:reactions',
+  'news:stats',
+  'news:refresh',
+  'news:setActual'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed']

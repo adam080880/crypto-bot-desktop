@@ -1,4 +1,5 @@
-import type { DataConfig } from '@shared/config'
+import type { DataConfig, NewsConfig, SmcConfig } from '@shared/config'
+import type { NewsState } from '@shared/news'
 import type { LiveCandleEvent, LiveState } from '@shared/live'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent } from '@shared/sync'
 
@@ -11,6 +12,10 @@ export interface WorkerInit {
 export interface ServiceConfig {
   data: DataConfig
   watchlist: string[]
+  news: NewsConfig
+  smc: SmcConfig
+  /** Decrypted in main (safeStorage is main-only); held in memory by the worker. */
+  blsApiKey: string | null
 }
 
 export type ToWorker =
@@ -22,6 +27,8 @@ export type ToWorker =
   | { type: 'sync-now' }
   | { type: 'set-chart'; symbol: string | null }
   | { type: 'set-positions'; symbols: string[] }
+  | { type: 'news-refresh' }
+  | { type: 'news-set-actual'; id: string; value: number | null }
 
 export type FromWorker =
   | { type: 'event'; event: BackfillEvent }
@@ -32,3 +39,5 @@ export type FromWorker =
   | { type: 'live-candle'; event: LiveCandleEvent }
   | { type: 'live-synced'; symbol: string }
   | { type: 'autosync'; state: AutoSyncState }
+  | { type: 'news-state'; state: NewsState }
+  | { type: 'news-changed' }

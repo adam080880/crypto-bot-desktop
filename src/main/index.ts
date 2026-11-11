@@ -51,9 +51,11 @@ function bootstrap(): void {
     {
       syncEvent: (event, ui) => sendAll('sync:event', { event, ui }),
       liveCandle: (event) => sendAll('live:candle', event),
-      liveSynced: (symbol) => sendAll('live:synced', { symbol })
+      liveSynced: (symbol) => sendAll('live:synced', { symbol }),
+      newsChanged: () => sendAll('news:changed', { at: Date.now() })
     },
-    lastRun
+    lastRun,
+    () => secrets.get('bls.apiKey')
   )
 
   registerIpcHandlers({
