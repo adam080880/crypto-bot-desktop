@@ -1,6 +1,6 @@
 # Rencana — SMC/ICT Trading Assistant
 
-Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 berikutnya.
+Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 ✅ · Fase 6 berikutnya.
 
 ## Prinsip
 - **Main process = otak.** Exchange, DB, scheduler, Claude, risk guard semuanya di main

@@ -103,3 +103,30 @@ describe('news window', () => {
     expect(nextEvent([ev({ id: 'a', time: 5 }), ev({ id: 'b', time: 10, impact: 'Low' }), ev({ id: 'c', time: 20 })], cfg, 6)?.id).toBe('c')
   })
 })
+
+describe('repo dedupe of simultaneous releases', () => {
+  it('counts one reaction sample per release in stats and one candidate per release+direction', async () => {
+    const { resolve } = await import('node:path')
+    const { openDatabase } = await import('../db/client')
+    const { NewsRepo } = await import('./repo')
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    const repo = new NewsRepo(db)
+    const cfg = newsConfigSchema.parse({})
+    const t = Date.UTC(2026, 10, 10, 13, 30)
+    repo.upsertFeed('ff', [
+      { title: 'CPI m/m', currency: 'USD', impact: 'High', time: t, forecastRaw: '0.3%', previousRaw: '0.6%', actualRaw: null },
+      { title: 'Core CPI m/m', currency: 'USD', impact: 'High', time: t, forecastRaw: '0.2%', previousRaw: '0.3%', actualRaw: null }
+    ], cfg)
+    const [a, b] = repo.list(t - 1, t + 1)
+    repo.setActual(a!.id, 0.4, '0.4%', 'bls', findRule(a!.title, cfg.rules), 'inverse')
+    repo.setActual(b!.id, 0.4, '0.4%', 'bls', findRule(b!.title, cfg.rules), 'inverse')
+    for (const e of [a!, b!]) repo.addReaction({ eventId: e.id, symbol: 'BTCUSDT', horizonMin: 60, priceBefore: 100, priceAfter: 99, changePct: -1 })
+    const st = repo.stats('inverse')
+    expect(st).toHaveLength(1)
+    expect(st[0]).toMatchObject({ usdBias: 'bullish', n: 1, ruleHitPct: 1 })
+
+    repo.addCandidate({ id: `${a!.id}-BTCUSDT`, eventId: a!.id, eventTitle: a!.title, symbol: 'BTCUSDT', direction: 'bearish', createdAt: t, price: 1, trend: {}, poi: null, target: null, setupId: null, aligned: false, reasons: [] })
+    expect(repo.hasCandidateForRelease('BTCUSDT', t, 'bearish')).toBe(true)
+    expect(repo.hasCandidateForRelease('BTCUSDT', t, 'bullish')).toBe(false)
+  })
+})

@@ -23,20 +23,16 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
   swings/structure (BOS = pembalikan), OB (bentuk + **warna** candle), FVG, RBS/SBR, OCL/OCL break,
   QM, liquidity (wick OB + swing BSL/SSL), dan setups (POI kena → OB valid → entry/SL/TP, skor,
   status sampai TP/SL). Overlay di Chart (`src/renderer/src/chart/smcOverlay.ts`) dengan toggle layer.
-- Fase 5 🚧 hampir selesai (lihat "Lanjut di sini" di bawah). Fase 6 belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
+- Fase 5 ✅ kalender ekonomi (FF feed + actual BLS/FRED/manual), bias USD→crypto, news window,
+  reaksi harga, kandidat trade-on-news, statistik aturan. Fase 6 belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
   minta mulai. Detail di PLAN.md.
 
-## Lanjut di sini (pause 2026-11-11, dilanjut user di PC)
-Fase 5 sudah jalan end-to-end dengan data asli. Feed FF menyimpan 106 event. Actual CPI 10 Nov ditarik
-dari BLS (0.4% vs forecast 0.3% → USD bullish → crypto bearish; BTC −0,85% dan ETH −1,6% dalam 1 jam).
-Reaksi harga dan kandidat tercatat. Sisa pekerjaan:
-1. **Dedupe rilis bersamaan:** CPI m/m dan Core CPI m/m rilis di menit yang sama, jadi reaksi dan
-   kandidatnya dobel. Kandidat: 1 per (simbol, waktu rilis, arah). Statistik: dedupe per (waktu rilis,
-   simbol, horizon, bias).
-2. **Cek visual halaman Economic Calendar** (belum di-screenshot) dan Settings → News (editor JSON aturan).
-3. **Cek visual chart** setelah 2 perubahan terakhir. (a) Overlay tanpa background (garis/outline saja).
-   (b) Garis tidak sampai ujung kanan: berhenti di hit/invalid/swept, atau maksimal 30 candle (`EXTEND_BARS`).
-4. Setelah itu: ringkasan Fase 5 ke user, lalu Fase 6 (Claude analis).
+## Lanjut di sini
+Fase 5 ✅ selesai dan diverifikasi visual (kalender, settings news, chart). Menunggu keputusan user:
+- **OCL sebagai POI setup:** setelah definisi OCL dikoreksi (tiap pasangan candle searah), setup ETH naik
+  33 → 64 dan winrate turun 21% → 16%. Opsi: OCL biasa tidak dipakai sebagai POI setup (OCL Break tetap
+  dipakai), atau diberi skor −1. Tunggu jawaban user.
+- Berikutnya Fase 6 (Claude analis).
 
 ## Keputusan yang sudah diambil (jangan diubah tanpa tanya)
 - Data harga selalu dari endpoint **publik production** Binance (tanpa API key). Testnet harganya

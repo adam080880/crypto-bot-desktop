@@ -153,13 +153,18 @@ export class NewsRepo {
   stats(mode: NewsConfig['cryptoBiasMode']): ReactionStat[] {
     const rows = this.db.$client
       .prepare(
-        `SELECT e.usd_bias AS usdBias, r.symbol, r.horizon_min AS horizonMin, r.change_pct AS change
+        `SELECT e.usd_bias AS usdBias, e.time AS time, r.symbol, r.horizon_min AS horizonMin, r.change_pct AS change
          FROM event_reactions r JOIN economic_events e ON e.id = r.event_id
          WHERE e.usd_bias IS NOT NULL`
       )
-      .all() as { usdBias: Bias; symbol: string; horizonMin: number; change: number }[]
+      .all() as { usdBias: Bias; time: number; symbol: string; horizonMin: number; change: number }[]
     const groups = new Map<string, { usdBias: Bias; symbol: string; horizonMin: number; changes: number[] }>()
+    // one sample per release (simultaneous events with the same bias share one price move)
+    const seen = new Set<string>()
     for (const r of rows) {
+      const sample = `${r.time}|${r.symbol}|${r.horizonMin}|${r.usdBias}`
+      if (seen.has(sample)) continue
+      seen.add(sample)
       const k = `${r.usdBias}|${r.symbol}|${r.horizonMin}`
       const g = groups.get(k) ?? { usdBias: r.usdBias, symbol: r.symbol, horizonMin: r.horizonMin, changes: [] }
       g.changes.push(r.change)
@@ -186,6 +191,19 @@ export class NewsRepo {
   }
 
   // ---- candidates --------------------------------------------------------------------------
+
+  /**
+   * Same symbol + direction already proposed for a release at the same minute? (e.g. CPI m/m and
+   * Core CPI m/m come out together — one candidate, not two.)
+   */
+  hasCandidateForRelease(symbol: string, time: number, direction: string): boolean {
+    return !!this.db.$client
+      .prepare(
+        `SELECT 1 FROM news_candidates c JOIN economic_events e ON e.id = c.event_id
+         WHERE c.symbol = ? AND e.time = ? AND json_extract(c.payload, '$.direction') = ? LIMIT 1`
+      )
+      .get(symbol, time, direction)
+  }
 
   hasCandidate(eventId: string, symbol: string): boolean {
     return !!this.db

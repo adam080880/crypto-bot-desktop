@@ -233,7 +233,7 @@ export class NewsService extends EventEmitter<{ state: [NewsState]; changed: [];
     if (!e.cryptoBias || e.cryptoBias === 'neutral') return
     const dir: Dir = e.cryptoBias
     for (const symbol of this.symbols(cfg)) {
-      if (this.repo.hasCandidate(e.id, symbol)) continue
+      if (this.repo.hasCandidate(e.id, symbol) || this.repo.hasCandidateForRelease(symbol, e.time, dir)) continue
       try {
         const ctx = this.smc.context(symbol, this.deps.getSmc())
         if (!ctx) continue

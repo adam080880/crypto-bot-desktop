@@ -29,7 +29,7 @@ function countdown(ms: number): string {
   const h = Math.floor((s % 86400) / 3600)
   const m = Math.floor((s % 3600) / 60)
   const sec = s % 60
-  return d ? `${d}h ${h}j ${m}m` : h ? `${h}j ${m}m ${sec}d` : `${m}m ${String(sec).padStart(2, '0')}d`
+  return d ? `${d}hr ${h}j ${m}m` : h ? `${h}j ${m}m ${sec}dtk` : `${m}m ${String(sec).padStart(2, '0')}dtk`
 }
 
 function useNow(ms = 1000): number {
@@ -62,6 +62,9 @@ function ActualCell({ e }: { e: EconomicEvent }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
   const released = e.time <= Date.now()
+  // speeches etc. have nothing to measure: no forecast, no previous, no interpretation rule
+  const measurable = e.forecastRaw !== null || e.previousRaw !== null || e.ruleKey !== null || e.actual !== null
+  if (!measurable) return null
   if (editing)
     return (
       <form
