@@ -110,7 +110,6 @@ corepack enable            # pnpm 11
 pnpm install               # pnpm-workspace.yaml sudah mengizinkan build: electron, better-sqlite3, esbuild
 # Kalau node_modules/electron/dist tidak ada (binary Electron belum terdownload):
 node node_modules/electron/install.js
-pnpm rebuild:native        # build better-sqlite3 untuk ABI Electron
 pnpm test && pnpm typecheck
 pnpm dev
 ```
@@ -145,8 +144,8 @@ pnpm data:backfill --verify      # cocokkan resample dengan kline asli Binance
   memperingatkan.
 
 ## Gotchas
-- better-sqlite3 di-build untuk **Electron**, jadi `pnpm test` dan CLI jalan lewat
-  `ELECTRON_RUN_AS_NODE=1 electron ...`. Jangan jalankan dengan `node` biasa (ABI mismatch).
+- better-sqlite3 v13 memakai N-API dengan binary prebuilt per OS (tidak perlu rebuild). `pnpm test` dan
+  CLI tetap jalan lewat `ELECTRON_RUN_AS_NODE=1 electron ...` supaya runtime-nya sama dengan app.
 - Pakai TypeScript 5.9 (bukan 7), demi kompatibilitas tooling.
 - Setelah mengubah `src/main/db/schema.ts`: `pnpm db:generate`. Tabel candle: edit SQL manual.
 - Logger modul (`logger('x')`) boleh dibuat saat import; dia ikut root logger yang aktif saat menulis log.

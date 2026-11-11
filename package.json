@@ -16,7 +16,6 @@
     "test:watch": "cross-env ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs",
     "db:generate": "drizzle-kit generate",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
-    "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "data:backfill": "electron-vite build --logLevel warn && cross-env ELECTRON_RUN_AS_NODE=1 electron out/main/backfill.js",
     "dist:win": "electron-vite build && electron-builder --win --x64",
