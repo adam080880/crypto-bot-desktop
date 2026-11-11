@@ -1,0 +1,16 @@
+appId: dev.local.smc-trading-assistant
+productName: SMC Trading Assistant
+directories:
+  buildResources: resources
+  output: release
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: drizzle
+    to: drizzle
+asarUnpack:
+  - node_modules/better-sqlite3/**
+mac:
+  category: public.app-category.finance
+  target: dmg

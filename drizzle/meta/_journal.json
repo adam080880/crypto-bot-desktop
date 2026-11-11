@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794388991814,
+      "tag": "0000_panoramic_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794389925786,
+      "tag": "0001_symbols_sync_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794389926870,
+      "tag": "0002_candles",
+      "breakpoints": true
+    }
+  ]
+}

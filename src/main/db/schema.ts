@@ -1,0 +1,46 @@
+import { blob, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+/** Generic key/value app settings (JSON-encoded values, validated with zod on read). */
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
+/** Secrets encrypted with Electron safeStorage. Plaintext never touches disk. */
+export const secrets = sqliteTable('secrets', {
+  name: text('name').primaryKey(),
+  ciphertext: blob('ciphertext', { mode: 'buffer' }).notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
+/** Binance USDT-M perpetual symbols. Integer id keeps candle PKs small. */
+export const symbols = sqliteTable('symbols', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  symbol: text('symbol').notNull().unique(),
+  baseAsset: text('base_asset').notNull(),
+  quoteAsset: text('quote_asset').notNull(),
+  onboardDate: integer('onboard_date').notNull(),
+  status: text('status').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
+/**
+ * Sync progress per symbol + timeframe. `lastOpenTime` = open time of the newest stored
+ * (closed) candle; backfill resumes from lastOpenTime + timeframe.
+ */
+export const syncState = sqliteTable(
+  'sync_state',
+  {
+    symbolId: integer('symbol_id').notNull(),
+    timeframe: text('timeframe').notNull(),
+    firstOpenTime: integer('first_open_time'),
+    lastOpenTime: integer('last_open_time'),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.symbolId, t.timeframe] })]
+)
+
+// Candle tables (candles_1m … candles_1w) are created in a hand-written migration because
+// they use WITHOUT ROWID, which drizzle-kit can't express. Accessed via src/main/db/candles.ts.
