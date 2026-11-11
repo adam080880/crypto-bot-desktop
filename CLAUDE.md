@@ -28,11 +28,10 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
   minta mulai. Detail di PLAN.md.
 
 ## Lanjut di sini
-Fase 5 ✅ selesai dan diverifikasi visual (kalender, settings news, chart). Menunggu keputusan user:
-- **OCL sebagai POI setup:** setelah definisi OCL dikoreksi (tiap pasangan candle searah), setup ETH naik
-  33 → 64 dan winrate turun 21% → 16%. Opsi: OCL biasa tidak dipakai sebagai POI setup (OCL Break tetap
-  dipakai), atau diberi skor −1. Tunggu jawaban user.
-- Berikutnya Fase 6 (Claude analis).
+Fase 5 ✅. OCL sudah diputuskan user: OCL biasa hanya 1d/1w, di 4h ke bawah hanya OCL Break
+(`oclPlainTimeframes`). Hasil 21 hari (net R): BTC −16,8, ETH −7,5, SOL +20,9. **Strategi belum
+tervalidasi.** Jangan dipakai bot (Fase 7) sebelum ada backtest di data full.
+Berikutnya: Fase 6 (Claude analis), menunggu go dari user.
 
 ## Keputusan yang sudah diambil (jangan diubah tanpa tanya)
 - Data harga selalu dari endpoint **publik production** Binance (tanpa API key). Testnet harganya

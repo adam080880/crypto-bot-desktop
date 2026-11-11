@@ -182,6 +182,8 @@ Candle `i` adalah **bullish OB** jika:
 - Hit = harga kembali ke level. Invalid = close menembus level berlawanan arah POI. OCL biasa yang
   ditembus close tanpa memenuhi syarat break dianggap invalid.
 - Market biasanya mengambil OCL **terdekat** dengan harga, jadi di chart cuma yang terdekat yang digambar.
+- **Timeframe (user, 2026-11-11):** OCL biasa **hanya untuk HTF (1d, 1w)**. Di 4h ke bawah **hanya OCL
+  Break** yang dipakai. Setting `oclPlainTimeframes`.
 
 ✅ Q11 dijawab user lewat contoh gambar (definisi lama "body ≥ 60%" dibuang).
 

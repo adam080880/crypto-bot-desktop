@@ -58,6 +58,8 @@ export const smcConfigSchema = z.object({
   fvgMinPct: z.number().min(0).max(10).default(0.05),
   /** §6: an OCL Break must happen within N candles after the OCL pair ("oleh candle setelahnya"). */
   oclBreakMaxCandles: z.number().int().min(1).max(50).default(5),
+  /** §6 (user): plain OCL only on high timeframes; below these only OCL Break is used. */
+  oclPlainTimeframes: z.array(z.enum(['1m', '5m', '15m', '1h', '4h', '1d', '1w'])).default(['1d', '1w']),
   /** §3 Q7: SL buffer beyond the wick, % of price. */
   slBufferPct: z.number().min(0).max(5).default(0.1),
   /** §7: mountain 2's body must break mountain 1's wick ("biasanya"; user-confirmed). */

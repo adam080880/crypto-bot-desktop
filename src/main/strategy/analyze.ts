@@ -25,6 +25,9 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
   const structure = analyzeStructure(candles, pivots)
   const fvgs = detectFvgs(candles, cfg.fvgMinPct)
   const orderBlocks = detectOrderBlocks(candles, pivots, fvgs, cfg)
+  // §6: plain OCL only on HTF (1d/1w by default); lower timeframes keep OCL Break only
+  const plainOcl = (cfg.oclPlainTimeframes as string[]).includes(timeframe)
+  const ocls = detectOcls(candles, cfg.oclBreakMaxCandles).filter((o) => o.kind === 'OCL_BREAK' || plainOcl)
   return {
     timeframe,
     trend: structure.trend,
@@ -34,7 +37,7 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
     orderBlocks,
     fvgs,
     srFlips: detectSrFlips(candles, pivots, fvgs),
-    ocls: detectOcls(candles, cfg.oclBreakMaxCandles),
+    ocls,
     qms: detectQms(candles, structure.alternating, cfg.qmRequireBodyBreak),
     liquidity: detectLiquidity(candles, orderBlocks, structure.alternating, cfg.equalPct),
     candles,

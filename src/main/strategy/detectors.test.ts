@@ -103,9 +103,20 @@ describe('OCL (§6)', () => {
       [99, 104, 98.5, 103.5], // closes above the level but not above 105 → not a break
       [103.5, 103.8, 101, 101.5]
     ])
-    const o = analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))!
+    const o = analyzeSmc(c, '1d', cfg()).ocls.find((x) => x.t === at(0))!
     expect(o.kind).toBe('OCL')
     expect(o.invalidT).toBe(at(2)) // a bearish OCL closed through upward without a qualifying break
+  })
+
+  it('plain OCL only on 1d/1w; lower timeframes keep only OCL Break', () => {
+    const c = bars([
+      [100, 101, 99.5, 101], // green
+      [101, 102.5, 100.8, 102], // green continues → plain bullish OCL @101
+      [102, 102.4, 101.6, 102.2]
+    ])
+    expect(analyzeSmc(c, '15m', cfg()).ocls.filter((o) => o.kind === 'OCL')).toHaveLength(0)
+    expect(analyzeSmc(c, '4h', cfg()).ocls.filter((o) => o.kind === 'OCL')).toHaveLength(0)
+    expect(analyzeSmc(c, '1d', cfg()).ocls.filter((o) => o.kind === 'OCL').length).toBeGreaterThan(0)
   })
 
   it('needs the second candle to have the same colour (no body-size rule)', () => {
@@ -114,7 +125,7 @@ describe('OCL (§6)', () => {
       [100, 101, 97, 100.5], // green → not an OCL pair
       [100.5, 101, 99, 99.5]
     ])
-    expect(analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))).toBeUndefined()
+    expect(analyzeSmc(c, '1d', cfg()).ocls.find((x) => x.t === at(0))).toBeUndefined()
   })
 })
 
