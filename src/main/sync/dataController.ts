@@ -119,6 +119,14 @@ export class DataController {
     this.post({ type: 'bot-cancel', id })
   }
 
+  botRetry(id: string): void {
+    this.post({ type: 'bot-retry', id })
+  }
+
+  botClose(id: string): void {
+    this.post({ type: 'bot-close', id })
+  }
+
   botResetPaper(): void {
     this.post({ type: 'bot-reset-paper' })
   }

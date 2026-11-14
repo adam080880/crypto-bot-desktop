@@ -20,6 +20,45 @@ export interface OrderPlan {
   leverage: number
 }
 
+/** One Binance leverage bracket (GET /fapi/v1/leverageBracket). */
+export interface LeverageBracket {
+  initialLeverage: number
+  notionalFloor: number
+  notionalCap: number
+  maintMarginRatio: number
+}
+
+/** Liquidation must sit at least this many SL distances away from the entry. */
+export const LIQ_BUFFER = 1.5
+
+/**
+ * Highest leverage that is still safe: capped by the config (`cap`) and the symbol's bracket for this
+ * notional, and low enough that the isolated liquidation price stays beyond the SL.
+ * Isolated liquidation ≈ entry × (1 ∓ (1/L − mmr)), so we need 1/L − mmr ≥ LIQ_BUFFER × SL distance
+ * (+ fees). Margin = notional ÷ L; the loss at the SL does not depend on L (risk sizing).
+ * Returns a reason string when even the minimum leverage needed for the margin isn't safe.
+ */
+export function pickLeverage(p: {
+  entry: number
+  sl: number
+  notional: number
+  equity: number
+  cap: number
+  brackets: LeverageBracket[]
+  feePct: number
+}): { leverage: number; liqDistPct: number; marginUsd: number } | string {
+  const b = p.brackets.find((x) => p.notional >= x.notionalFloor && p.notional < x.notionalCap) ?? p.brackets[0]
+  const bracketMax = b?.initialLeverage ?? p.cap
+  const mmr = b?.maintMarginRatio ?? 0.01
+  const d = Math.abs(p.entry - p.sl) / p.entry
+  const safe = Math.floor(1 / (mmr + LIQ_BUFFER * d + p.feePct / 100))
+  const lev = Math.max(1, Math.min(p.cap, bracketMax, safe))
+  // margin must fit in the equity
+  const need = Math.max(1, Math.ceil(p.notional / p.equity))
+  if (lev < need) return `leverage aman maks ${lev}× (likuidasi harus lewat SL), tapi margin butuh ≥ ${need}×`
+  return { leverage: lev, liqDistPct: (1 / lev - mmr) * 100, marginUsd: p.notional / lev }
+}
+
 /** Plain decimal string for the API (never exponent notation like 1e-7). */
 export const fmtStep = (x: number, step: number): string => x.toFixed(decimals(step))
 

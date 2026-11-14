@@ -1,4 +1,4 @@
-import type { Setup, SetupStatus } from '@shared/smc'
+import { setupPoiLabel, type Setup, type SetupStatus } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { formatTime } from '@/lib/utils'
 
@@ -50,7 +50,7 @@ export function SetupList({ setups }: { setups: Setup[] }) {
                   {s.direction === 'bullish' ? 'LONG' : 'SHORT'}
                 </td>
                 <td className="px-3 py-1">
-                  {s.poi.kind} {s.poi.timeframe}
+                  {setupPoiLabel(s.model, s.poi.kind)} {s.poi.timeframe}
                 </td>
                 <td className="px-3 py-1">{px(s.entry)}</td>
                 <td className="px-3 py-1">{px(s.sl)}</td>

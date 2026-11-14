@@ -171,6 +171,24 @@ describe('BotService (paper, end to end)', () => {
     expect(states.at(-1)!.trades[0]).toMatchObject({ status: 'pending', model: 'M1', analysisId: null, confidence: null })
   })
 
+  it('retry: a failed entry is re-checked through the gates and placed again', async () => {
+    const { db, bot, row } = setup({}, { requireClaude: false })
+    await bot.onScreener([row])
+    const first = db.$client.prepare(`SELECT id FROM bot_trades`).pluck().get() as string
+    // pretend the exchange refused it
+    const t = JSON.parse(db.$client.prepare(`SELECT payload FROM bot_trades WHERE id = ?`).pluck().get(first) as string)
+    db.$client.prepare(`UPDATE bot_trades SET status = 'cancelled', payload = ? WHERE id = ?`).run(JSON.stringify({ ...t, status: 'cancelled', reason: 'error' }), first)
+    await bot.retryById(first)
+    const rows = db.$client.prepare(`SELECT status, json_extract(payload, '$.reason') AS reason FROM bot_trades ORDER BY created_at`).all()
+    expect(rows).toEqual([
+      { status: 'cancelled', reason: 'retried' },
+      { status: 'pending', reason: null }
+    ])
+    // retrying a non-error row does nothing
+    await bot.retryById(first)
+    expect(db.$client.prepare(`SELECT count(*) FROM bot_trades`).pluck().get()).toBe(2)
+  })
+
   it('tiered exit: 1R → BE incl. fee, 3R → half off + SL to 1R, rest stopped in profit', async () => {
     const { bot, row } = setup({}, { requireClaude: false })
     const states: import('@shared/bot').BotState[] = []

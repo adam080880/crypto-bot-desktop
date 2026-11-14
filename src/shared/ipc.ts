@@ -63,6 +63,8 @@ export interface IpcInvokeMap {
   'bot:get': { req: void; res: BotState | null }
   'bot:setLive': { req: { live: boolean; confirm?: string }; res: AppConfig }
   'bot:cancel': { req: { id: string }; res: void }
+  'bot:retry': { req: { id: string }; res: void }
+  'bot:close': { req: { id: string }; res: void }
   'bot:resetPaper': { req: void; res: void }
   'bot:testConnection': { req: void; res: ConnTestResult }
   'config:get': { req: void; res: AppConfig }
@@ -126,6 +128,7 @@ export interface IpcEventMap {
   'claude:changed': { at: number }
   'screener:state': ScreenerState
   'bot:state': BotState
+  'config:changed': AppConfig
   'backtest:progress': BacktestProgress
   'storage:progress': { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }
 }
@@ -149,6 +152,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'bot:get',
   'bot:setLive',
   'bot:cancel',
+  'bot:retry',
+  'bot:close',
   'bot:resetPaper',
   'bot:testConnection',
   'config:get',
@@ -187,4 +192,4 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'storage:plan',
   'storage:move'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'backtest:progress', 'storage:progress']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'config:changed', 'backtest:progress', 'storage:progress']

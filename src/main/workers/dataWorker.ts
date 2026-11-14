@@ -215,6 +215,12 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
     case 'bot-cancel':
       void bot.cancelById(msg.id)
       break
+    case 'bot-retry':
+      void bot.retryById(msg.id)
+      break
+    case 'bot-close':
+      void bot.closeById(msg.id)
+      break
     case 'bot-reset-paper':
       bot.resetPaper()
       break

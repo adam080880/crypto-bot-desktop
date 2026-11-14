@@ -1,6 +1,6 @@
 /** Pure stats over Backtest v2 results (renderer filters + tests). No Node imports. */
 import type { BtResult, BtSetup, PeriodKey } from './backtest'
-import type { Confluence, Dir, EntryModel } from './smc'
+import { poiConcept, type Confluence, type Dir, type EntryModel } from './smc'
 
 export interface BtFilter {
   models: EntryModel[]
@@ -13,7 +13,8 @@ export interface BtFilter {
   minScore: number
 }
 
-export const poiKey = (s: Pick<BtSetup, 'poiKind' | 'poiTf'>): string => `${s.poiKind}|${s.poiTf}`
+/** Filter/profile key of the parent POI; M4 is "BREAKER|tf" (its parent OB got broken). */
+export const poiKey = (s: Pick<BtSetup, 'model' | 'poiKind' | 'poiTf'>): string => `${poiConcept(s.model, s.poiKind)}|${s.poiTf}`
 
 export function applyFilter(setups: readonly BtSetup[], f: BtFilter): BtSetup[] {
   return setups.filter(

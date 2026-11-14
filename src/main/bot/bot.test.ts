@@ -5,7 +5,7 @@ import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { BinanceApiError, isCryptoPerp, topCrypto, type ExchangeSymbol } from './binanceTrade'
 import { LiveBroker, PaperBroker, paperPnl } from './brokers'
 import { accountGate, claudeGate, setupGate, type Candidate } from './gate'
-import { planOrder, roundStep } from './sizing'
+import { pickLeverage, planOrder, roundStep } from './sizing'
 
 const RULES = { tickSize: 0.001, stepSize: 1, minQty: 1, minNotional: 5 }
 const FEE = 0.09
@@ -240,5 +240,121 @@ describe('LiveBroker.moveStop (algo orders cannot be modified → cancel + place
     const { broker, calls } = fake(2)
     await expect(broker.moveStop(t, 100.1, RULES)).rejects.toThrow(/ditutup market/)
     expect(calls).toContain('marketClose')
+  })
+})
+
+describe('LiveBroker SL after fill (Binance -4509: closePosition stop needs an open position)', () => {
+  const pend = { id: 'y', symbol: 'AAAUSDT', direction: 'bullish', entry: 100, sl: 99, tp: 105, qty: 10, status: 'pending', createdAt: 0, filledAt: null, entryOrderId: 'smc-y-e', slOrderId: null, tpOrderId: null } as unknown as BotTrade
+  const fake = (o: { status: string; executedQty: string }, slFails = false) => {
+    const calls: string[] = []
+    const client = {
+      setIsolated: async () => undefined,
+      setLeverage: async () => undefined,
+      limitEntry: async () => (calls.push('entry'), { status: 'NEW', executedQty: '0' }),
+      getOrder: async () => ({ ...o, updateTime: 5 }),
+      stopLoss: async (p: { clientId: string }) => {
+        calls.push(`sl ${p.clientId}`)
+        if (slFails) throw new BinanceApiError(-2021, 'would immediately trigger', '/fapi/v1/algoOrder')
+        return { algoId: 1, clientAlgoId: p.clientId }
+      },
+      limitTakeProfit: async (p: { clientId: string }) => void calls.push(`tp ${p.clientId}`),
+      cancelOrder: async () => (calls.push('cancelEntry'), null),
+      cancelAll: async () => void calls.push('cancelAll'),
+      position: async () => ({ positionAmt: '10' }),
+      marketClose: async () => void calls.push('marketClose'),
+      realised: async () => ({ pnl: -1.2, lastPrice: 98.9, lastTime: 9 })
+    }
+    return { broker: new LiveBroker(client as never), calls }
+  }
+
+  it('open() places only the limit entry, no stop yet', async () => {
+    const { broker, calls } = fake({ status: 'NEW', executedQty: '0' })
+    const plan = { entry: 100, sl: 99, qty: 10, leverage: 2 } as never
+    expect(await broker.open(pend, plan, RULES)).toEqual({ entryOrderId: 'smc-y-e', slOrderId: null })
+    expect(calls).toEqual(['entry'])
+  })
+
+  it('on fill: SL first, then TP', async () => {
+    const { broker, calls } = fake({ status: 'FILLED', executedQty: '10' })
+    expect(await broker.sync(pend, null, RULES)).toMatchObject({ status: 'open', slOrderId: 'smc-y-s', tpOrderId: 'smc-y-t0' })
+    expect(calls).toEqual(['sl smc-y-s', 'tp smc-y-t0'])
+  })
+
+  it('partial fill still working: SL goes on right away', async () => {
+    const { broker, calls } = fake({ status: 'PARTIALLY_FILLED', executedQty: '4' })
+    expect(await broker.sync(pend, null, RULES)).toEqual({ slOrderId: 'smc-y-s' })
+    expect(calls).toEqual(['sl smc-y-s'])
+  })
+
+  it('SL refused after fill → cancel rest, close at market, book as closed', async () => {
+    const { broker, calls } = fake({ status: 'FILLED', executedQty: '10' }, true)
+    const r = await broker.sync(pend, null, RULES)
+    expect(r).toMatchObject({ status: 'closed', exitPrice: 98.9, pnl: -1.2 })
+    expect(calls).toEqual(['sl smc-y-s', 'cancelEntry', 'cancelAll', 'marketClose'])
+  })
+
+  it('open position without a stop (restart between fill and SL) gets one', async () => {
+    const { broker, calls } = fake({ status: 'FILLED', executedQty: '10' })
+    expect(await broker.sync({ ...pend, status: 'open' } as BotTrade, null, RULES)).toEqual({ slOrderId: 'smc-y-s' })
+    expect(calls).toEqual(['sl smc-y-s'])
+  })
+})
+
+describe('pickLeverage (as high as safe; liquidation beyond the SL)', () => {
+  const BR = [
+    { initialLeverage: 50, notionalFloor: 0, notionalCap: 5000, maintMarginRatio: 0.01 },
+    { initialLeverage: 20, notionalFloor: 5000, notionalCap: 25000, maintMarginRatio: 0.025 }
+  ]
+  const fee = 0.09
+
+  it('tight SL → bracket max (50×), margin = notional ÷ 50', () => {
+    // SL 0.3 %: safe = 1 / (1 % + 0.45 % + 0.09 %) = 64 → bracket 50
+    const r = pickLeverage({ entry: 100, sl: 99.7, notional: 60, equity: 23, cap: 100, brackets: BR, feePct: fee })
+    expect(r).toMatchObject({ leverage: 50 })
+    expect((r as { marginUsd: number }).marginUsd).toBeCloseTo(1.2)
+  })
+
+  it('wider SL → lower leverage so liquidation stays ≥ 1.5 SL distances away', () => {
+    // SL 2 %: safe = floor(1 / (1 % + 3 % + 0.09 %)) = 24
+    const r = pickLeverage({ entry: 100, sl: 98, notional: 60, equity: 23, cap: 100, brackets: BR, feePct: fee }) as { leverage: number; liqDistPct: number }
+    expect(r.leverage).toBe(24)
+    expect(r.liqDistPct).toBeGreaterThan(2 * 1.5)
+  })
+
+  it('config cap and the bracket of the notional both apply', () => {
+    expect(pickLeverage({ entry: 100, sl: 99.9, notional: 60, equity: 23, cap: 10, brackets: BR, feePct: fee })).toMatchObject({ leverage: 10 })
+    expect(pickLeverage({ entry: 100, sl: 99.9, notional: 6000, equity: 1000, cap: 100, brackets: BR, feePct: fee })).toMatchObject({ leverage: 20 })
+  })
+
+  it('refuses when the margin would need more leverage than is safe', () => {
+    // SL 5 %: safe = floor(1 / (1 % + 7.5 % + 0.09 %)) = 11, but notional 300 on equity 23 needs 14×
+    expect(pickLeverage({ entry: 100, sl: 95, notional: 300, equity: 23, cap: 100, brackets: BR, feePct: fee })).toMatch(/aman maks 11×/)
+  })
+})
+
+describe('LiveBroker.closeNow (manual)', () => {
+  const mk = (pos: boolean) => {
+    const calls: string[] = []
+    const client = {
+      cancelOrder: async () => (calls.push('cancelEntry'), null),
+      position: async () => (pos ? { positionAmt: '-255' } : null),
+      marketClose: async (_s: string, q: number) => void calls.push(`market ${q}`),
+      cancelAll: async () => void calls.push('cancelAll'),
+      realised: async () => ({ pnl: 0.4, lastPrice: 0.548, lastTime: 7 })
+    }
+    return { broker: new LiveBroker(client as never), calls }
+  }
+  const t = { id: 'z', symbol: 'ETHFIUSDT', direction: 'bearish', status: 'open', entryOrderId: 'smc-z-e', createdAt: 0, filledAt: 1 } as unknown as BotTrade
+
+  it('open: market close while the SL is still there, then remove SL/TP', async () => {
+    const { broker, calls } = mk(true)
+    expect(await broker.closeNow(t)).toMatchObject({ status: 'closed', reason: 'manual-close', pnl: 0.4 })
+    expect(calls).toEqual(['market -255', 'cancelAll'])
+  })
+
+  it('pending without fill: just cancelled', async () => {
+    const { broker, calls } = mk(false)
+    expect(await broker.closeNow({ ...t, status: 'pending' } as BotTrade)).toMatchObject({ status: 'cancelled', reason: 'manual' })
+    expect(calls).toEqual(['cancelEntry', 'cancelAll'])
   })
 })

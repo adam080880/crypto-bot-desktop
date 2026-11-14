@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { BotEventLevel, BotState, BotTrade } from '@shared/bot'
 import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
-import { MODEL_LABEL, POI_LABEL } from '@shared/smc'
+import { MODEL_LABEL, setupPath } from '@shared/smc'
 import type { ScreenerRow } from '@shared/screener'
 import { TF_MS } from '@shared/timeframes'
 import type { Db } from '../db/client'
@@ -15,7 +15,7 @@ import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from '.
 import { accountGate, candidatesOf, claudeGate, knownAt, planTpFor, setupGate, type Candidate } from './gate'
 import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
-import { planOrder, roundStep, type SymbolRules } from './sizing'
+import { pickLeverage, planOrder, roundStep, type LeverageBracket, type SymbolRules } from './sizing'
 import { ExitTracker } from '../strategy/exit'
 
 const log = logger('bot')
@@ -64,6 +64,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   private rules = new Map<string, SymbolRules>()
   private universeAt: number | null = null
   private bars = new Map<string, Bar>()
+  private lastPx = new Map<string, number>()
   private lastRows: ScreenerRow[] = []
   private awaiting = new Set<string>()
   private requested = new Set<string>()
@@ -120,6 +121,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     const c = new BinanceTradeClient(k.key, k.secret)
     await c.syncTime()
     if (await c.isHedgeMode()) return 'akun Binance di Hedge Mode; bot butuh One-way Mode'
+    if (await c.isMultiAssets()) return 'akun Binance di Multi-Assets Mode; bot butuh Single-Asset Mode (isolated margin)'
     this.live = new LiveBroker(c)
     this.liveChecked = true
     return null
@@ -129,6 +131,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
 
   /** Every live 1m kline message (forming or closed) for streamed symbols. */
   onKline(symbol: string, h: number, l: number, c: number): void {
+    this.lastPx.set(symbol, c)
     const b = this.bars.get(symbol)
     if (b) {
       b.high = Math.max(b.high, h)
@@ -227,6 +230,54 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   async cancelById(id: string): Promise<void> {
     const t = this.repo.active().find((x) => x.id === id)
     if (t?.status === 'pending') await this.cancelTrade(t, 'manual')
+    this.publish()
+  }
+
+  /**
+   * Retry an entry that failed to place (status cancelled, reason 'error'). Not a blind resend: the row
+   * is marked 'retried' and the setup goes through every gate again with current data.
+   */
+  async retryById(id: string): Promise<void> {
+    const t = this.repo.get(id)
+    if (!t || t.status !== 'cancelled' || t.reason !== 'error') return
+    const dir = t.direction === 'bullish' ? 'LONG' : 'SHORT'
+    this.repo.save({ ...t, reason: 'retried' })
+    const mode = this.mode()
+    const key = `${t.setupId}|${mode}`
+    const stillThere = candidatesOf(this.lastRows).some((c) => c.setup.id === t.setupId)
+    if (!this.deps.getBot().enabled) this.event('warn', t.symbol, `Retry ${dir}: bot lagi mati, start dulu`)
+    else if (!stillThere) this.event('warn', t.symbol, `Retry ${dir}: setup sudah nggak ada / nggak pending lagi di scan terakhir, nggak dipasang`)
+    else {
+      this.event('info', t.symbol, `Retry ${dir}: setup dicek ulang`)
+      this.logged.delete(key)
+      while (this.busy) await new Promise((r) => setTimeout(r, 200))
+      await this.evaluate()
+      if (!this.repo.hasSetup(t.setupId, mode)) {
+        const why = this.logged.get(key) ?? 'syarat entry nggak terpenuhi sekarang'
+        this.event('warn', t.symbol, `Retry ${dir}: nggak dipasang (${why})`)
+      }
+    }
+    this.publish()
+  }
+
+  /** Manual close from the UI: pending → cancel the limit, open → close at market (SL stays until flat). */
+  async closeById(id: string): Promise<void> {
+    const t = this.repo.active().find((x) => x.id === id)
+    const b = t && this.broker(t.mode)
+    if (!t || !b) return
+    const dir = t.direction === 'bullish' ? 'LONG' : 'SHORT'
+    try {
+      const patch = await b.closeNow(t, this.lastPx.get(t.symbol) ?? null)
+      const next = { ...t, ...patch }
+      this.repo.save(next)
+      this.trackers.delete(t.id)
+      this.equityCache = null
+      if (next.status === 'closed') this.event('warn', t.symbol, `${dir} ditutup manual (market) @${next.exitPrice ?? '?'} · PnL ${(next.pnl ?? 0).toFixed(3)} USDT`)
+      else this.event('order', t.symbol, `${dir} limit dibatalkan manual`)
+    } catch (err) {
+      this.event('error', t.symbol, `close manual ${dir} gagal: ${(err as Error).message}`)
+    }
+    this.updateStreams()
     this.publish()
   }
 
@@ -469,6 +520,16 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       feePct: FEES.makerPct + FEES.takerPct + FEES.slippagePct
     })
     if (typeof plan === 'string') return this.skip(`${c.setup.id}|${mode}`, c.symbol, `${dirLabel} dilewati: ${plan}`)
+    // leverage as high as is safe (margin = notional ÷ leverage; the loss at the SL stays = risk %)
+    let brackets: LeverageBracket[] = []
+    try {
+      brackets = await this.broker(mode)!.leverageBrackets(c.symbol)
+    } catch (err) {
+      return this.skip(`${c.setup.id}|${mode}`, c.symbol, `${dirLabel} dilewati: bracket leverage gagal diambil (${(err as Error).message})`)
+    }
+    const lev = pickLeverage({ entry: plan.entry, sl: plan.sl, notional: plan.notional, equity, cap: risk.maxLeverage, brackets, feePct: FEES.makerPct + FEES.takerPct + FEES.slippagePct })
+    if (typeof lev === 'string') return this.skip(`${c.setup.id}|${mode}`, c.symbol, `${dirLabel} dilewati: ${lev}`)
+    plan.leverage = lev.leverage
     const id = randomUUID().replace(/-/g, '').slice(0, 20)
     const trade: BotTrade = {
       id,
@@ -527,10 +588,15 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       return
     }
     this.repo.save(trade)
+    if (trade.status === 'closed') {
+      this.event('error', c.symbol, `${dirLabel} langsung terisi tapi SL gagal dipasang, posisi ditutup market (${trade.reason})`)
+      this.updateStreams()
+      return
+    }
     this.event(
       'order',
       c.symbol,
-      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} · TP ${plan.tp ?? 'trailing'} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}×) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${POI_LABEL[c.setup.poi.kind]} ${c.setup.poi.timeframe} → ${c.setup.child.kind} ${c.setup.child.timeframe} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
+      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} · TP ${plan.tp ?? 'trailing'} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}× · margin ${lev.marginUsd.toFixed(2)} · likuidasi ±${lev.liqDistPct.toFixed(1)}%) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${setupPath(c.setup.model, c.setup.poi.kind, c.setup.poi.timeframe, c.setup.child.kind, c.setup.child.timeframe)} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
     )
     this.updateStreams()
   }

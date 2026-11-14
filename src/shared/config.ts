@@ -327,6 +327,25 @@ export const configPatchSchema = appConfigSchema
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** Keep only the keys that exist in `raw` (recursively for plain objects). */
+function onlyGiven(parsed: unknown, raw: unknown): unknown {
+  if (!isPlainObject(parsed) || !isPlainObject(raw)) return parsed
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(raw)) if (k in parsed) out[k] = onlyGiven(parsed[k], raw[k])
+  return out
+}
+
+/**
+ * Validate a partial config update. Zod 4 still applies `.default()` inside `.partial()`, so a plain
+ * parse of `{ bot: { enabled: true } }` comes back with every other bot field reset to its default
+ * (that silently reset riskPerTradePct to 1 on "Start bot"). Only the keys the caller sent are kept.
+ */
+export function parseConfigPatch(raw: unknown): ConfigPatch {
+  return onlyGiven(configPatchSchema.parse(raw), raw) as ConfigPatch
+}
+
 /** True if a symbol should be synced/traded according to the data config. */
 export function isSymbolAllowed(symbol: string, data: Pick<DataConfig, 'excludeSymbols' | 'excludeNonAscii'>): boolean {
   if (data.excludeSymbols.includes(symbol)) return false

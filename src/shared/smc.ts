@@ -141,6 +141,23 @@ export const POI_LABEL: Record<PoiKind, string> = {
 }
 
 /**
+ * Display name of a setup's parent POI. In M4 the parent is an order block that got broken, i.e. a
+ * breaker — never shown as "OB" (an OB that failed is not an order block any more).
+ */
+export const setupPoiLabel = (model: string, kind: PoiKind): string => CONCEPT_LABEL[poiConcept(model, kind)]
+
+/** Concept used for labels and filters: a breaker is its own concept, never lumped in with "OB". */
+export type PoiConcept = PoiKind | 'BREAKER'
+export const poiConcept = (model: string, kind: PoiKind): PoiConcept => (model === 'M4' ? 'BREAKER' : kind)
+export const CONCEPT_LABEL: Record<PoiConcept, string> = { ...POI_LABEL, BREAKER: 'Breaker' }
+
+/** "OB 4h → QM 15m"; M4 is just "Breaker 15m". */
+export function setupPath(model: string, poiKind: PoiKind, poiTf: string, childKind: string, childTf: string): string {
+  if (model === 'M4') return `Breaker ${childTf}`
+  return `${POI_LABEL[poiKind]} ${poiTf} → ${childKind === 'BREAKER' ? 'Breaker' : childKind} ${childTf}`
+}
+
+/**
  * Why a POI exists (docs/entry-v2.md §1): it formed because liquidity was swept, or because price
  * tapped an active POI of a higher timeframe. A POI without an origin is not traded.
  */

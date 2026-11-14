@@ -50,7 +50,14 @@ export class BotRepo {
 
   /** Setups already acted on in this mode (never enter the same setup twice). */
   hasSetup(setupId: string, mode: string): boolean {
-    return !!this.c.prepare(`SELECT 1 FROM bot_trades WHERE setup_id = ? AND mode = ? LIMIT 1`).get(setupId, mode)
+    return !!this.c
+      .prepare(`SELECT 1 FROM bot_trades WHERE setup_id = ? AND mode = ? AND NOT (status = 'cancelled' AND json_extract(payload, '$.reason') = 'retried') LIMIT 1`)
+      .get(setupId, mode)
+  }
+
+  get(id: string): BotTrade | null {
+    const p = this.c.prepare(`SELECT payload FROM bot_trades WHERE id = ?`).pluck().get(id) as string | undefined
+    return p ? normalizeTrade(JSON.parse(p)) : null
   }
 
   pnlSince(mode: string, t: number): number {

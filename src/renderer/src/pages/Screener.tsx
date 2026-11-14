@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Play, ScanSearch } from 'lucide-react'
 import type { ScreenerConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerState } from '@shared/screener'
-import type { Dir, PoiKind } from '@shared/smc'
+import { poiConcept, setupPoiLabel, type Dir, type PoiConcept } from '@shared/smc'
 import { TF_MS } from '@shared/timeframes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,15 +32,16 @@ const tfMatch = (r: ScreenerRow, f: TfFilter): boolean => {
 }
 
 /** SMC concept (POI kind) of the row: the setup's POI, else the nearest active POI. */
-const KINDS: { key: PoiKind; label: string }[] = [
+const KINDS: { key: PoiConcept; label: string }[] = [
   { key: 'OB', label: 'OB' },
+  { key: 'BREAKER', label: 'Breaker' },
   { key: 'RBS', label: 'RBS' },
   { key: 'SBR', label: 'SBR' },
   { key: 'QM', label: 'QM' },
   { key: 'OCL', label: 'OCL' },
   { key: 'OCL_BREAK', label: 'OCL break' }
 ]
-const poiKind = (r: ScreenerRow): PoiKind | null => r.setup?.poi.kind ?? r.nearPoi?.kind ?? null
+const poiKind = (r: ScreenerRow): PoiConcept | null => (r.setup ? poiConcept(r.setup.model, r.setup.poi.kind) : r.nearPoi?.kind ?? null)
 
 type Criterion = 'setup' | 'nearPoi' | 'trend' | 'bos'
 const CRITERIA: { key: Criterion; label: string; test: (r: ScreenerRow) => boolean }[] = [
@@ -183,7 +184,7 @@ export function Screener() {
   const [entry, setEntry] = useState<EntryFilter>('all')
   const [tfF, setTfF] = useState<TfFilter>('all')
   // empty = every concept
-  const [kinds, setKinds] = useState<Set<PoiKind>>(new Set())
+  const [kinds, setKinds] = useState<Set<PoiConcept>>(new Set())
   const [now, setNow] = useState(Date.now())
   // null = screener ranking (setup first, more criteria, closer POI)
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null)
@@ -219,7 +220,7 @@ export function Screener() {
 
   const counts = useMemo(() => Object.fromEntries(CRITERIA.map((c) => [c.key, (st?.rows ?? []).filter(c.test).length])), [st])
   const kindCounts = useMemo(() => {
-    const m: Partial<Record<PoiKind, number>> = {}
+    const m: Partial<Record<PoiConcept, number>> = {}
     for (const r of st?.rows ?? []) {
       const k = poiKind(r)
       if (k) m[k] = (m[k] ?? 0) + 1
@@ -408,7 +409,7 @@ export function Screener() {
                           <span className="inline-flex items-center gap-1.5">
                             <Badge variant="warn">{s.status === 'triggered' ? 'kena entry' : 'pending'}</Badge>
                             <span className="text-muted-foreground">
-                              {s.poi.kind} {s.poi.timeframe} · skor {s.score} · {ago(s.createdT, now)} lalu
+                              {setupPoiLabel(s.model, s.poi.kind)} {s.poi.timeframe} · skor {s.score} · {ago(s.createdT, now)} lalu
                             </span>
                           </span>
                         ) : (

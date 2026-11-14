@@ -116,9 +116,16 @@ dites ke exchange beneran.
   `maxAnalysisAgeMin`, bias searah, confidence ≥ `minConfidence`, bukan forcedSkip. Kalau belum ada,
   bot memanggil `analyst.runFor(symbols)` (trigger `bot`, kena batas biaya harian Claude).
 - Order live: isolated margin, One-way Mode (Hedge Mode ditolak), limit entry **post-only (GTX)**, SL
-  **STOP_MARKET closePosition** lewat **Algo Order API** (`/fapi/v1/algoOrder`), dipasang langsung setelah
-  entry. Kalau SL gagal, entry dibatalkan. TP = limit reduce-only setelah fill. Pending dibatalkan
+  **STOP_MARKET closePosition** lewat **Algo Order API** (`/fapi/v1/algoOrder`). Binance menolak SL closePosition
+  sebelum ada posisi (-4509), jadi (keputusan user 2026-11-14) SL dipasang **begitu fill terdeteksi** (tick 5 dtk,
+  termasuk partial fill, dan saat restart kalau posisi belum ber-SL). Kalau SL gagal → sisa entry dibatalkan,
+  posisi ditutup market. Akun wajib **Single-Asset Mode** (Multi-Assets menolak isolated, -4168). Trade error bisa
+  di-**Retry** dari Riwayat: baris ditandai `retried`, setup dicek ulang lewat semua gate (bukan kirim ulang buta). TP = limit reduce-only setelah fill. Pending dibatalkan
   kalau lewat TP / expired / Kill Switch. Posisi terbuka tetap dijaga SL+TP saat Kill Switch.
+- **Leverage = setinggi yang aman** (keputusan user 2026-11-14, `sizing.ts pickLeverage`): min(`risk.maxLeverage`,
+  bracket simbol `/fapi/v1/leverageBracket`, batas likuidasi). Syarat: 1/L − mmr ≥ 1,5 × jarak SL + fee, jadi likuidasi
+  isolated selalu jauh di belakang SL. Margin = notional ÷ L; rugi di SL tetap = risk%. Kalau margin butuh leverage
+  di atas batas aman → setup dilewati.
 - Satu posisi per koin, `risk.maxOpenPositions`, berhenti sisa hari UTC kalau rugi ≥ `maxDailyLossPct`,
   tidak entry di news window. Order di bawah min notional Binance dilewati, bukan diperbesar.
 - Universe di-stream live (LiveSources.bot) supaya data screener segar. Event `kline` LiveService dipakai
@@ -251,6 +258,8 @@ pnpm data:backfill --verify      # cocokkan resample dengan kline asli Binance
 - better-sqlite3 v13 memakai N-API dengan binary prebuilt per OS (tidak perlu rebuild). `pnpm test` dan
   CLI tetap jalan lewat `ELECTRON_RUN_AS_NODE=1 electron ...` supaya runtime-nya sama dengan app.
 - Pakai TypeScript 5.9 (bukan 7), demi kompatibilitas tooling.
+- **Zod 4 tetap mengisi `.default()` di dalam `.partial()`**. Patch config wajib lewat `parseConfigPatch()`
+  (cuma key yang dikirim yang dipakai). Dulu tombol Start bot mereset `riskPerTradePct` dll. ke default.
 - Setelah mengubah `src/main/db/schema.ts`: `pnpm db:generate`. Tabel candle: edit SQL manual.
 - Logger modul (`logger('x')`) boleh dibuat saat import; dia ikut root logger yang aktif saat menulis log.
 - **Jangan `pkill` semua Electron proyek ini**, karena itu ikut mematikan `yarn dev`/`pnpm dev` milik

@@ -54,6 +54,8 @@ export type ToWorker =
   | { type: 'screener-run' }
   | { type: 'bot-kill' }
   | { type: 'bot-cancel'; id: string }
+  | { type: 'bot-retry'; id: string }
+  | { type: 'bot-close'; id: string }
   | { type: 'bot-reset-paper' }
 
 export type FromWorker =

@@ -115,7 +115,8 @@ export async function testBinanceConnection(keys: { key: string; secret: string 
       checks.push(
         await step('mode', 'Position mode', async () => {
           if (await c.isHedgeMode()) throw new Error('Hedge Mode aktif, bot butuh One-way Mode')
-          return 'One-way Mode'
+          if (await c.isMultiAssets()) throw new Error('Multi-Assets Mode aktif, bot butuh Single-Asset Mode (isolated margin)')
+          return 'One-way · Single-Asset'
         })
       )
     }

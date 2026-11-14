@@ -61,6 +61,8 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       bot: { ...this.config.bot, ...(patch.bot ?? {}) },
       exit: { ...this.config.exit, ...(patch.exit ?? {}) }
     })
+    if (next.bot.riskPerTradePct !== this.config.bot.riskPerTradePct)
+      log.info({ from: this.config.bot.riskPerTradePct, to: next.bot.riskPerTradePct, patchKeys: Object.keys(patch.bot ?? {}) }, 'bot.riskPerTradePct changed')
     this.config = next
     writeSetting(this.db, 'app_config', next)
     this.patch({ mode: next.mode })

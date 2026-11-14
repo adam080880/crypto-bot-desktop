@@ -1,7 +1,7 @@
 import type { CoinProfile } from '@shared/backtest'
 import type { BotConfig, ExitConfig, RiskConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
-import { MODEL_LABEL, POI_LABEL } from '@shared/smc'
+import { MODEL_LABEL, poiConcept, setupPoiLabel } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 
 export interface AnalysisLite {
@@ -42,9 +42,12 @@ export function setupGate(
   if (!o.universe.has(c.symbol)) return `bukan top ${o.bot.topVolume} crypto by volume`
   const models: string[] = p ? p.models : o.bot.models
   if (!models.includes(s.model)) return `${MODEL_LABEL[s.model]} tidak dipakai bot${p ? ` (profil ${c.symbol})` : ''}`
-  if (p && p.pois.length && !p.pois.includes(`${s.poi.kind}|${s.poi.timeframe}`)) return `POI ${POI_LABEL[s.poi.kind]} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
+  const pk = `${poiConcept(s.model, s.poi.kind)}|${s.poi.timeframe}`
+  // profiles saved before breakers had their own key stored M4 as "OB|tf"
+  if (p && p.pois.length && !p.pois.includes(pk) && !(s.model === 'M4' && p.pois.includes(`OB|${s.poi.timeframe}`)))
+    return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
   if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
-    return `POI ${POI_LABEL[s.poi.kind]} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
+    return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
   const missing = (p ? p.requireConfluence : o.bot.requireConfluence).filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
   const minScore = p ? p.minScore : o.bot.minScore

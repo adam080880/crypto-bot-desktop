@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { FAPI_BASE } from '../exchange/binanceFutures'
 import { HttpError, timeoutSignal, withRetry } from '../exchange/http'
 import { logger } from '../logger'
-import type { SymbolRules } from './sizing'
+import type { LeverageBracket, SymbolRules } from './sizing'
 
 const log = logger('binance-trade')
 
@@ -131,12 +131,32 @@ export class BinanceTradeClient {
     return r.dualSidePosition
   }
 
+  /** Multi-Assets margin mode forbids isolated margin (Binance -4168). */
+  async isMultiAssets(): Promise<boolean> {
+    const r = await this.request<{ multiAssetsMargin: boolean }>('GET', '/fapi/v1/multiAssetsMargin')
+    return r.multiAssetsMargin
+  }
+
   async setIsolated(symbol: string): Promise<void> {
     try {
       await this.request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' })
     } catch (err) {
+      if (err instanceof BinanceApiError && err.code === -4168)
+        throw new Error('akun Binance di Multi-Assets Mode; isolated margin butuh Single-Asset Mode (Binance -4168)')
       if (!(err instanceof BinanceApiError && err.code === -4046)) throw err // -4046 = already isolated
     }
+  }
+
+  /** Leverage brackets of one symbol (signed; max leverage + maintenance margin rate per notional tier). */
+  async leverageBrackets(symbol: string): Promise<LeverageBracket[]> {
+    const r = await this.request<{ symbol: string; brackets: LeverageBracket[] }[] | { symbol: string; brackets: LeverageBracket[] }>('GET', '/fapi/v1/leverageBracket', { symbol })
+    const one = Array.isArray(r) ? r.find((x) => x.symbol === symbol) ?? r[0] : r
+    return (one?.brackets ?? []).map((b) => ({
+      initialLeverage: Number(b.initialLeverage),
+      notionalFloor: Number(b.notionalFloor),
+      notionalCap: Number(b.notionalCap),
+      maintMarginRatio: Number(b.maintMarginRatio)
+    }))
   }
 
   async setLeverage(symbol: string, leverage: number): Promise<void> {

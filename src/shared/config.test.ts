@@ -40,6 +40,13 @@ describe('config patch', () => {
     for (const v of [0, 101, -1]) expect(configPatchSchema.safeParse({ bot: { riskPerTradePct: v } }).success).toBe(false)
   })
 
+  it('a partial patch keeps only the sent keys (zod 4 fills defaults inside partial)', async () => {
+    const { parseConfigPatch } = await import('./config')
+    expect(parseConfigPatch({ bot: { enabled: true } })).toEqual({ bot: { enabled: true } })
+    expect(parseConfigPatch({ screener: { notify: false }, risk: { maxLeverage: 10 } })).toEqual({ screener: { notify: false }, risk: { maxLeverage: 10 } })
+    expect(() => parseConfigPatch({ bot: { riskPerTradePct: 0 } })).toThrow()
+  })
+
   it('never turns live trading on through a config patch', async () => {
     const { configPatchSchema } = await import('./config')
     expect(defaultAppConfig.bot.live).toBe(false)

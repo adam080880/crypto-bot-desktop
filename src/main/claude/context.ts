@@ -1,6 +1,6 @@
 import type { SmcConfig } from '@shared/config'
 import type { EconomicEvent, NewsState } from '@shared/news'
-import type { Dir } from '@shared/smc'
+import { setupPoiLabel, type Dir } from '@shared/smc'
 import type { NewsRepo } from '../news/repo'
 import type { SmcService } from '../strategy/service'
 
@@ -57,7 +57,7 @@ export function symbolContext(smc: SmcService, symbol: string, cfg: SmcConfig, n
   if (active.length) {
     for (const s of active)
       lines.push(
-        `Setup OB valid ${s.direction === 'bullish' ? 'LONG' : 'SHORT'} (${s.status}): entry ${fmtPx(s.entry)} SL ${fmtPx(s.sl)} TP ${fmtPx(s.tp)} RR ${s.rr} skor ${s.score} — POI ${s.poi.kind} ${s.poi.timeframe}`
+        `Setup OB valid ${s.direction === 'bullish' ? 'LONG' : 'SHORT'} (${s.status}): entry ${fmtPx(s.entry)} SL ${fmtPx(s.sl)} TP ${fmtPx(s.tp)} RR ${s.rr} skor ${s.score} — POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe}`
       )
   } else lines.push('Setup OB valid aktif: tidak ada')
   const done = ctx.setups.filter((s) => s.status === 'win' || s.status === 'loss')

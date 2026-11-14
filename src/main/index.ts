@@ -121,7 +121,10 @@ function bootstrap(): void {
     sendAll('app:status', status)
     updatePowerBlocker()
   })
-  state.on('config', updatePowerBlocker)
+  state.on('config', (c) => {
+    updatePowerBlocker()
+    sendAll('config:changed', c)
+  })
   data.start()
 
   app.on('activate', () => main.show())

@@ -1,6 +1,6 @@
 import type { BotTrade } from '@shared/bot'
 import { BinanceApiError, type BinanceTradeClient } from './binanceTrade'
-import { fmtStep, roundStep, type OrderPlan, type SymbolRules } from './sizing'
+import { fmtStep, roundStep, type LeverageBracket, type OrderPlan, type SymbolRules } from './sizing'
 
 /** Price extremes seen since the previous sync (from the live 1m stream). */
 export interface Bar {
@@ -17,7 +17,9 @@ export const FEES = { makerPct: 0.02, takerPct: 0.05, slippagePct: 0.02 }
 export interface Broker {
   readonly mode: 'paper' | 'live'
   equity(): Promise<number>
-  /** Place the limit entry and its SL together. Throws (after cleaning up) if the SL can't be placed. */
+  /** Leverage brackets of a symbol (paper: none → config cap + 1 % maintenance margin assumed). */
+  leverageBrackets(symbol: string): Promise<LeverageBracket[]>
+  /** Place the limit entry (live: SL follows as soon as it fills, see LiveBroker.protect). */
   open(trade: BotTrade, plan: OrderPlan, rules: SymbolRules): Promise<TradePatch>
   /** Cancel a pending entry. A partial fill turns into an open trade (SL stays, TP added). */
   cancel(trade: BotTrade, reason: string, rules: SymbolRules | undefined): Promise<TradePatch>
@@ -25,6 +27,8 @@ export interface Broker {
   sync(trade: BotTrade, bar: Bar | null, rules: SymbolRules | undefined): Promise<TradePatch | null>
   /** Move the stop of an open position (tiered exit / order flow). Never leaves it unprotected. */
   moveStop(trade: BotTrade, sl: number, rules: SymbolRules): Promise<TradePatch>
+  /** Manual: cancel what is still working and close whatever is filled at market (`last` = paper fill). */
+  closeNow(trade: BotTrade, last: number | null): Promise<TradePatch>
   /** Close part of an open position (ladder partial) at about `price`. */
   partialClose(trade: BotTrade, qty: number, price: number, rules: SymbolRules): Promise<TradePatch>
 }
@@ -52,6 +56,10 @@ export class PaperBroker implements Broker {
 
   async equity(): Promise<number> {
     return this.getEquity()
+  }
+
+  async leverageBrackets(): Promise<LeverageBracket[]> {
+    return []
   }
 
   async open(): Promise<TradePatch> {
@@ -89,6 +97,13 @@ export class PaperBroker implements Broker {
     return { sl }
   }
 
+  async closeNow(t: BotTrade, last: number | null): Promise<TradePatch> {
+    if (t.status === 'pending') return { status: 'cancelled', reason: 'manual', closedAt: Date.now() }
+    if (last === null) throw new Error('harga terakhir belum ada, coba lagi sebentar')
+    // market exit: taker fee + slippage, like a stop
+    return { status: 'closed', reason: 'manual-close', closedAt: Date.now(), exitPrice: last, pnl: (t.realized ?? 0) + paperPnl(t, last, true, openQty(t)) }
+  }
+
   async partialClose(t: BotTrade, qty: number, price: number): Promise<TradePatch> {
     // ladder partials are limit-like fills at the step level (maker)
     return { closedQty: (t.closedQty ?? 0) + qty, realized: (t.realized ?? 0) + paperPnl(t, price, false, qty), partials: (t.partials ?? 0) + 1 }
@@ -99,6 +114,7 @@ export class PaperBroker implements Broker {
 export class LiveBroker implements Broker {
   readonly mode = 'live' as const
   private prepared = new Map<string, number>()
+  private brackets = new Map<string, { at: number; v: LeverageBracket[] }>()
 
   constructor(private readonly client: BinanceTradeClient) {}
 
@@ -106,6 +122,18 @@ export class LiveBroker implements Broker {
     return this.client.equity()
   }
 
+  async leverageBrackets(symbol: string): Promise<LeverageBracket[]> {
+    const c = this.brackets.get(symbol)
+    if (c && Date.now() - c.at < 3_600_000) return c.v
+    const v = await this.client.leverageBrackets(symbol)
+    this.brackets.set(symbol, { at: Date.now(), v })
+    return v
+  }
+
+  /**
+   * Places only the limit entry. Binance refuses a closePosition stop while there is no position
+   * (-4509, TIF GTE needs an open position), so the SL goes on as soon as a fill is seen (`protect`).
+   */
   async open(t: BotTrade, plan: OrderPlan, rules: SymbolRules): Promise<TradePatch> {
     if (this.prepared.get(t.symbol) !== plan.leverage) {
       await this.client.setIsolated(t.symbol)
@@ -113,7 +141,6 @@ export class LiveBroker implements Broker {
       this.prepared.set(t.symbol, plan.leverage)
     }
     const entryId = `smc-${t.id}-e`
-    const slId = `smc-${t.id}-s`
     const o = await this.client.limitEntry({
       symbol: t.symbol,
       side: side(t, true),
@@ -123,15 +150,36 @@ export class LiveBroker implements Broker {
     })
     if (o.status === 'EXPIRED' || o.status === 'REJECTED' || o.status === 'EXPIRED_IN_MATCH')
       throw new Error('limit post-only ditolak (harga sudah melewati entry)')
+    const patch: TradePatch = { entryOrderId: entryId, slOrderId: null }
+    // filled right away (can happen between placing and this check): protect immediately
+    if (Number(o.executedQty) > 0) Object.assign(patch, await this.protect({ ...t, ...patch }, rules))
+    return patch
+  }
+
+  /**
+   * Put the closePosition SL on a (partly) filled entry. If the stop can't be placed (price already
+   * beyond it, or any other refusal) the position is closed at market and the trade is booked as
+   * closed — never left without a stop.
+   */
+  private async protect(t: BotTrade, rules: SymbolRules | undefined): Promise<TradePatch> {
+    if (t.slOrderId) return {}
+    const id = `smc-${t.id}-s`
     try {
-      await this.client.stopLoss({ symbol: t.symbol, side: side(t, false), triggerPrice: fmtStep(plan.sl, rules.tickSize), clientId: slId })
+      if (!rules) throw new Error(`aturan order ${t.symbol} belum dimuat`)
+      await this.client.stopLoss({ symbol: t.symbol, side: side(t, false), triggerPrice: fmtStep(t.sl, rules.tickSize), clientId: id })
+      return { slOrderId: id }
     } catch (err) {
-      // never leave an entry without its stop
-      const c = await this.client.cancelOrder(t.symbol, entryId).catch(() => null)
-      if (c && Number(c.executedQty) > 0) await this.flatten(t)
-      throw new Error(`SL gagal dipasang, entry dibatalkan: ${(err as Error).message}`)
+      await this.client.cancelOrder(t.symbol, t.entryOrderId!).catch(() => null)
+      await this.flatten(t)
+      const r = await this.client.realised(t.symbol, (t.filledAt ?? t.createdAt) - 60_000).catch(() => null)
+      return {
+        status: 'closed',
+        reason: `sl-gagal: ${(err as Error).message}`.slice(0, 200),
+        closedAt: r?.lastTime ?? Date.now(),
+        exitPrice: r?.lastPrice ?? null,
+        pnl: r?.pnl ?? 0
+      }
     }
-    return { entryOrderId: entryId, slOrderId: slId }
   }
 
   /** Emergency: close whatever filled with a reduce-only market order (cancelAll first). */
@@ -216,13 +264,29 @@ export class LiveBroker implements Broker {
   }
 
 
+  /**
+   * Manual close. Order matters: the remaining entry is cancelled, then the position is closed with a
+   * reduce-only market order while its SL is still in place, and only then are the SL/TP removed.
+   */
+  async closeNow(t: BotTrade): Promise<TradePatch> {
+    if (t.entryOrderId && t.status === 'pending') await this.client.cancelOrder(t.symbol, t.entryOrderId).catch(() => null)
+    const p = await this.client.position(t.symbol)
+    if (p) await this.client.marketClose(t.symbol, Number(p.positionAmt))
+    await this.client.cancelAll(t.symbol)
+    if (!p && t.status === 'pending') return { status: 'cancelled', reason: 'manual', closedAt: Date.now() }
+    const r = await this.client.realised(t.symbol, (t.filledAt ?? t.createdAt) - 60_000)
+    return { status: 'closed', reason: 'manual-close', closedAt: r.lastTime ?? Date.now(), exitPrice: r.lastPrice, pnl: r.pnl }
+  }
+
   async cancel(t: BotTrade, reason: string, rules: SymbolRules | undefined): Promise<TradePatch> {
     const c = await this.client.cancelOrder(t.symbol, t.entryOrderId!)
     const o = c ?? (await this.client.getOrder(t.symbol, t.entryOrderId!))
     const filled = o ? Number(o.executedQty) : 0
     if (filled > 0) {
+      const sl = await this.protect(t, rules)
+      if (sl.status === 'closed') return sl
       const tpOrderId = await this.placeTp(t, filled, rules)
-      return { status: 'open', filledAt: t.filledAt ?? o!.updateTime, filledQty: filled, tpOrderId }
+      return { ...sl, status: 'open', filledAt: t.filledAt ?? o!.updateTime, filledQty: filled, tpOrderId }
     }
     await this.client.cancelAll(t.symbol) // removes the SL algo order
     return { status: 'cancelled', reason, closedAt: Date.now() }
@@ -233,21 +297,29 @@ export class LiveBroker implements Broker {
       const o = await this.client.getOrder(t.symbol, t.entryOrderId!)
       if (!o) return { status: 'cancelled', reason: 'external', closedAt: Date.now() }
       if (o.status === 'FILLED') {
+        const sl = await this.protect(t, rules)
+        if (sl.status === 'closed') return sl
         const tpOrderId = await this.placeTp(t, Number(o.executedQty), rules)
-        return { status: 'open', filledAt: o.updateTime, filledQty: Number(o.executedQty), tpOrderId }
+        return { ...sl, status: 'open', filledAt: o.updateTime, filledQty: Number(o.executedQty), tpOrderId }
       }
       if (o.status === 'CANCELED' || o.status === 'EXPIRED' || o.status === 'REJECTED' || o.status === 'EXPIRED_IN_MATCH') {
         if (Number(o.executedQty) > 0) {
+          const sl = await this.protect(t, rules)
+          if (sl.status === 'closed') return sl
           const tpOrderId = await this.placeTp(t, Number(o.executedQty), rules)
-          return { status: 'open', filledAt: o.updateTime, filledQty: Number(o.executedQty), tpOrderId }
+          return { ...sl, status: 'open', filledAt: o.updateTime, filledQty: Number(o.executedQty), tpOrderId }
         }
         await this.client.cancelAll(t.symbol)
         return { status: 'cancelled', reason: 'external', closedAt: Date.now() }
       }
+      // partly filled and still working: the filled part needs its stop now (closePosition covers later fills too)
+      if (Number(o.executedQty) > 0 && !t.slOrderId) return this.protect(t, rules)
       return null
     }
     if (t.status === 'open') {
       const p = await this.client.position(t.symbol)
+      // open without a stop (e.g. crash between fill and SL): place it now
+      if (p && !t.slOrderId) return this.protect(t, rules)
       if (p) return null
       // flat: SL or TP done (or closed by hand) → clean up the other leg and book the result
       await this.client.cancelAll(t.symbol)

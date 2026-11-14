@@ -2,7 +2,7 @@ import { app, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from 
 import { is } from '@electron-toolkit/utils'
 import { moveDatabase, planMove, storageInfo } from '../storage'
 import { z } from 'zod'
-import { configPatchSchema } from '@shared/config'
+import { parseConfigPatch } from '@shared/config'
 import { backtestParamsSchema, coinProfileSchema, type CoinProfile } from '@shared/backtest'
 import { deleteProfile, readProfiles, saveProfile } from '../backtest/profiles'
 import { SECRET_NAMES, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc'
@@ -83,6 +83,14 @@ export function registerIpcHandlers(deps: {
     const { id } = z.object({ id: z.string().regex(/^[a-z0-9]{8,40}$/) }).strict().parse(req)
     data.botCancel(id)
   })
+  handle('bot:retry', (req) => {
+    const { id } = z.object({ id: z.string().regex(/^[a-z0-9]{8,40}$/) }).strict().parse(req)
+    data.botRetry(id)
+  })
+  handle('bot:close', (req) => {
+    const { id } = z.object({ id: z.string().regex(/^[a-z0-9]{8,40}$/) }).strict().parse(req)
+    data.botClose(id)
+  })
   handle('bot:resetPaper', () => data.botResetPaper())
   handle('bot:testConnection', () => {
     const key = secrets.get('binance.apiKey')
@@ -90,7 +98,7 @@ export function registerIpcHandlers(deps: {
     return testBinanceConnection(key && secret ? { key, secret } : null)
   })
   handle('config:get', () => state.getConfig())
-  handle('config:update', (req) => state.updateConfig(configPatchSchema.parse(req)))
+  handle('config:update', (req) => state.updateConfig(parseConfigPatch(req)))
 
   handle('secrets:encryptionAvailable', () => secrets.isEncryptionAvailable())
   handle('secrets:list', () => secrets.list())

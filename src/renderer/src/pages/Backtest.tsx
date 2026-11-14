@@ -3,7 +3,7 @@ import { CandlestickChart, ChevronDown, ChevronRight, FlaskConical, Play, Star, 
 import type { BacktestProgress, BacktestResult, BtSetup, CoinProfile, PeriodKey } from '@shared/backtest'
 import { applyFilter, breakdown, byPeriod, metaTable, poiKey, simulateEquity, stats, type BtFilter, type Stats } from '@shared/backtestStats'
 import type { SymbolListItem } from '@shared/ipc'
-import { ENTRY_MODELS, MODEL_LABEL, POI_LABEL, type Confluence, type EntryModel, type PoiKind } from '@shared/smc'
+import { CONCEPT_LABEL, ENTRY_MODELS, MODEL_LABEL, POI_LABEL, setupPath, setupPoiLabel, type PoiConcept, type Confluence, type EntryModel, type PoiKind } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,8 +37,8 @@ const CONF_CHIPS: { key: Confluence; label: string }[] = [
 ]
 const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'model', label: 'Model', of: (s) => s.model },
-  { key: 'poi', label: 'POI induk', of: (s) => `${POI_LABEL[s.poiKind]} ${s.poiTf}` },
-  { key: 'child', label: 'POI anak', of: (s) => `${s.childKind} ${s.childTf}` },
+  { key: 'poi', label: 'POI induk', of: (s) => `${setupPoiLabel(s.model, s.poiKind)} ${s.poiTf}` },
+  { key: 'child', label: 'POI anak', of: (s) => `${s.childKind === 'BREAKER' ? 'Breaker' : s.childKind} ${s.childTf}` },
   { key: 'origin', label: 'Asal POI', of: (s) => s.origin ?? 'tanpa asal' },
   { key: 'score', label: 'Skor', of: (s) => String(s.score).padStart(2, '0') },
   { key: 'btc', label: 'Trend BTC', of: (s) => (s.conf.includes('btc4h') ? 'searah BTC 4h' : s.conf.includes('btcAgainst') ? 'lawan BTC' : 'campur') },
@@ -326,7 +326,7 @@ function Results(p: {
     () =>
       [...new Set(r.setups.map(poiKey))]
         .sort()
-        .map((k) => ({ key: k, label: `${POI_LABEL[k.split('|')[0] as PoiKind]} ${k.split('|')[1]}` })),
+        .map((k) => ({ key: k, label: `${CONCEPT_LABEL[k.split('|')[0] as PoiConcept]} ${k.split('|')[1]}` })),
     [r]
   )
   const childOptions = useMemo(() => [...new Set(r.setups.map((s) => s.childKind))].map((k) => ({ key: k, label: k })), [r])
@@ -628,7 +628,7 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
                   <td className="py-1.5 text-left font-medium" title={MODEL_LABEL[row.model]}>
                     {row.model} {row.robust && <Badge variant="bull">kokoh</Badge>}
                   </td>
-                  <td className="text-left">{`${POI_LABEL[row.poi.split('|')[0] as PoiKind]} ${row.poi.split('|')[1]}`}</td>
+                  <td className="text-left">{`${CONCEPT_LABEL[row.poi.split('|')[0] as PoiConcept]} ${row.poi.split('|')[1]}`}</td>
                   <td className="text-left">{r.plans[row.plan]!.label}</td>
                   <ShortCells s={row.is} />
                   <ShortCells s={row.oos} />
@@ -710,7 +710,7 @@ function Trades({ r, setups, planIdx }: { r: BacktestResult; setups: BtSetup[]; 
                     <Badge variant={s.dir === 'bullish' ? 'bull' : 'bear'}>{s.dir === 'bullish' ? 'LONG' : 'SHORT'}</Badge>
                   </td>
                   <td className="text-left">
-                    {s.model} · {POI_LABEL[s.poiKind]} {s.poiTf} → {s.childKind} {s.childTf}
+                    {s.model} · {setupPath(s.model, s.poiKind, s.poiTf, s.childKind, s.childTf)}
                   </td>
                   <td>{s.score}</td>
                   <td>{px(s.entry)}</td>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
 import type { BotEvent, BotState, BotTrade, ConnTestResult } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
-import { POI_LABEL } from '@shared/smc'
+import { setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +22,8 @@ const REASON: Record<string, string> = {
   kill: 'kill switch',
   manual: 'dibatalkan',
   error: 'error',
+  retried: 'error (sudah di-retry)',
+  'manual-close': 'close manual',
   external: 'di luar bot'
 }
 const LEVEL: Record<BotEvent['level'], string> = { info: 'text-muted-foreground', skip: 'text-muted-foreground', order: 'text-foreground', warn: 'text-warn', error: 'text-bear' }
@@ -41,7 +43,12 @@ export function Bot() {
   useEffect(() => {
     void window.api.invoke('bot:get').then(setSt)
     void window.api.invoke('config:get').then(setCfg)
-    return window.api.on('bot:state', setSt)
+    const offSt = window.api.on('bot:state', setSt)
+    const offCfg = window.api.on('config:changed', setCfg)
+    return () => {
+      offSt()
+      offCfg()
+    }
   }, [])
 
   const setEnabled = async (enabled: boolean): Promise<void> => {
@@ -259,6 +266,31 @@ export function Bot() {
   )
 }
 
+/** Two-step market close (first click arms, second click sends) so it can't be hit by accident. */
+function CloseMarket({ t }: { t: BotTrade }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const h = setTimeout(() => setArmed(false), 4000)
+    return () => clearTimeout(h)
+  }, [armed])
+  return (
+    <Button
+      size="sm"
+      variant={armed ? 'destructive' : 'outline'}
+      className="h-6 px-2 text-xs whitespace-nowrap"
+      title="Tutup posisi pakai market order (reduce-only), lalu SL/TP dibatalkan"
+      onClick={() => {
+        if (!armed) return setArmed(true)
+        setArmed(false)
+        void window.api.invoke('bot:close', { id: t.id })
+      }}
+    >
+      {armed ? 'Yakin? klik lagi' : 'Close market'}
+    </Button>
+  )
+}
+
 function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean }) {
   if (!trades.length) return <div className="px-4 py-4 text-sm text-muted-foreground">Belum ada.</div>
   return (
@@ -282,7 +314,7 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
             <td className="px-3 py-1.5 font-medium">{t.symbol}</td>
             <td className={cn('px-3 py-1.5', t.direction === 'bullish' ? 'text-bull' : 'text-bear')}>{t.direction === 'bullish' ? 'LONG' : 'SHORT'}</td>
             <td className="px-3 py-1.5 whitespace-nowrap">
-              {t.model} · {POI_LABEL[t.poi.kind]} {t.poi.timeframe} · skor {t.score}
+              {t.model} · {setupPoiLabel(t.model, t.poi.kind)} {t.poi.timeframe} · skor {t.score}
             </td>
             <td className="px-3 py-1.5">{t.confidence ?? '—'}</td>
             <td className="px-3 py-1.5 whitespace-nowrap">
@@ -311,8 +343,20 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
             <td className={cn('px-3 py-1.5 font-semibold', (t.pnl ?? 0) > 0 ? 'text-bull' : (t.pnl ?? 0) < 0 ? 'text-bear' : '')}>{t.pnl === null ? '—' : usd(t.pnl, 3)}</td>
             <td className="px-3 py-1.5">
               {actions && t.status === 'pending' && (
-                <Button size="sm" variant="ghost" className="h-6 px-2" title="Batalkan limit entry" onClick={() => void window.api.invoke('bot:cancel', { id: t.id })}>
-                  <X className="size-3" />
+                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" title="Batalkan limit entry" onClick={() => void window.api.invoke('bot:cancel', { id: t.id })}>
+                  <X className="size-3" /> Cancel
+                </Button>
+              )}
+              {actions && t.status === 'open' && <CloseMarket t={t} />}
+              {t.status === 'cancelled' && t.reason === 'error' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  title="Cek ulang setup ini dengan data sekarang, lalu pasang lagi kalau masih lolos semua syarat"
+                  onClick={() => void window.api.invoke('bot:retry', { id: t.id })}
+                >
+                  <RotateCcw className="size-3" /> Retry
                 </Button>
               )}
             </td>

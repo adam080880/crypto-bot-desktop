@@ -102,6 +102,7 @@ export function Settings() {
       setConfig(c)
       setRisk(c.risk)
     })
+    return window.api.on('config:changed', setConfig)
   }, [])
 
   return (
@@ -380,7 +381,9 @@ function NewsSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
 function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppConfig) => void }) {
   const [b, setB] = useState(config.bot)
   const [msg, setMsg] = useState<string | null>(null)
-  const num = (k: 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity', label: string, step: number) => (
+  // Keep the form in sync when config changes elsewhere (Bot page Start/Stop, other windows)
+  useEffect(() => setB(config.bot), [config.bot])
+  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity', label: string, step: number) => (
     <>
       <Label htmlFor={`bot-${k}`}>{label}</Label>
       <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
@@ -398,7 +401,8 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
       <CardContent className="space-y-3">
         <div className="grid grid-cols-[1fr_140px] items-center gap-3">
           {num('riskPerTradePct', 'Risk per order (% equity yang rela hilang kalau kena SL)', 0.1)}
-          {num('minConfidence', 'Min confidence Claude (0–100)', 1)}
+          {num('minScore', 'Min skor setup (0 = mati; skor = 3 + jumlah konfluensi). Profil koin dari Backtest punya min skor sendiri', 1)}
+          {num('minConfidence', 'Min confidence Claude (0–100, cuma dipakai kalau "Claude wajib" nyala)', 1)}
           {num('maxAnalysisAgeMin', 'Umur maks analisis Claude (menit)', 5)}
           {num('topVolume', 'Koin crypto top N volume 24 jam', 10)}
           {num('maxSetupAgeMin', 'Umur maks setup saat entry (menit)', 15)}
@@ -427,7 +431,11 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
             size="sm"
             onClick={async () => {
               try {
-                const { enabled: _e, live: _l, ...patch } = b
+                // Only send fields changed in this form, so stale values never overwrite newer config
+                const { enabled: _e, live: _l, ...all } = b
+                const patch = Object.fromEntries(
+                  Object.entries(all).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(config.bot[k as keyof typeof config.bot]))
+                )
                 const next = await window.api.invoke('config:update', { bot: patch })
                 onSaved(next)
                 setB(next.bot)
