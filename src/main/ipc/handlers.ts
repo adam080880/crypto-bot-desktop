@@ -3,6 +3,8 @@ import { is } from '@electron-toolkit/utils'
 import { moveDatabase, planMove, storageInfo } from '../storage'
 import { z } from 'zod'
 import { configPatchSchema } from '@shared/config'
+import { backtestParamsSchema } from '@shared/backtest'
+import { runBacktest } from '../backtest/runBacktest'
 import { SECRET_NAMES, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc'
 import { TIMEFRAMES } from '@shared/timeframes'
 import { CandleRepo } from '../db/candles'
@@ -15,6 +17,7 @@ import type { DataController } from '../sync/dataController'
 import { SmcService } from '../strategy/service'
 import { NewsRepo } from '../news/repo'
 import { ClaudeRepo } from '../claude/repo'
+import { testBinanceConnection } from '../net/binanceCheck'
 
 const log = logger('ipc')
 
@@ -65,6 +68,27 @@ export function registerIpcHandlers(deps: {
     state.resume()
     return state.getStatus()
   })
+  handle('bot:get', () => data.getBot())
+  handle('bot:setLive', (req) => {
+    const r = z.object({ live: z.boolean(), confirm: z.string().optional() }).strict().parse(req)
+    // real-money switch: needs the typed confirmation and both Binance keys
+    if (r.live) {
+      if (r.confirm !== 'LIVE') throw new Error('Ketik LIVE untuk konfirmasi')
+      if (!secrets.get('binance.apiKey') || !secrets.get('binance.apiSecret')) throw new Error('Isi Binance API Key dan Secret dulu di Settings')
+      log.warn('bot LIVE trading switched ON by the user')
+    } else log.info('bot live trading switched off')
+    return state.setBotLive(r.live)
+  })
+  handle('bot:cancel', (req) => {
+    const { id } = z.object({ id: z.string().regex(/^[a-z0-9]{8,40}$/) }).strict().parse(req)
+    data.botCancel(id)
+  })
+  handle('bot:resetPaper', () => data.botResetPaper())
+  handle('bot:testConnection', () => {
+    const key = secrets.get('binance.apiKey')
+    const secret = secrets.get('binance.apiSecret')
+    return testBinanceConnection(key && secret ? { key, secret } : null)
+  })
   handle('config:get', () => state.getConfig())
   handle('config:update', (req) => state.updateConfig(configPatchSchema.parse(req)))
 
@@ -76,13 +100,13 @@ export function registerIpcHandlers(deps: {
       .strict()
       .parse(req)
     secrets.set(name, value)
-    if (name === 'bls.apiKey' || name === 'anthropic.apiKey') data.pushConfig()
+    data.pushConfig()
     return secrets.list()
   })
   handle('secrets:delete', (req) => {
     const { name } = z.object({ name: secretNameSchema }).strict().parse(req)
     secrets.delete(name)
-    if (name === 'bls.apiKey' || name === 'anthropic.apiKey') data.pushConfig()
+    data.pushConfig()
     return secrets.list()
   })
 
@@ -134,6 +158,12 @@ export function registerIpcHandlers(deps: {
     const { symbol } = z.object({ symbol: symbolSchema }).strict().parse(req)
     return smc.setups(symbol, state.getConfig().smc)
   })
+  handle('backtest:run', (req) => {
+    const params = backtestParamsSchema.parse(req)
+    const result = runBacktest(db, params, state.getConfig())
+    if (result) log.info({ symbol: params.symbol, ms: result.ms, trades: result.stats.all.trades }, 'backtest done')
+    return result
+  })
   handle('news:list', (req) => {
     const { from, to } = z.object({ from: z.number().int(), to: z.number().int() }).strict().parse(req)
     if (to - from > 62 * 86_400_000) throw new Error('range too large')
@@ -152,6 +182,8 @@ export function registerIpcHandlers(deps: {
   })
   handle('claude:list', () => ({ runs: claude.runs(30), analyses: claude.analyses(60) }))
   handle('claude:run', () => data.claudeRun())
+  handle('screener:get', () => data.getScreener())
+  handle('screener:run', () => data.screenerRun())
   handle('storage:get', () => storageInfo(deps.dbPath))
   handle('storage:chooseDir', async (_req, event) => {
     const win = (await import('electron')).BrowserWindow.fromWebContents(event.sender)

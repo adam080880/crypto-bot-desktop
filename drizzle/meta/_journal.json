@@ -36,6 +36,13 @@
       "when": 1794405843714,
       "tag": "0004_claude",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794418431579,
+      "tag": "0005_bot",
+      "breakpoints": true
     }
   ]
 }

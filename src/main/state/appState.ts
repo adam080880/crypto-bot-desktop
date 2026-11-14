@@ -56,11 +56,22 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       data: { ...this.config.data, ...(patch.data ?? {}) },
       smc: { ...this.config.smc, ...(patch.smc ?? {}) },
       news: { ...this.config.news, ...(patch.news ?? {}) },
-      claude: { ...this.config.claude, ...(patch.claude ?? {}) }
+      claude: { ...this.config.claude, ...(patch.claude ?? {}) },
+      screener: { ...this.config.screener, ...(patch.screener ?? {}) },
+      bot: { ...this.config.bot, ...(patch.bot ?? {}) }
     })
     this.config = next
     writeSetting(this.db, 'app_config', next)
     this.patch({ mode: next.mode })
+    this.emit('config', next)
+    return next
+  }
+
+  /** Live trading switch; never reachable through updateConfig (patch schema omits it). */
+  setBotLive(live: boolean): AppConfig {
+    const next = appConfigSchema.parse({ ...this.config, bot: { ...this.config.bot, live } })
+    this.config = next
+    writeSetting(this.db, 'app_config', next)
     this.emit('config', next)
     return next
   }

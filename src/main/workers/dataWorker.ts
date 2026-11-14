@@ -4,12 +4,15 @@
  * symbol by Backfiller.locks. The main process only relays messages and reads.
  */
 import { join } from 'node:path'
-import { claudeConfigSchema, dataConfigSchema, newsConfigSchema, smcConfigSchema } from '@shared/config'
+import { botConfigSchema, claudeConfigSchema, dataConfigSchema, newsConfigSchema, riskConfigSchema, screenerConfigSchema, smcConfigSchema } from '@shared/config'
+import { BotService } from '../bot/botService'
 import { ClaudeAnalyst } from '../claude/analyst'
 import { NewsService } from '../news/newsService'
 import { openDatabase } from '../db/client'
 import { LiveService } from '../live/liveService'
+import { ScreenerService } from '../screener/screenerService'
 import { initLogger, logger } from '../logger'
+import { installCloudflareDns } from '../net/dns'
 import { AutoSync } from '../sync/autoSync'
 import { Backfiller } from '../sync/backfill'
 import { estimateFullBackfill } from '../sync/estimate'
@@ -18,6 +21,18 @@ import type { FromWorker, ServiceConfig, ToWorker, WorkerInit } from './protocol
 const port = process.parentPort
 const init = JSON.parse(process.argv[2] ?? '{}') as WorkerInit
 initLogger(init.logsDir, { stdout: false })
+installCloudflareDns()
+
+// Event-loop stall detector: everything here (WS, bot, Claude MCP tools) shares one thread.
+{
+  const stallLog = logger('worker')
+  let expected = Date.now() + 1000
+  setInterval(() => {
+    const lag = Date.now() - expected
+    if (lag > 3000) stallLog.warn({ blockedMs: lag }, 'event loop blocked')
+    expected = Date.now() + 1000
+  }, 1000).unref()
+}
 const log = logger('data-worker')
 const db = openDatabase({ path: init.dbPath, migrationsFolder: init.migrationsFolder })
 const backfiller = new Backfiller(db)
@@ -29,6 +44,11 @@ let config: ServiceConfig = {
   news: newsConfigSchema.parse({}),
   smc: smcConfigSchema.parse({}),
   claude: claudeConfigSchema.parse({}),
+  screener: screenerConfigSchema.parse({}),
+  bot: botConfigSchema.parse({}),
+  risk: riskConfigSchema.parse({}),
+  killSwitch: false,
+  binance: null,
   blsApiKey: null,
   anthropicApiKey: null,
   claudeExecutable: null
@@ -62,6 +82,7 @@ const analyst = new ClaudeAnalyst(db, {
   getNews: () => config.news,
   getNewsState: () => news.getState(),
   getWatchlist: () => config.watchlist,
+  getPositionsNote: () => bot?.positionsNote() ?? 'tidak ada',
   getApiKey: () => config.anthropicApiKey,
   rulesPath: join(init.docsDir, 'smc-rules.md'),
   workDir: init.claudeWorkDir,
@@ -69,6 +90,41 @@ const analyst = new ClaudeAnalyst(db, {
 })
 analyst.on('state', (state) => send({ type: 'claude-state', state }))
 analyst.on('done', () => send({ type: 'claude-changed' }))
+
+const screener = new ScreenerService(db, {
+  getConfig: () => config.screener,
+  getSmc: () => config.smc,
+  getData: () => config.data,
+  canAutoRun: () => manual === null
+})
+screener.on('state', (state) => {
+  send({ type: 'screener-state', state })
+  if (!state.running && state.lastRun && state.lastRun.finishedAt !== lastScreenerRun) {
+    lastScreenerRun = state.lastRun.finishedAt
+    bot.onScreener(state.rows)
+  }
+})
+let lastScreenerRun: number | null = null
+
+// Fase 7 bot: screener setups → gates (incl. Claude) → risk-sized orders (paper / live)
+const bot: BotService = new BotService(db, {
+  getBot: () => config.bot,
+  getRisk: () => config.risk,
+  getSmc: () => config.smc,
+  getNews: () => config.news,
+  getKeys: () => config.binance,
+  isKilled: () => config.killSwitch,
+  newsWindow: () => {
+    const w = news.getState()?.window
+    return w && Date.now() < w.endsAt ? w.title : null
+  },
+  requestClaude: (symbols) => analyst.runFor(symbols),
+  setStreams: (symbols) => live.setSources({ bot: symbols }),
+  syncedSymbols: () =>
+    new Set(db.$client.prepare(`SELECT s.symbol FROM symbols s JOIN sync_state ss ON ss.symbol_id = s.id AND ss.timeframe = '1m'`).pluck().all() as string[])
+})
+bot.on('state', (state) => send({ type: 'bot-state', state }))
+analyst.on('done', () => bot.onClaudeDone())
 
 // News-triggered analysis: collect simultaneous releases (e.g. CPI + Core CPI) into one run.
 const pendingRelease = new Map<number, { titles: string[]; timer: ReturnType<typeof setTimeout> }>()
@@ -101,6 +157,7 @@ const scheduleInterval = (): void => {
 backfiller.on('event', (event) => send({ type: 'event', event }))
 live.on('state', (state) => send({ type: 'live-state', state }))
 live.on('candle', (event) => send({ type: 'live-candle', event }))
+live.on('kline', (k) => bot.onKline(k.symbol, k.candle.h, k.candle.l, k.candle.c))
 live.on('synced', (symbol) => send({ type: 'live-synced', symbol }))
 
 let started = false
@@ -122,15 +179,33 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       news.start()
       scheduleInterval()
       send({ type: 'claude-state', state: analyst.getState() })
+      screener.start()
+      send({ type: 'screener-state', state: screener.getState() })
+      bot.configure()
+      bot.start()
       break
     case 'config':
       config = msg.config
       live.setSources({ watchlist: config.watchlist })
       autoSync.configure()
       scheduleInterval()
+      screener.configure()
+      bot.configure()
+      break
+    case 'bot-kill':
+      void bot.kill()
+      break
+    case 'bot-cancel':
+      void bot.cancelById(msg.id)
+      break
+    case 'bot-reset-paper':
+      bot.resetPaper()
       break
     case 'claude-run':
       void analyst.run('manual')
+      break
+    case 'screener-run':
+      void screener.run('manual')
       break
     case 'news-refresh':
       void news.refreshNow()
@@ -181,6 +256,8 @@ process.on('exit', () => {
   live.dispose()
   autoSync.dispose()
   news.dispose()
+  screener.dispose()
+  bot.dispose()
   if (intervalTimer) clearInterval(intervalTimer)
   db.$client.close()
 })

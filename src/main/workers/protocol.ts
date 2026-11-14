@@ -1,6 +1,8 @@
-import type { ClaudeConfig, DataConfig, NewsConfig, SmcConfig } from '@shared/config'
+import type { BotConfig, ClaudeConfig, DataConfig, NewsConfig, RiskConfig, ScreenerConfig, SmcConfig } from '@shared/config'
+import type { BotState } from '@shared/bot'
 import type { ClaudeState } from '@shared/claude'
 import type { NewsState } from '@shared/news'
+import type { ScreenerState } from '@shared/screener'
 import type { LiveCandleEvent, LiveState } from '@shared/live'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent } from '@shared/sync'
 
@@ -20,6 +22,12 @@ export interface ServiceConfig {
   news: NewsConfig
   smc: SmcConfig
   claude: ClaudeConfig
+  screener: ScreenerConfig
+  bot: BotConfig
+  risk: RiskConfig
+  killSwitch: boolean
+  /** Binance trade keys (decrypted in main), only when both are stored. */
+  binance: { key: string; secret: string } | null
   /** Decrypted in main (safeStorage is main-only); held in memory by the worker. */
   blsApiKey: string | null
   anthropicApiKey: string | null
@@ -39,6 +47,10 @@ export type ToWorker =
   | { type: 'news-refresh' }
   | { type: 'news-set-actual'; id: string; value: number | null }
   | { type: 'claude-run' }
+  | { type: 'screener-run' }
+  | { type: 'bot-kill' }
+  | { type: 'bot-cancel'; id: string }
+  | { type: 'bot-reset-paper' }
 
 export type FromWorker =
   | { type: 'event'; event: BackfillEvent }
@@ -53,3 +65,5 @@ export type FromWorker =
   | { type: 'news-changed' }
   | { type: 'claude-state'; state: ClaudeState }
   | { type: 'claude-changed' }
+  | { type: 'screener-state'; state: ScreenerState }
+  | { type: 'bot-state'; state: BotState }

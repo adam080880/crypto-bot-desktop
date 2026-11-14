@@ -136,3 +136,33 @@ export const claudeAnalyses = sqliteTable(
   },
   (t) => [index('claude_analyses_symbol_idx').on(t.symbol, t.createdAt)]
 )
+
+/** Fase 7: one row per bot trade (paper or live). Payload = BotTrade JSON (audit trail). */
+export const botTrades = sqliteTable(
+  'bot_trades',
+  {
+    id: text('id').primaryKey(),
+    setupId: text('setup_id').notNull(),
+    mode: text('mode').notNull(),
+    symbol: text('symbol').notNull(),
+    status: text('status').notNull(),
+    createdAt: integer('created_at').notNull(),
+    closedAt: integer('closed_at'),
+    pnl: real('pnl'),
+    payload: text('payload').notNull()
+  },
+  (t) => [index('bot_trades_setup_idx').on(t.setupId, t.mode), index('bot_trades_status_idx').on(t.status, t.createdAt)]
+)
+
+/** Fase 7: bot decision log (why a setup was taken or skipped, every order sent). */
+export const botEvents = sqliteTable(
+  'bot_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    t: integer('t').notNull(),
+    level: text('level').notNull(),
+    symbol: text('symbol'),
+    message: text('message').notNull()
+  },
+  (t) => [index('bot_events_t_idx').on(t.t)]
+)

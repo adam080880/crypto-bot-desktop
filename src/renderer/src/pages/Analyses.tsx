@@ -10,9 +10,9 @@ import { useAppStore } from '@/stores/appStore'
 
 const px = (n: number): string => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(5))
 const usd = (n: number | null | undefined): string => (n == null ? '—' : `$${n.toFixed(n < 0.1 ? 4 : 2)}`)
-const TRIGGER: Record<string, string> = { news: 'news', manual: 'manual', interval: 'berkala' }
+const TRIGGER: Record<string, string> = { news: 'news', manual: 'manual', interval: 'berkala', bot: 'bot (setup baru)' }
 
-function AnalysisCard({ a, run }: { a: ClaudeAnalysis; run: ClaudeRun | undefined }) {
+function AnalysisCard({ a, run, minConfidence }: { a: ClaudeAnalysis; run: ClaudeRun | undefined; minConfidence: number | null }) {
   const tone = a.bias === 'long' ? 'bull' : a.bias === 'short' ? 'bear' : 'outline'
   return (
     <Card>
@@ -21,6 +21,11 @@ function AnalysisCard({ a, run }: { a: ClaudeAnalysis; run: ClaudeRun | undefine
           <span className="num">{a.symbol}</span>
           <Badge variant={tone}>{a.bias.toUpperCase()}</Badge>
           {a.forcedSkip && <Badge variant="warn">dipaksa skip</Badge>}
+          {minConfidence !== null && a.bias !== 'skip' && (
+            <Badge variant={a.confidence >= minConfidence ? 'bull' : 'outline'} title={`Min confidence bot: ${minConfidence}`}>
+              {a.confidence >= minConfidence ? 'lolos min bot' : `< min bot ${minConfidence}`}
+            </Badge>
+          )}
           <span className="num ml-auto text-xs font-normal text-muted-foreground">{formatTime(a.createdAt)}</span>
         </CardTitle>
         <CardDescription>
@@ -64,6 +69,10 @@ export function Analyses() {
   const st = useAppStore((s) => s.status?.claude)
   const [runs, setRuns] = useState<ClaudeRun[]>([])
   const [analyses, setAnalyses] = useState<ClaudeAnalysis[]>([])
+  const [minConfidence, setMinConfidence] = useState<number | null>(null)
+  useEffect(() => {
+    void window.api.invoke('config:get').then((c) => setMinConfidence(c.bot.minConfidence))
+  }, [])
 
   const load = useCallback(async () => {
     const r = await window.api.invoke('claude:list')
@@ -127,7 +136,7 @@ export function Analyses() {
       ) : (
         <div className="grid grid-cols-2 gap-4">
           {latest.map((a) => (
-            <AnalysisCard key={a.id} a={a} run={runById.get(a.runId)} />
+            <AnalysisCard key={a.id} a={a} run={runById.get(a.runId)} minConfidence={minConfidence} />
           ))}
         </div>
       )}

@@ -8,6 +8,9 @@ import { Dashboard } from '@/pages/Dashboard'
 import { DataSync } from '@/pages/DataSync'
 import { useSyncStore } from '@/stores/syncStore'
 import { Placeholder } from '@/pages/Placeholder'
+import { Screener } from '@/pages/Screener'
+import { Backtest } from '@/pages/Backtest'
+import { Bot } from '@/pages/Bot'
 import { Settings } from '@/pages/Settings'
 import { useAppStore } from '@/stores/appStore'
 
@@ -26,6 +29,9 @@ export function App() {
         <main className="min-w-0 flex-1 overflow-auto p-6">
           {page === 'dashboard' && <Dashboard />}
           {page === 'chart' && <Chart />}
+          {page === 'screener' && <Screener />}
+          {page === 'backtest' && <Backtest />}
+          {page === 'bot' && <Bot />}
           {page === 'calendar' && <Calendar />}
           {page === 'analyses' && <Analyses />}
           {page === 'sync' && <DataSync />}

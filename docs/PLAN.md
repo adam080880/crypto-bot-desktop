@@ -1,6 +1,6 @@
 # Rencana — SMC/ICT Trading Assistant
 
-Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 ✅ · Fase 6 ✅ (menunggu run uji pertama) · Fase 7 hanya jika diminta.
+Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) · Fase 3 ✅ · Fase 4 ✅ · Fase 5 ✅ · Fase 6 ✅ (menunggu run uji pertama) · Fase 7 🚧 (bot paper + live dibuat, user minta tanpa testnet; live belum dites ke exchange).
 
 ## Prinsip
 - **Main process = otak.** Exchange, DB, scheduler, Claude, risk guard semuanya di main

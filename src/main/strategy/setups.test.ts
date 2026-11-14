@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeSmc } from './analyze'
-import { detectSetups } from './setups'
+import { detectSetups, trendKnownAt } from './setups'
 import { at, bars, cfg } from './testkit'
 
 type Row = [number, number, number, number]
@@ -59,5 +59,41 @@ describe('setups: POI hit → OB valid (§8)', () => {
     const c = cfg()
     const entry = analyzeSmc(bars(rows), '15m', c)
     expect(detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).filter((x) => x.obValid.t === at(14))).toHaveLength(0)
+  })
+})
+
+describe('trendKnownAt (no look-ahead in the trend score)', () => {
+  const H = 3_600_000
+  const t0 = Date.UTC(2026, 10, 2, 8) // 4h candle 08:00–12:00 UTC
+  const a = { timeframe: '4h' as const, trendChanges: [{ t: t0 - 8 * H, trend: 'bearish' as const }, { t: t0, trend: 'bullish' as const }] }
+
+  it('ignores a break whose higher-TF candle has not closed yet', () => {
+    expect(trendKnownAt(a, t0 + H)).toBe('bearish') // 15m setup at 09:00 can't see the 4h close of 12:00
+    expect(trendKnownAt(a, t0 + 4 * H - 1)).toBe('bearish')
+  })
+
+  it('uses the break once its candle has closed', () => {
+    expect(trendKnownAt(a, t0 + 4 * H)).toBe('bullish')
+    expect(trendKnownAt(a, t0 - 9 * H)).toBe(null)
+  })
+})
+
+describe('setups: limit cancelled when price reaches the TP first', () => {
+  it("marks the setup 'missed' (no trade) instead of filling it later", () => {
+    const rows = ROWS.map((r) => [...r] as Row)
+    rows[17] = [9.5, 10.2, 9.4, 10.1] // TP 10.0 reached before the limit 8.4 filled
+    const c = cfg({ minRR: 2 })
+    const entry = analyzeSmc(bars(rows), '15m', c)
+    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.obValid.t === at(14))!
+    expect(s.status).toBe('missed')
+    expect(s.statusT).toBe(at(17))
+    expect(s.filledT).toBeNull()
+  })
+
+  it('records the fill candle of a closed trade', () => {
+    const c = cfg({ minRR: 2 })
+    const entry = analyzeSmc(bars(ROWS), '15m', c)
+    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.obValid.t === at(14))!
+    expect(s.filledT).toBe(at(18))
   })
 })

@@ -2,7 +2,10 @@ import type { AppConfig, ConfigPatch, TradingMode } from './config'
 import type { Candle } from './candles'
 import type { LiveCandleEvent, LiveState } from './live'
 import type { Setup, SmcAnalysis } from './smc'
+import type { BacktestParams, BacktestResult } from './backtest'
+import type { BotState, ConnTestResult } from './bot'
 import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
+import type { ScreenerState } from './screener'
 import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
@@ -57,6 +60,11 @@ export interface IpcInvokeMap {
   'app:getStatus': { req: void; res: AppStatus }
   'bot:killSwitch': { req: void; res: AppStatus }
   'bot:resume': { req: void; res: AppStatus }
+  'bot:get': { req: void; res: BotState | null }
+  'bot:setLive': { req: { live: boolean; confirm?: string }; res: AppConfig }
+  'bot:cancel': { req: { id: string }; res: void }
+  'bot:resetPaper': { req: void; res: void }
+  'bot:testConnection': { req: void; res: ConnTestResult }
   'config:get': { req: void; res: AppConfig }
   'config:update': { req: ConfigPatch; res: AppConfig }
   'secrets:list': { req: void; res: SecretStatus[] }
@@ -74,6 +82,7 @@ export interface IpcInvokeMap {
   'live:setChart': { req: { symbol: string | null }; res: void }
   'smc:analyze': { req: { symbol: string; timeframe: Timeframe; limit: number }; res: SmcAnalysis | null }
   'smc:setups': { req: { symbol: string }; res: Setup[] }
+  'backtest:run': { req: BacktestParams; res: BacktestResult | null }
   'news:list': { req: { from: number; to: number }; res: EconomicEvent[] }
   'news:candidates': { req: void; res: NewsCandidate[] }
   'news:reactions': { req: { eventId: string }; res: EventReaction[] }
@@ -82,6 +91,8 @@ export interface IpcInvokeMap {
   'news:setActual': { req: { id: string; value: number | null }; res: void }
   'claude:list': { req: void; res: { runs: ClaudeRun[]; analyses: ClaudeAnalysis[] } }
   'claude:run': { req: void; res: void }
+  'screener:get': { req: void; res: ScreenerState | null }
+  'screener:run': { req: void; res: void }
   'storage:get': { req: void; res: StorageInfo }
   'storage:chooseDir': { req: void; res: string | null }
   'storage:plan': { req: { dir: string }; res: { ok: boolean; error?: string; targetHasDb: boolean; needBytes: number; freeBytes: number | null } }
@@ -110,6 +121,8 @@ export interface IpcEventMap {
   'live:synced': { symbol: string }
   'news:changed': { at: number }
   'claude:changed': { at: number }
+  'screener:state': ScreenerState
+  'bot:state': BotState
   'storage:progress': { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }
 }
 
@@ -129,6 +142,11 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'app:getStatus',
   'bot:killSwitch',
   'bot:resume',
+  'bot:get',
+  'bot:setLive',
+  'bot:cancel',
+  'bot:resetPaper',
+  'bot:testConnection',
   'config:get',
   'config:update',
   'secrets:list',
@@ -146,6 +164,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'live:setChart',
   'smc:analyze',
   'smc:setups',
+  'backtest:run',
   'news:list',
   'news:candidates',
   'news:reactions',
@@ -154,9 +173,11 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'news:setActual',
   'claude:list',
   'claude:run',
+  'screener:get',
+  'screener:run',
   'storage:get',
   'storage:chooseDir',
   'storage:plan',
   'storage:move'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'storage:progress']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'storage:progress']

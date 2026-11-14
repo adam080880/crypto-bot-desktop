@@ -5,15 +5,13 @@ import { z } from 'zod'
  * Values are configurable, but the guard itself cannot be disabled.
  */
 export const riskConfigSchema = z.object({
-  /** Max notional per position, as % of account equity. */
-  maxPositionPct: z.number().positive().max(100).default(2),
   /** Max realised+unrealised loss per UTC day, % of equity. Breach → bot halts automatically. */
   maxDailyLossPct: z.number().positive().max(100).default(3),
   /** Max simultaneously open positions. */
   maxOpenPositions: z.number().int().positive().max(50).default(3),
   /** Every order must carry a stop-loss. Not configurable on purpose. */
   requireStopLoss: z.literal(true).default(true),
-  /** Max leverage allowed. */
+  /** Max leverage allowed. Also caps the notional of risk-sized positions (equity × maxLeverage). */
   maxLeverage: z.number().int().min(1).max(125).default(5)
 })
 
@@ -170,6 +168,52 @@ export const claudeConfigSchema = z.object({
 })
 export type ClaudeConfig = z.infer<typeof claudeConfigSchema>
 
+/** Screener over stored data: entry material across all synced symbols. Candidates only. */
+export const screenerConfigSchema = z.object({
+  /** Rescan one minute after every 15m close (and once after startup). */
+  autoScan: z.boolean().default(true),
+  /** "Harga dekat POI": max distance to an active POI, % of price. */
+  nearPoiPct: z.number().min(0.05).max(10).default(1),
+  poiTimeframes: z.array(z.enum(['15m', '1h', '4h'])).default(['1h', '4h']),
+  /** "BOS baru": last structure break on these timeframes within N hours. */
+  bosTimeframes: z.array(z.enum(['15m', '1h', '4h'])).default(['1h', '4h']),
+  bosRecentHours: z.number().int().min(1).max(168).default(24),
+  /** Skip symbols whose newest 1m candle is older than this (not synced / delisted). */
+  maxDataAgeMin: z.number().int().min(5).max(1440).default(120),
+  /** Desktop notification for new OB valid setups found by an automatic scan. */
+  notify: z.boolean().default(true)
+})
+export type ScreenerConfig = z.infer<typeof screenerConfigSchema>
+
+/**
+ * Fase 7 bot. Entries come from screener setups (HTF POI → OB valid on the entry TF) on the top
+ * crypto coins by volume, gated by a fresh Claude analysis (bias == direction, confidence ≥ min).
+ * `live` is never set through a config patch: it needs the explicit confirmation IPC.
+ */
+export const botConfigSchema = z.object({
+  /** Bot running (paper unless `live`). */
+  enabled: z.boolean().default(false),
+  /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
+  live: z.boolean().default(false),
+  minConfidence: z.number().int().min(0).max(100).default(70),
+  /**
+   * Risk-based sizing: max loss per order if the SL is hit, % of equity.
+   * Size = equity × riskPerTradePct ÷ |entry − SL| distance (capped by risk.maxLeverage).
+   */
+  riskPerTradePct: z.number().positive().max(100).default(1),
+  /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
+  topVolume: z.number().int().min(5).max(300).default(100),
+  /** Setups whose POI comes from these (higher) timeframes; the OB valid confirms on the entry TF. */
+  poiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['1h', '4h']),
+  /** Only take setups confirmed within the last N minutes (no chasing old ones). */
+  maxSetupAgeMin: z.number().int().min(1).max(525600).default(60),
+  /** The Claude analysis must be newer than the setup and at most this old. */
+  maxAnalysisAgeMin: z.number().int().min(1).max(525600).default(90),
+  /** Paper account starting balance (USDT). */
+  paperEquity: z.number().positive().max(1e9).default(10)
+})
+export type BotConfig = z.infer<typeof botConfigSchema>
+
 export const appConfigSchema = z.object({
   mode: tradingModeSchema.default('paper'),
   /** ccxt exchange id; Binance USDT-M perpetual by default. */
@@ -180,7 +224,9 @@ export const appConfigSchema = z.object({
   data: dataConfigSchema.default(dataConfigSchema.parse({})),
   smc: smcConfigSchema.default(smcConfigSchema.parse({})),
   news: newsConfigSchema.default(newsConfigSchema.parse({})),
-  claude: claudeConfigSchema.default(claudeConfigSchema.parse({}))
+  claude: claudeConfigSchema.default(claudeConfigSchema.parse({})),
+  screener: screenerConfigSchema.default(screenerConfigSchema.parse({})),
+  bot: botConfigSchema.default(botConfigSchema.parse({}))
 })
 
 export type RiskConfig = z.infer<typeof riskConfigSchema>
@@ -190,14 +236,16 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema
-  .omit({ risk: true, data: true, smc: true, news: true, claude: true })
+  .omit({ risk: true, data: true, smc: true, news: true, claude: true, screener: true, bot: true })
   .partial()
   .extend({
     risk: riskConfigSchema.omit({ requireStopLoss: true }).partial().strict().optional(),
     data: dataConfigSchema.partial().strict().optional(),
     smc: smcConfigSchema.partial().strict().optional(),
     news: newsConfigSchema.partial().strict().optional(),
-    claude: claudeConfigSchema.partial().strict().optional()
+    claude: claudeConfigSchema.partial().strict().optional(),
+    screener: screenerConfigSchema.partial().strict().optional(),
+    bot: botConfigSchema.omit({ live: true }).partial().strict().optional()
   })
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>

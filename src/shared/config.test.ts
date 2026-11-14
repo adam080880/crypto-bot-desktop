@@ -24,6 +24,28 @@ describe('config patch', () => {
     expect(configPatchSchema.safeParse({ risk: { requireStopLoss: false } }).success).toBe(false)
     expect(configPatchSchema.safeParse({ foo: 1 }).success).toBe(false)
   })
+
+  it('accepts bot.minConfidence only as an integer 0–100 (not a 0–1 fraction)', async () => {
+    const { configPatchSchema } = await import('./config')
+    expect(defaultAppConfig.bot.minConfidence).toBe(70)
+    expect(configPatchSchema.safeParse({ bot: { minConfidence: 80 } }).success).toBe(true)
+    for (const v of [101, -1, 0.7]) expect(configPatchSchema.safeParse({ bot: { minConfidence: v } }).success).toBe(false)
+  })
+
+  it('accepts bot.riskPerTradePct above 0 up to 100 % of equity', async () => {
+    const { configPatchSchema } = await import('./config')
+    expect(defaultAppConfig.bot.riskPerTradePct).toBe(1)
+    expect(configPatchSchema.safeParse({ bot: { riskPerTradePct: 0.5 } }).success).toBe(true)
+    expect(configPatchSchema.safeParse({ bot: { riskPerTradePct: 10 } }).success).toBe(true)
+    for (const v of [0, 101, -1]) expect(configPatchSchema.safeParse({ bot: { riskPerTradePct: v } }).success).toBe(false)
+  })
+
+  it('never turns live trading on through a config patch', async () => {
+    const { configPatchSchema } = await import('./config')
+    expect(defaultAppConfig.bot.live).toBe(false)
+    expect(defaultAppConfig.bot.enabled).toBe(false)
+    expect(configPatchSchema.safeParse({ bot: { live: true } }).success).toBe(false)
+  })
 })
 
 describe('symbol filter', () => {

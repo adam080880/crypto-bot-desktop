@@ -109,7 +109,8 @@ export interface SmcAnalysis {
 
 export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK'
 
-export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' | 'expired'
+/** missed = price reached the TP before the limit entry filled (cancelled, no trade). */
+export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' | 'expired' | 'missed'
 
 /** §8 Confirmed entry: POI hit → OB valid on the entry timeframe. A candidate, never an order. */
 export interface Setup {
@@ -128,4 +129,6 @@ export interface Setup {
   createdT: number
   status: SetupStatus
   statusT: number | null
+  /** Entry-TF candle on which the limit entry filled (null if it never did). */
+  filledT: number | null
 }

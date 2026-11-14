@@ -39,7 +39,7 @@ export function collectPois(a: SmcAnalysisFull): Poi[] {
 }
 
 /** First index with candle open time ≥ t (binary search). */
-function indexAtOrAfter(c: readonly Candle[], t: number): number {
+export function indexAtOrAfter(c: readonly Candle[], t: number): number {
   let lo = 0
   let hi = c.length
   while (lo < hi) {
@@ -128,7 +128,7 @@ export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): S
       reasons.push(`POI dari TF lebih tinggi (${poi.timeframe})`)
     }
     const poiA = poiAnalyses.find((a) => a.timeframe === poi.timeframe) ?? entry
-    const trend = trendAtTime(poiA, createdT)
+    const trend = trendKnownAt(poiA, known)
     if (trend === poi.direction) {
       score += 1
       reasons.push(`searah trend ${poi.timeframe}`)
@@ -138,7 +138,7 @@ export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): S
       reasons.push('candle sebelum OB berlawanan warna')
     }
 
-    const { status, statusT } = followSetup(c, ob.confirmedAt, bull, entryPx, sl, tp, ob.wickEnd, cfg.setupExpiryCandles)
+    const { status, statusT, filledT } = followSetup(c, ob.confirmedAt, bull, entryPx, sl, tp, ob.wickEnd, cfg.setupExpiryCandles)
     const setup: Setup = {
       id: `${symbol}-${entry.timeframe}-${ob.t}-${poi.direction}`,
       symbol,
@@ -153,7 +153,8 @@ export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): S
       reasons,
       createdT,
       status,
-      statusT
+      statusT,
+      filledT
     }
     const prev = best.get(setup.id)
     if (!prev || setup.score > prev.score) best.set(setup.id, setup)
@@ -177,16 +178,24 @@ function nearestTarget(analyses: readonly SmcAnalysisFull[], bull: boolean, entr
   return best
 }
 
-function trendAtTime(a: SmcAnalysisFull, t: number): Dir | null {
+/**
+ * Trend of `a` as known at time `t`. A change is only known once its breaking candle has closed
+ * (`ch.t` is that candle's open time), so a 4h break can't score a 15m setup earlier in the same 4h.
+ */
+export function trendKnownAt(a: Pick<SmcAnalysisFull, 'timeframe' | 'trendChanges'>, t: number): Dir | null {
   let trend: Dir | null = null
   for (const ch of a.trendChanges) {
-    if (ch.t > t) break
+    if (closeTime(ch.t, a.timeframe) > t) break
     trend = ch.trend
   }
   return trend
 }
 
-/** Walk entry-TF candles after the OB valid is known. Same-candle SL/TP counts as a loss (conservative). */
+/**
+ * Walk entry-TF candles after the OB valid is known. Same-candle SL/TP counts as a loss, and a
+ * pending limit is cancelled ('missed') once price reaches the TP first, including a candle that
+ * touches both entry and TP (order inside the candle is unknown → conservative, no trade).
+ */
 function followSetup(
   c: readonly Candle[],
   from: number,
@@ -196,23 +205,24 @@ function followSetup(
   tp: number,
   wickEnd: number,
   expiry: number
-): { status: SetupStatus; statusT: number | null } {
+): { status: SetupStatus; statusT: number | null; filledT: number | null } {
   let triggered = false
   let triggeredT: number | null = null
   for (let m = from + 1; m < c.length; m++) {
     const x = c[m]!
     if (!triggered) {
-      if (m - from > expiry) return { status: 'expired', statusT: x.t }
+      if (m - from > expiry) return { status: 'expired', statusT: x.t, filledT: null }
+      if (bull ? x.h >= tp : x.l <= tp) return { status: 'missed', statusT: x.t, filledT: null }
       if (bull ? x.l <= entry : x.h >= entry) {
         triggered = true
         triggeredT = x.t
-      } else if (bull ? x.c < wickEnd : x.c > wickEnd) return { status: 'invalid', statusT: x.t }
+      } else if (bull ? x.c < wickEnd : x.c > wickEnd) return { status: 'invalid', statusT: x.t, filledT: null }
       else continue
     }
     const hitSl = bull ? x.l <= sl : x.h >= sl
     const hitTp = bull ? x.h >= tp : x.l <= tp
-    if (hitSl) return { status: 'loss', statusT: x.t }
-    if (hitTp) return { status: 'win', statusT: x.t }
+    if (hitSl) return { status: 'loss', statusT: x.t, filledT: triggeredT }
+    if (hitTp) return { status: 'win', statusT: x.t, filledT: triggeredT }
   }
-  return triggered ? { status: 'triggered', statusT: triggeredT } : { status: 'pending', statusT: null }
+  return triggered ? { status: 'triggered', statusT: triggeredT, filledT: triggeredT } : { status: 'pending', statusT: null, filledT: null }
 }

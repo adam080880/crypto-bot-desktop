@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AppStatus } from '@shared/ipc'
 
-export type PageId = 'dashboard' | 'chart' | 'calendar' | 'analyses' | 'sync' | 'settings'
+export type PageId = 'dashboard' | 'chart' | 'screener' | 'backtest' | 'bot' | 'calendar' | 'analyses' | 'sync' | 'settings'
 
 interface AppStore {
   page: PageId

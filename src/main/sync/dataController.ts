@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { utilityProcess, type UtilityProcess } from 'electron'
 import type { AppConfig } from '@shared/config'
 import type { LiveCandleEvent } from '@shared/live'
+import type { ScreenerRow, ScreenerState } from '@shared/screener'
+import type { BotState } from '@shared/bot'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from '@shared/sync'
 import type { AppStatus, SyncStartRequest, SyncUiState } from '@shared/ipc'
 import { findClaude } from '../claude/findClaude'
@@ -20,6 +22,10 @@ export interface DataBroadcast {
   liveSynced: (symbol: string) => void
   newsChanged: () => void
   claudeChanged: () => void
+  screenerState: (s: ScreenerState) => void
+  /** New OB valid setups from an automatic scan (for a desktop notification). */
+  screenerNewSetups: (rows: ScreenerRow[]) => void
+  botState: (s: BotState) => void
 }
 
 /**
@@ -31,6 +37,10 @@ export class DataController {
   private disposed = false
   private chartSymbol: string | null = null
   private autoSync: AutoSyncState | null = null
+  private screener: ScreenerState | null = null
+  /** Setup ids already seen in a finished scan; null until the worker's first state. */
+  private seenSetups: Set<string> | null = null
+  private bot: BotState | null = null
   private ui: SyncUiState = { running: false, progress: null, lastSummary: null, lastError: null }
   private pendingEstimate: { resolve: (e: BackfillEstimate) => void; reject: (e: Error) => void } | null = null
   private estimatePromise: Promise<BackfillEstimate> | null = null
@@ -41,10 +51,19 @@ export class DataController {
     private readonly out: DataBroadcast,
     lastSummary: BackfillSummary | null,
     private readonly getBlsKey: () => string | null,
-    private readonly getAnthropicKey: () => string | null
+    private readonly getAnthropicKey: () => string | null,
+    private readonly getBinanceKeys: () => { key: string; secret: string } | null
   ) {
     this.ui.lastSummary = lastSummary
     state.on('config', () => this.pushConfig())
+    // kill switch: cancel the bot's pending entries right away, then keep the flag in sync
+    let killed = state.isHalted()
+    state.on('status', (st) => {
+      if (st.killSwitch.active === killed) return
+      killed = st.killSwitch.active
+      this.pushConfig()
+      if (killed) this.post({ type: 'bot-kill' })
+    })
   }
 
   private serviceConfig(c: AppConfig = this.state.getConfig()): ServiceConfig {
@@ -54,6 +73,11 @@ export class DataController {
       news: c.news,
       smc: c.smc,
       claude: c.claude,
+      screener: c.screener,
+      bot: c.bot,
+      risk: c.risk,
+      killSwitch: this.state.isHalted(),
+      binance: this.getBinanceKeys(),
       blsApiKey: this.getBlsKey(),
       anthropicApiKey: this.getAnthropicKey(),
       claudeExecutable: findClaude(c.claude.executable)
@@ -76,6 +100,22 @@ export class DataController {
 
   getAutoSync(): AutoSyncState | null {
     return this.autoSync
+  }
+
+  getScreener(): ScreenerState | null {
+    return this.screener
+  }
+
+  getBot(): BotState | null {
+    return this.bot
+  }
+
+  botCancel(id: string): void {
+    this.post({ type: 'bot-cancel', id })
+  }
+
+  botResetPaper(): void {
+    this.post({ type: 'bot-reset-paper' })
   }
 
   private spawn(): UtilityProcess {
@@ -149,7 +189,28 @@ export class DataController {
       case 'claude-changed':
         this.out.claudeChanged()
         return
+      case 'screener-state':
+        this.onScreenerState(m.state)
+        return
+      case 'bot-state':
+        this.bot = m.state
+        this.out.botState(m.state)
+        return
     }
+  }
+
+  private onScreenerState(next: ScreenerState): void {
+    const finished = next.lastRun && next.lastRun.finishedAt !== this.screener?.lastRun?.finishedAt
+    this.screener = next
+    this.out.screenerState(next)
+    if (!finished && this.seenSetups) return
+    const withSetup = next.rows.filter((r) => r.setup)
+    const seen = this.seenSetups
+    this.seenSetups = new Set(withSetup.map((r) => r.setup!.id))
+    // first state (persisted result / worker restart) only primes the seen set
+    if (!seen || next.lastRun?.trigger === 'manual') return
+    const fresh = withSetup.filter((r) => !seen.has(r.setup!.id))
+    if (fresh.length) this.out.screenerNewSetups(fresh)
   }
 
   private onBackfillEvent(e: BackfillEvent): void {
@@ -213,6 +274,10 @@ export class DataController {
 
   claudeRun(): void {
     this.post({ type: 'claude-run' })
+  }
+
+  screenerRun(): void {
+    this.post({ type: 'screener-run' })
   }
 
   newsRefresh(): void {

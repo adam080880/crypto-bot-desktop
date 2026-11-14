@@ -1,4 +1,4 @@
-import { BrainCircuit, CalendarClock, CandlestickChart, DatabaseZap, LayoutDashboard, Settings } from 'lucide-react'
+import { Bot, BrainCircuit, FlaskConical, ScanSearch, CalendarClock, CandlestickChart, DatabaseZap, LayoutDashboard, Settings } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore, type PageId } from '@/stores/appStore'
@@ -6,6 +6,9 @@ import { useAppStore, type PageId } from '@/stores/appStore'
 const items: { id: PageId; label: string; icon: LucideIcon }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'chart', label: 'Chart', icon: CandlestickChart },
+  { id: 'screener', label: 'Screener', icon: ScanSearch },
+  { id: 'backtest', label: 'Backtest', icon: FlaskConical },
+  { id: 'bot', label: 'Bot', icon: Bot },
   { id: 'calendar', label: 'Economic Calendar', icon: CalendarClock },
   { id: 'analyses', label: 'Claude Analyses', icon: BrainCircuit },
   { id: 'sync', label: 'Data Sync', icon: DatabaseZap },

@@ -18,6 +18,8 @@ export interface LiveSources {
   chart: string | null
   watchlist: readonly string[]
   positions: readonly string[]
+  /** Bot universe + symbols with bot orders (Fase 7). */
+  bot: readonly string[]
 }
 
 /**
@@ -27,10 +29,12 @@ export interface LiveSources {
  */
 export class LiveService extends EventEmitter<{
   candle: [LiveCandleEvent]
+  /** Every 1m kline message (forming or closed) of every streamed symbol. */
+  kline: [KlineMessage]
   state: [LiveState]
   synced: [string]
 }> {
-  private sources: LiveSources = { chart: null, watchlist: [], positions: [] }
+  private sources: LiveSources = { chart: null, watchlist: [], positions: [], bot: [] }
   private readonly pool: KlineSocketPool
   private readonly repo: CandleRepo
   private forming: FormingCandles | null = null
@@ -64,7 +68,7 @@ export class LiveService extends EventEmitter<{
     const prevChart = this.sources.chart
     this.sources = { ...this.sources, ...patch }
     const allowed = new Set(activeSymbols(this.db).map((s) => s.symbol))
-    const wanted = [this.sources.chart, ...this.sources.watchlist, ...this.sources.positions].filter(
+    const wanted = [...new Set([this.sources.chart, ...this.sources.watchlist, ...this.sources.positions, ...this.sources.bot])].filter(
       (s): s is string => !!s && allowed.has(s)
     )
     this.live = new Set(wanted)
@@ -100,6 +104,7 @@ export class LiveService extends EventEmitter<{
   }
 
   private onKline(k: KlineMessage): void {
+    this.emit('kline', k)
     if (k.closed) {
       this.backfiller
         .ingestClosed1m(k.symbol, k.candle, this.getData())

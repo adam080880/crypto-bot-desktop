@@ -25,7 +25,8 @@ export const analysisOutputSchema = z
   .strict()
 export type AnalysisOutput = z.infer<typeof analysisOutputSchema>
 
-export type AnalysisTrigger = 'news' | 'manual' | 'interval'
+/** bot = requested by the Fase 7 bot for fresh setups on specific symbols. */
+export type AnalysisTrigger = 'news' | 'manual' | 'interval' | 'bot'
 export type RunStatus = 'ok' | 'invalid' | 'error' | 'budget'
 
 export interface ClaudeRun {

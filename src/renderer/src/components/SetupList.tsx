@@ -8,7 +8,8 @@ const STATUS: Record<SetupStatus, { label: string; variant: 'bull' | 'bear' | 'w
   win: { label: 'TP', variant: 'bull' },
   loss: { label: 'SL', variant: 'bear' },
   invalid: { label: 'invalid', variant: 'outline' },
-  expired: { label: 'expired', variant: 'secondary' }
+  expired: { label: 'expired', variant: 'secondary' },
+  missed: { label: 'lewat TP', variant: 'secondary' }
 }
 
 const px = (n: number): string => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(5))

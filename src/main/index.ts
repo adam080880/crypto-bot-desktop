@@ -1,8 +1,9 @@
-import { app, BrowserWindow, powerSaveBlocker, type Tray } from 'electron'
+import { app, BrowserWindow, Notification, powerSaveBlocker, type Tray } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { openDatabase } from './db/client'
 import { registerIpcHandlers } from './ipc/handlers'
 import { initLogger } from './logger'
+import { installCloudflareDns } from './net/dns'
 import { paths, pinUserData } from './paths'
 import { SecretStore } from './security/secrets'
 import { AppState } from './state/appState'
@@ -28,6 +29,7 @@ if (!app.requestSingleInstanceLock()) {
 
 function bootstrap(): void {
   const log = initLogger(paths.logs()).child({ module: 'main' })
+  installCloudflareDns()
   electronApp.setAppUserModelId('dev.local.smc-trading-assistant')
   app.on('browser-window-created', (_, w) => optimizer.watchWindowShortcuts(w))
 
@@ -53,11 +55,28 @@ function bootstrap(): void {
       liveCandle: (event) => sendAll('live:candle', event),
       liveSynced: (symbol) => sendAll('live:synced', { symbol }),
       newsChanged: () => sendAll('news:changed', { at: Date.now() }),
-      claudeChanged: () => sendAll('claude:changed', { at: Date.now() })
+      claudeChanged: () => sendAll('claude:changed', { at: Date.now() }),
+      screenerState: (s) => sendAll('screener:state', s),
+      botState: (s) => sendAll('bot:state', s),
+      screenerNewSetups: (rows) => {
+        if (!state.getConfig().screener.notify || !Notification.isSupported()) return
+        const list = rows.slice(0, 5).map((r) => `${r.symbol} ${r.direction === 'bullish' ? 'LONG' : 'SHORT'} RR ${r.setup!.rr}`)
+        const n = new Notification({
+          title: `Screener: ${rows.length} setup OB valid baru`,
+          body: list.join('\n') + (rows.length > 5 ? `\n+${rows.length - 5} lagi` : '')
+        })
+        n.on('click', () => main.show())
+        n.show()
+      }
     },
     lastRun,
     () => secrets.get('bls.apiKey'),
-    () => secrets.get('anthropic.apiKey')
+    () => secrets.get('anthropic.apiKey'),
+    () => {
+      const key = secrets.get('binance.apiKey')
+      const secret = secrets.get('binance.apiSecret')
+      return key && secret ? { key, secret } : null
+    }
   )
 
   registerIpcHandlers({

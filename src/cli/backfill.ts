@@ -21,6 +21,7 @@ import { SOURCE_TIMEFRAMES, DERIVED_TIMEFRAMES, type SourceTimeframe } from '@sh
 import { openDatabase } from '../main/db/client'
 import { BinanceFuturesClient } from '../main/exchange/binanceFutures'
 import { initLogger } from '../main/logger'
+import { installCloudflareDns } from '../main/net/dns'
 import { Backfiller } from '../main/sync/backfill'
 import { dbFileBytes, estimateFullBackfill } from '../main/sync/estimate'
 import { verifyResample } from '../main/sync/verify'
@@ -62,6 +63,7 @@ const fmtInt = (n: number): string => Math.round(n).toLocaleString('id-ID')
 
 async function main(): Promise<void> {
   initLogger(join(userDataDir(), 'logs'), { stdout: false })
+  installCloudflareDns()
   const dbPath = resolve(args.db ?? defaultDbPath())
   const db = openDatabase({ path: dbPath, migrationsFolder: resolve('drizzle') })
   const data = dataConfigSchema.parse({ concurrency: args.concurrency ? Number(args.concurrency) : undefined })

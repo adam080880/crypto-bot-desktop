@@ -10,6 +10,8 @@ files:
   # Claude Code is NOT bundled (~300 MB): the app uses the user's installed `claude`
   - "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
   - "!**/node_modules/better-sqlite3/{build,deps,src}/**"
+  # Build outputs (release/, release-next/ …) must never end up inside app.asar
+  - "!release*{,/**}"
 extraResources:
   - from: drizzle
     to: drizzle
@@ -21,11 +23,17 @@ asarUnpack:
 npmRebuild: false
 mac:
   files:
+    # Platform `files` with only "!" patterns makes electron-builder add "**/*" (whole repo). Keep the includes.
+    - out/**
+    - package.json
     - "!**/node_modules/better-sqlite3/prebuilds/{win32,linux,linuxmusl}-*"
   category: public.app-category.finance
   target: dmg
 win:
   files:
+    # Platform `files` with only "!" patterns makes electron-builder add "**/*" (whole repo). Keep the includes.
+    - out/**
+    - package.json
     - "!**/node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*"
     - "!**/node_modules/better-sqlite3/prebuilds/win32-arm64.node"
   target:

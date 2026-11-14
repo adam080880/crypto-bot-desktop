@@ -26,6 +26,8 @@ export interface AnalystDeps {
   getNews: () => NewsConfig
   getNewsState: () => NewsState | null
   getWatchlist: () => readonly string[]
+  /** One line about the bot's open positions / orders for the prompt. */
+  getPositionsNote: () => string
   /** Decrypted in main; null → the Claude Code CLI uses its own login. */
   getApiKey: () => string | null
   rulesPath: string
@@ -94,16 +96,36 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
     this.emit('state', this.state)
   }
 
-  async run(trigger: AnalysisTrigger, eventTitles: string[] = []): Promise<void> {
+  private queue: Promise<void> = Promise.resolve()
+
+  /**
+   * Bot request: analyse exactly these symbols. Queued behind a running analysis instead of being
+   * dropped, so the bot always gets an answer (or a skip) for its setups.
+   */
+  runFor(symbols: string[]): Promise<void> {
+    const next = this.queue.then(() => this.run('bot', [], symbols))
+    this.queue = next.catch(() => undefined)
+    return next
+  }
+
+  async run(trigger: AnalysisTrigger, eventTitles: string[] = [], only?: string[]): Promise<void> {
     const cfg = this.deps.getConfig()
-    if (!cfg.enabled || this.state.running) return
+    if (!cfg.enabled) {
+      if (trigger === 'bot') throw new Error('Claude analis dimatikan di Settings')
+      return
+    }
+    if (this.state.running) {
+      if (trigger !== 'bot') return
+      await new Promise<void>((r) => this.once('done', () => r()))
+    }
     this.refreshCosts()
     if (this.state.costTodayUsd >= cfg.dailyBudgetUsd) {
       this.patch({ lastError: `Batas biaya harian $${cfg.dailyBudgetUsd} tercapai — analisis dilewati.` })
+      if (trigger === 'bot') throw new Error(`batas biaya Claude harian $${cfg.dailyBudgetUsd} tercapai`)
       return
     }
     const active = new Set(activeSymbols(this.db).map((s) => s.symbol))
-    const symbols = [...new Set(this.deps.getWatchlist())].filter((s) => active.has(s))
+    const symbols = [...new Set(only ?? this.deps.getWatchlist())].filter((s) => active.has(s))
     if (!symbols.length) return
 
     const smcCfg = this.deps.getSmc()
@@ -116,9 +138,17 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
     }
     const newsCfg = this.deps.getNews()
     const prompt = [
-      `Pemicu analisis: ${trigger === 'news' ? `rilis news (${eventTitles.join(', ')})` : trigger === 'manual' ? 'diminta manual' : 'jadwal berkala'}.`,
+      `Pemicu analisis: ${
+        trigger === 'news'
+          ? `rilis news (${eventTitles.join(', ')})`
+          : trigger === 'manual'
+            ? 'diminta manual'
+            : trigger === 'bot'
+              ? 'bot menemukan setup OB valid baru (POI HTF → OB valid 15m) dan butuh konfirmasi sebelum entry. Nilai setup terbaru di konteks: bias searah setup kalau layak, confidence sesuai keyakinanmu, skip kalau tidak.'
+              : 'jadwal berkala'
+      }.`,
       `Analisis simbol berikut: ${ctxs.map((c) => c.symbol).join(', ')}.`,
-      'Posisi terbuka: tidak ada (bot belum aktif, mode paper).',
+      `Posisi/order bot: ${this.deps.getPositionsNote()}`,
       '',
       newsContext(this.news, this.deps.getNewsState(), newsCfg.currencies, newsCfg.impacts as string[]),
       '',
@@ -134,7 +164,13 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
     this.repo.startRun(runId, trigger, eventTitles, cfg.model)
     this.patch({ running: true, lastError: null })
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), RUN_TIMEOUT_MS)
+    const t0 = Date.now()
+    // progress trail, so a timeout says where it got stuck (turns, tools, last stderr)
+    const trail = { msgs: 0, turns: 0, tools: [] as string[], lastAt: t0, lastType: 'start', stderr: [] as string[] }
+    const timer = setTimeout(() => {
+      log.warn({ runId, elapsedMs: Date.now() - t0, ...trail, stderr: trail.stderr.slice(-5) }, 'claude run timeout; aborting')
+      ctrl.abort()
+    }, RUN_TIMEOUT_MS)
     const apiKey = this.deps.getApiKey()
     log.info({ runId, trigger, symbols: ctxs.map((c) => c.symbol), promptChars: prompt.length }, 'claude run start')
 
@@ -164,9 +200,21 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
             ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
             CLAUDE_AGENT_SDK_CLIENT_APP: 'smc-trading-assistant/0.1'
           },
-          stderr: (d) => log.debug({ stderr: d.slice(0, 500) }, 'claude cli')
+          stderr: (d) => {
+            trail.stderr.push(d.slice(0, 300))
+            if (trail.stderr.length > 20) trail.stderr.shift()
+            log.debug({ stderr: d.slice(0, 500) }, 'claude cli')
+          }
         }
       })) {
+        trail.msgs++
+        trail.lastAt = Date.now()
+        trail.lastType = m.type === 'system' || m.type === 'result' ? `${m.type}:${m.subtype}` : m.type
+        if (m.type === 'assistant') {
+          trail.turns++
+          for (const b of m.message.content) if (b.type === 'tool_use') trail.tools.push(b.name.replace(/^mcp__[^_]+__/, ''))
+          log.info({ runId, turn: trail.turns, elapsedMs: Date.now() - t0, tools: trail.tools.length }, 'claude turn')
+        }
         if (m.type === 'result') {
           result = {
             subtype: m.subtype,
@@ -199,8 +247,10 @@ export class ClaudeAnalyst extends EventEmitter<{ state: [ClaudeState]; done: []
         log.info({ runId, cost: result.cost, inTok: result.inTok, outTok: result.outTok, valid: v.valid }, 'claude run done')
       }
     } catch (err) {
-      const msg = ctrl.signal.aborted ? 'timeout' : (err as Error).message
-      log.error({ runId, err: msg }, 'claude run failed')
+      const msg = ctrl.signal.aborted
+        ? `timeout ${Math.round(RUN_TIMEOUT_MS / 60_000)} menit (${trail.turns} turn, ${trail.tools.length} tool call, pesan terakhir ${trail.lastType} ${Math.round((Date.now() - trail.lastAt) / 1000)} dtk lalu)`
+        : (err as Error).message
+      log.error({ runId, err: msg, elapsedMs: Date.now() - t0, stderr: trail.stderr.slice(-5) }, 'claude run failed')
       for (const c of ctxs) this.repo.addAnalysis(runId, skipItem(c.symbol, `run gagal: ${msg.slice(0, 200)}`), c.price, true)
       this.repo.finishRun(runId, { status: 'error', error: msg.slice(0, 500) })
       this.patch({ lastError: `Claude: ${msg.slice(0, 200)}` })

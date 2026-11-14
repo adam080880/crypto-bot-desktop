@@ -10,6 +10,21 @@ import { Label } from '@/components/ui/label'
 import { formatTime } from '@/lib/utils'
 import { StorageSettings } from '@/components/StorageSettings'
 
+/** Readable reason from a zod error that crossed IPC ("bot.maxSetupAgeMin: Too big ..."). */
+function failMsg(e: unknown): string {
+  const text = e instanceof Error ? e.message : String(e)
+  const m = text.match(/\[[\s\S]*\]/)
+  if (m) {
+    try {
+      const issues = JSON.parse(m[0]) as { path?: (string | number)[]; message?: string }[]
+      return 'Gagal: ' + issues.map((i) => `${(i.path ?? []).join('.')}: ${i.message ?? ''}`).join('; ')
+    } catch {
+      /* not zod JSON */
+    }
+  }
+  return `Gagal: ${text}`
+}
+
 const SECRET_LABELS: Record<SecretName, string> = {
   'binance.apiKey': 'Binance API Key',
   'binance.apiSecret': 'Binance API Secret',
@@ -68,7 +83,6 @@ function SecretRow({ s, onChange }: { s: SecretStatus; onChange: (list: SecretSt
 }
 
 const RISK_FIELDS: { key: Exclude<keyof RiskConfig, 'requireStopLoss'>; label: string; step: number }[] = [
-  { key: 'maxPositionPct', label: 'Max size per posisi (% equity)', step: 0.1 },
   { key: 'maxDailyLossPct', label: 'Max daily loss (% equity) → bot berhenti', step: 0.1 },
   { key: 'maxOpenPositions', label: 'Max posisi terbuka', step: 1 },
   { key: 'maxLeverage', label: 'Max leverage', step: 1 }
@@ -152,8 +166,7 @@ export function Settings() {
                   setRisk(next.risk)
                   setRiskMsg('Tersimpan')
                 } catch (e) {
-                  setRiskMsg(`Gagal: nilai tidak valid`)
-                  console.error(e)
+                  setRiskMsg(failMsg(e))
                 }
               }}
             >
@@ -168,6 +181,7 @@ export function Settings() {
       {config && <DataSettings config={config} onSaved={setConfig} />}
       {config && <NewsSettings config={config} onSaved={setConfig} />}
       {config && <ClaudeSettings config={config} onSaved={setConfig} />}
+      {config && <BotSettings config={config} onSaved={setConfig} />}
 
       <Card>
         <CardHeader>
@@ -253,8 +267,8 @@ function DataSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
                 })
                 onSaved(next)
                 setMsg('Tersimpan')
-              } catch {
-                setMsg('Gagal: cek format simbol (contoh BTCUSDT) dan angka interval')
+              } catch (e) {
+                setMsg(failMsg(e))
               }
             }}
           >
@@ -339,8 +353,8 @@ function NewsSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
                 onSaved(next)
                 setRules(JSON.stringify(next.news.rules, null, 2))
                 setMsg('Tersimpan')
-              } catch {
-                setMsg('Gagal: cek format aturan (key, match, higherIsGoodForUsd, source)')
+              } catch (e) {
+                setMsg(failMsg(e))
               }
             }}
           >
@@ -355,6 +369,75 @@ function NewsSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: App
             }}
           >
             Reset ke default
+          </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppConfig) => void }) {
+  const [b, setB] = useState(config.bot)
+  const [msg, setMsg] = useState<string | null>(null)
+  const num = (k: 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity', label: string, step: number) => (
+    <>
+      <Label htmlFor={`bot-${k}`}>{label}</Label>
+      <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
+    </>
+  )
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Bot entry</CardTitle>
+        <CardDescription>
+          Start/stop dan saklar LIVE ada di halaman Bot. Entry cuma dari setup screener: POI HTF kena → OB valid {config.smc.entryTimeframe}, di koin crypto top
+          volume, dan wajib ada analisis Claude yang searah dengan confidence ≥ minimum.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+          {num('riskPerTradePct', 'Risk per order (% equity yang rela hilang kalau kena SL)', 0.1)}
+          {num('minConfidence', 'Min confidence Claude (0–100)', 1)}
+          {num('maxAnalysisAgeMin', 'Umur maks analisis Claude (menit)', 5)}
+          {num('topVolume', 'Koin crypto top N volume 24 jam', 10)}
+          {num('maxSetupAgeMin', 'Umur maks setup saat entry (menit)', 15)}
+          {num('paperEquity', 'Modal akun paper (USDT)', 1)}
+          <Label>POI HTF yang dipakai</Label>
+          <div className="flex justify-end gap-3 text-xs">
+            {(['1h', '4h', '1d'] as const).map((tf) => (
+              <label key={tf} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={b.poiTimeframes.includes(tf)}
+                  onChange={(e) => setB({ ...b, poiTimeframes: e.target.checked ? [...b.poiTimeframes, tf] : b.poiTimeframes.filter((x) => x !== tf) })}
+                />
+                {tf}
+              </label>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Ukuran posisi = equity × {b.riskPerTradePct}% ÷ jarak entry–SL (fee ikut dihitung). Contoh: equity 10 USDT, SL 0,5% dari entry → rugi maks{' '}
+          {((10 * b.riskPerTradePct) / 100).toFixed(2)} USDT, ukuran posisi ≈ {((10 * b.riskPerTradePct) / 100 / 0.0068).toFixed(0)} USDT (dibatasi leverage maks{' '}
+          {config.risk.maxLeverage}×). Order di bawah minimal Binance (biasanya 5 USDT, BTC 50, ETH 20) dilewati, bukan digedein.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                const { enabled: _e, live: _l, ...patch } = b
+                const next = await window.api.invoke('config:update', { bot: patch })
+                onSaved(next)
+                setB(next.bot)
+                setMsg('Tersimpan')
+              } catch (e) {
+                setMsg(failMsg(e))
+              }
+            }}
+          >
+            Simpan bot
           </Button>
           {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>
@@ -429,8 +512,8 @@ function ClaudeSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: A
                 onSaved(next)
                 setC(next.claude)
                 setMsg('Tersimpan')
-              } catch {
-                setMsg('Gagal: cek nilai')
+              } catch (e) {
+                setMsg(failMsg(e))
               }
             }}
           >

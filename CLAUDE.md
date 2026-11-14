@@ -30,8 +30,77 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
 ## Lanjut di sini
 Fase 6 ✅ dibangun (Claude analis via Agent SDK), **belum pernah dijalankan dengan model asli**. Run
 pertama menunggu persetujuan user, karena memakai kredit/akun Claude-nya. Setelah itu verifikasi hasil di
-halaman Claude Analyses. Berikutnya Fase 7 (bot trading Binance), hanya kalau user minta, dan
-strategi perlu backtest di data full dulu.
+halaman Claude Analyses. Fase 7 (bot) sudah dibuat atas permintaan user (lihat "Bot Fase 7"). Live belum pernah
+dites ke exchange beneran.
+
+## Screener (keputusan user)
+- Halaman **Screener**: scan **semua simbol yang punya histori 1m** (lolos `isSymbolAllowed`), dari data
+  tersimpan. Pakai `SmcService.context()` yang sama dengan chart/Claude, logika murni di
+  `src/main/screener/screen.ts`, runner `ScreenerService` di **data worker** (yield per simbol).
+- Kriteria per simbol+arah: setup OB valid aktif (pending/triggered), harga dekat POI aktif 1h/4h
+  (≤ `nearPoiPct`, sisi yang benar), trend 4h/1h/15m searah, BOS 1h/4h ≤ `bosRecentHours`. Baris
+  muncul kalau ada setup / dekat POI / BOS baru. Trend searah cuma flag/filter.
+- Pemicu: tombol manual + otomatis 1 menit setelah tiap 15m close + sekali 90 detik setelah start.
+  Auto-scan dilewati saat backfill manual. Hasil terakhir disimpan di setting `screener_last`.
+- Notifikasi desktop untuk setup baru dari scan otomatis (`screener.notify`).
+- Benchmark data asli (155 simbol): ±1,3 detik.
+- Header tabel bisa diklik buat sort (naik → turun → balik ke ranking screener). Sel kosong selalu di bawah.
+
+## Backtest (keputusan user, 2026-11-12)
+- **Satu koin saja**, yaitu yang lagi dibuka di Chart (`localStorage chart.symbol`). Jangan scan semua koin.
+  Jalan di main lewat IPC `backtest:run` (~1,5–2 dtk per koin, data 6 bulan). Logika murni ada di
+  `src/main/backtest/engine.ts`, runner di `runBacktest.ts`, memakai `SmcService.history()` (semua candle).
+- Ada dua ukuran: **A. setup** (POI hit → OB valid → limit, sampai TP/SL, dalam R) dan **B. reaksi POI**
+  (dari garis POI, race +X% vs −X%, X = 0,5/1/2%, jendela `reactionHours`; sisi rugi dihitung duluan).
+- **Lewat TP = batal**: `followSetup` memberi status `missed` kalau TP kena sebelum limit entry terisi,
+  termasuk kalau entry dan TP kena di candle yang sama (konservatif). Berlaku juga di live/screener/chart.
+- Fee: entry & TP maker 0,02%, SL taker 0,05% + slippage 0,02% (bisa diubah di form).
+- Periode: out-of-sample = 60 hari terakhir, sisanya in-sample (4+2 bulan). Kalau histori < 3× itu,
+  dibagi 2:1.
+- Simulasi equity: risk `bot.riskPerTradePct` % equity per order, size = risk ÷ jarak SL, dibatasi
+  `risk.maxLeverage`, 1 posisi per koin, berhenti sisa hari UTC kalau rugi harian ≥ `risk.maxDailyLossPct`.
+  Belum memperhitungkan minimal notional order Binance.
+- Hasil awal (default config, 4 koin besar, 6 bulan): sebelum fee kira-kira impas, setelah fee −0,1 s/d −0,6R
+  per trade. Median jarak SL 0,2–0,28%, jadi fee ≈ 0,3–0,4R. Skor setup tidak berkorelasi dengan hasil.
+  Reaksi POI 4h lebih kuat dari 15m.
+
+## Confidence & skor (untuk Fase 7)
+- User: **confidence berpengaruh besar untuk bot**. Setting `bot.minConfidence` (default 70, int 0–100,
+  Settings → Bot entry) = syarat minimum `confidence` analisis Claude. Belum dipakai, karena bot belum ada.
+- `confidence` itu **nilai self-report Claude** (prompt: "confidence 0–100"), bukan hasil hitungan kode.
+  Belum ada rubrik di prompt dan validasinya cuma range (zod). Analisis juga nggak terikat ke setup id
+  tertentu, dan cuma jalan saat news/manual untuk watchlist (bisa basi berjam-jam).
+  → Bot wajib cek: bias == arah setup, umur analisis, `forcedSkip` = false.
+- User: setting bot **berbasis risk**. `bot.riskPerTradePct` (default 1, 0,05–5) = % equity yang rela hilang
+  per order kalau kena SL. Size = equity × risk% ÷ (jarak entry–SL + fee). `risk.maxPositionPct` **dihapus**
+  (keputusan user): notional dibatasi `risk.maxLeverage` × equity.
+
+## Bot Fase 7 (keputusan user, 2026-11-12)
+- User minta **tanpa testnet**: paper → live. `bot.live` default false, **tidak bisa** diubah lewat
+  `config:update` (patch schema meng-omit `live`). Cuma lewat IPC `bot:setLive` + ketik "LIVE" + kedua
+  Binance key tersimpan. Saklar ada di halaman Bot.
+- Kode: `src/main/bot/` (jalan di **data worker**, di sebelah screener & Claude). `gate.ts` (setup/akun/Claude),
+  `sizing.ts`, `brokers.ts` (Paper/Live), `binanceTrade.ts` (REST signed), `botService.ts`, tabel
+  `bot_trades` + `bot_events` (migration 0005).
+- Kandidat = setup screener **pending** di koin **crypto** (`underlyingType COIN` + subtype `Crypto`, bukan
+  TradFi/XAU/index) **top `bot.topVolume` (100) volume 24 jam** yang punya data lokal, POI dari
+  `bot.poiTimeframes` (1h/4h = "POI HTF kena → OB valid 15m"), umur setup ≤ `maxSetupAgeMin`.
+- **Confidence Claude wajib** (keputusan user): analisis harus dibuat setelah setup diketahui, umur ≤
+  `maxAnalysisAgeMin`, bias searah, confidence ≥ `minConfidence`, bukan forcedSkip. Kalau belum ada,
+  bot memanggil `analyst.runFor(symbols)` (trigger `bot`, kena batas biaya harian Claude).
+- Order live: isolated margin, One-way Mode (Hedge Mode ditolak), limit entry **post-only (GTX)**, SL
+  **STOP_MARKET closePosition** lewat **Algo Order API** (`/fapi/v1/algoOrder`), dipasang langsung setelah
+  entry. Kalau SL gagal, entry dibatalkan. TP = limit reduce-only setelah fill. Pending dibatalkan
+  kalau lewat TP / expired / Kill Switch. Posisi terbuka tetap dijaga SL+TP saat Kill Switch.
+- Satu posisi per koin, `risk.maxOpenPositions`, berhenti sisa hari UTC kalau rugi ≥ `maxDailyLossPct`,
+  tidak entry di news window. Order di bawah min notional Binance dilewati, bukan diperbesar.
+- Universe di-stream live (LiveSources.bot) supaya data screener segar. Event `kline` LiveService dipakai
+  untuk deteksi fill/TP/SL paper dan "lewat TP".
+- Mode live **belum pernah dites ke Binance beneran** (tidak ada testnet). Order pertama perlu diawasi user.
+- `Setup.score` (deterministik, `detectSetups` §9): 3 + FVG ±2 + POI TF lebih tinggi +1 + searah trend
+  TF POI +1 + candle sebelumnya berlawanan +1 → rentang 1–8. **Fix look-ahead (2026-11-11):** trend
+  dulu dibaca dari candle HTF yang belum close. Sekarang pakai `trendKnownAt` (waktu close). Efeknya ke
+  79/6799 setup di data lokal.
 
 ## Claude analis (Fase 6, keputusan user)
 - Pakai **Claude Agent SDK** (Claude Code CLI), model **claude-opus-5-5**, effort medium.
@@ -61,6 +130,12 @@ strategi perlu backtest di data full dulu.
 - WebSocket kline **wajib** pakai routed endpoint `wss://fstream.binance.com/market/stream`.
   URL lama tanpa `/market` tetap bisa connect tapi **tidak mengirim data kline** (diam-diam).
   Batasan: 1024 stream/koneksi, 10 pesan masuk/detik, koneksi diputus tiap 24 jam.
+- **DNS Cloudflare** (keputusan user, ISP memblokir Binance lewat DNS): `src/main/net/dns.ts`
+  `installCloudflareDns()` dipanggil di main, data worker, dan CLI backfill. Fungsi ini memasang undici global
+  dispatcher dengan custom lookup: DoH 1.1.1.1 → 1.0.0.1 → UDP Cloudflare → DNS sistem (ada log). Fetch dan
+  WebSocket bawaan Node ikut lewat sini. Matikan dengan env `SMC_SYSTEM_DNS=1`. Tombol **Test koneksi** di halaman
+  Bot (`bot:testConnection`, `src/main/net/binanceCheck.ts`) bersifat read-only dan mengecek DNS, REST, WS, akun,
+  dan position mode.
 
 ## Pertanyaan yang masih terbuka (tanyakan ke user)
 1. Simpan harga sebagai integer berskala tick size untuk menghemat ~30–40% DB? Paling gampang
