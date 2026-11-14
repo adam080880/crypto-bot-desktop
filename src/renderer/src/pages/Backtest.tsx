@@ -33,7 +33,8 @@ const CONF_CHIPS: { key: Confluence; label: string }[] = [
   { key: 'wyckoff', label: 'Wyckoff searah' },
   { key: 'manipulation', label: 'spring/UTAD' },
   { key: 'unicorn', label: 'unicorn' },
-  { key: 'equalLiq', label: 'equal H/L' }
+  { key: 'equalLiq', label: 'equal H/L' },
+  { key: 'killzone', label: 'killzone London/NY' }
 ]
 const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'model', label: 'Model', of: (s) => s.model },
@@ -346,7 +347,7 @@ function Results(p: {
           <Chips label="Arah" options={[{ key: 'bullish', label: 'long' }, { key: 'bearish', label: 'short' }]} value={filter.dirs} onChange={(dirs) => setFilter({ ...filter, dirs })} />
           <Chips label="POI induk" options={poiOptions} value={filter.pois} onChange={(pois) => setFilter({ ...filter, pois })} />
           <Chips label="Entry di" options={childOptions} value={filter.childKinds} onChange={(childKinds) => setFilter({ ...filter, childKinds })} />
-          <Chips label="Wajib ada" options={CONF_CHIPS} value={filter.conf} onChange={(conf) => setFilter({ ...filter, conf })} />
+          <Chips label="Wajib ada (SMC)" options={CONF_CHIPS} value={filter.conf} onChange={(conf) => setFilter({ ...filter, conf })} />
           <div className="flex flex-wrap items-center gap-2">
             <span className="w-24 shrink-0 text-muted-foreground">Skor min</span>
             <Input type="number" className="num h-7 w-16 text-right" value={filter.minScore} onChange={(e) => setFilter({ ...filter, minScore: Number(e.target.value) || 0 })} />

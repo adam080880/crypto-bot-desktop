@@ -7,6 +7,7 @@ import type { SmcAnalysisFull } from './analyze'
 import { bodyHi, bodyLo } from './candle'
 import type { OrderBlockIdx } from './orderBlocks'
 import type { Pivot } from './swings'
+import { atrSeries, emaSeries } from './atr'
 import { wyckoffAt } from './wyckoff'
 
 /** A point of interest from any timeframe, normalised. */
@@ -176,6 +177,8 @@ interface Draft {
   invalidLevel: number
   confluence: Confluence[]
   reasons: string[]
+  /** Pending expiry in entry candles (default cfg.setupExpiryCandles). */
+  expiry?: number
 }
 
 /**
@@ -196,6 +199,7 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M1')) drafts.push(...modelM1(input, pois))
   if (models.has('M2a') || models.has('M2b')) drafts.push(...modelM2(input, all, pois, models))
   if (models.has('M4')) drafts.push(...modelM4(input, all))
+  if (models.has('M5')) drafts.push(...modelM5(input, all))
 
   const best = new Map<string, Setup>()
   for (const d of drafts) {
@@ -556,6 +560,69 @@ function modelM4({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): D
   return out
 }
 
+// ---------- M5: trend following (Donchian breakout) ----------
+
+/**
+ * Not SMC (user asked for other strategies; lab 2y BTC/ETH/SOL with fees: +0,15R/trade, OOS +0,08R).
+ * A close of `trendTimeframe` beyond the highest high / lowest low of the previous `trendChannel`
+ * candles, on the right side of the EMA → limit at that close (∓ offset × ATR), SL trendAtrMult × ATR
+ * behind it. The wide SL keeps fees at ≈ 0,03R. Exit = trailing only (config trendExit).
+ */
+function modelM5({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): Draft[] {
+  const a = all.find((x) => x.timeframe === cfg.trendTimeframe)
+  if (!a) return []
+  const c = a.candles
+  const n = cfg.trendChannel
+  const atr = cfg.atrPeriod === 14 ? a.atr : atrSeries(c, 14)
+  const ema = cfg.trendEma > 0 ? emaSeries(c, cfg.trendEma) : null
+  const hi = (j: number): number => {
+    let m = -Infinity
+    for (let k = j - n; k < j; k++) m = Math.max(m, c[k]!.h)
+    return m
+  }
+  const lo = (j: number): number => {
+    let m = Infinity
+    for (let k = j - n; k < j; k++) m = Math.min(m, c[k]!.l)
+    return m
+  }
+  const out: Draft[] = []
+  for (let i = Math.max(n + 1, cfg.trendEma); i < c.length; i++) {
+    const x = c[i]!
+    const up = x.c > hi(i) && (!ema || x.c > ema[i]!) && (!cfg.trendFreshOnly || c[i - 1]!.c <= hi(i - 1))
+    const dn = !cfg.trendLongOnly && x.c < lo(i) && (!ema || x.c < ema[i]!) && (!cfg.trendFreshOnly || c[i - 1]!.c >= lo(i - 1))
+    if (!up && !dn) continue
+    const knownIdx = lastClosedBy(entry.candles, entry.timeframe, closeTime(x.t, a.timeframe))
+    if (knownIdx < 0) continue
+    const bull = up
+    const level = bull ? x.c - cfg.trendEntryOffsetAtr * atr[i]! : x.c + cfg.trendEntryOffsetAtr * atr[i]!
+    const sl = bull ? level - cfg.trendAtrMult * atr[i]! : level + cfg.trendAtrMult * atr[i]!
+    const channel = bull ? hi(i) : lo(i)
+    out.push({
+      model: 'M5',
+      dir: bull ? 'bullish' : 'bearish',
+      poi: { kind: 'BO', timeframe: a.timeframe, level: channel, t: x.t, hitT: null, origin: null },
+      child: { kind: 'BREAKOUT', timeframe: a.timeframe, t: x.t, level, extreme: sl, hasFvg: false, origin: null },
+      entry: level,
+      sl,
+      knownIdx,
+      invalidLevel: sl,
+      confluence: [],
+      reasons: [
+        `close ${a.timeframe} ${x.c} tembus ${bull ? 'high' : 'low'} ${n} candle (${channel})${ema ? ` di ${bull ? 'atas' : 'bawah'} EMA${cfg.trendEma}` : ''}`,
+        `SL ${cfg.trendAtrMult}×ATR, exit trailing (tanpa BE/TP)`
+      ],
+      expiry: cfg.trendExpiryCandles
+    })
+  }
+  return out
+}
+
+/** Hour (UTC) of `t` inside one of the [from, to) killzones. */
+export function inKillzone(t: number, zones: readonly (readonly [number, number])[]): boolean {
+  const h = new Date(t).getUTCHours()
+  return zones.some(([from, to]) => h >= from && h < to)
+}
+
 // ---------- score, TP, status ----------
 
 const SCORE: Partial<Record<Confluence, number>> = {
@@ -589,7 +656,8 @@ const CONF_LABEL: Record<Confluence, string> = {
   manipulation: 'ada manipulation (spring/UTAD) searah',
   wyckoffAgainst: 'fase Wyckoff berlawanan',
   unicorn: 'breaker + FVG (unicorn)',
-  prevOpposite: 'candle sebelum OB berlawanan warna'
+  prevOpposite: 'candle sebelum OB berlawanan warna',
+  killzone: 'muncul di killzone London/NY'
 }
 
 function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft): Setup | null {
@@ -624,8 +692,12 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
     break
   }
 
-  const tpLiquidity = nearestTarget(all, bull, d.entry, known)
-  const exit = input.exit ?? { tpMode: 'liquidity', tpR: 5 }
+  // killzone = when the setup became known (the order goes in then); filter only, no score
+  if (inKillzone(known - 1, cfg.killzonesUtc)) conf.add('killzone')
+
+  // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
+  const tpLiquidity = d.model === 'M5' ? null : nearestTarget(all, bull, d.entry, known)
+  const exit = d.model === 'M5' ? { tpMode: 'trail' as const, tpR: 20 } : (input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk
@@ -634,7 +706,8 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
   let score = 3
   for (const k of conf) score += SCORE[k] ?? 0
   const confluence = [...conf]
-  const { status, statusT, filledT } = followSetup(c, d.knownIdx, bull, d.entry, d.sl, tp, d.invalidLevel, cfg.setupExpiryCandles)
+  const expiry = d.expiry ?? cfg.setupExpiryCandles
+  const { status, statusT, filledT } = followSetup(c, d.knownIdx, bull, d.entry, d.sl, tp, d.invalidLevel, expiry)
   return {
     id: `${symbol}-${d.model}-${d.child.timeframe}-${d.child.t}-${d.dir}`,
     symbol,
@@ -653,7 +726,8 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
     createdT: c[d.knownIdx]!.t,
     status,
     statusT,
-    filledT
+    filledT,
+    ...(d.expiry !== undefined ? { expiryCandles: d.expiry } : {})
   }
 }
 

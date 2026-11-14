@@ -1,5 +1,5 @@
 import type { CoinProfile } from '@shared/backtest'
-import type { BotConfig, ExitConfig, RiskConfig } from '@shared/config'
+import { trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { MODEL_LABEL, poiConcept, setupPoiLabel } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -25,6 +25,16 @@ export const cancelLevel = (s: Pick<ScreenerSetup, 'entry' | 'sl' | 'tp' | 'tpLi
   return s.tp
 }
 
+/**
+ * Exit plan for a setup: the coin profile's plan (chosen in the backtest Meta table) wins; without one,
+ * M5 (trend) uses its own trailing-only plan and the SMC models use the global `exit` config.
+ */
+export function exitFor<E extends ExitConfig>(model: string, base: E, profile: CoinProfile | null | undefined, smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): E {
+  if (profile) return { ...base, ...profile.plan.exit }
+  if (model === 'M5') return { ...base, ...trendExit(smc) }
+  return base
+}
+
 /** When the setup became known: close of the OB valid confirmation candle. */
 export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.createdT + TF_MS[entryTf]
 
@@ -48,14 +58,15 @@ export function setupGate(
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
   if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
-  const missing = (p ? p.requireConfluence : o.bot.requireConfluence).filter((k) => !(s.confluence as string[]).includes(k))
+  // required confluences are SMC concepts (FVG, trend of the POI TF…); the M5 trend model is exempt
+  const missing = s.model === 'M5' ? [] : (p ? p.requireConfluence : o.bot.requireConfluence).filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
   const minScore = p ? p.minScore : o.bot.minScore
   if (s.score < minScore) return `skor ${s.score} < ${minScore}`
   if (s.status !== 'pending') return 'entry sudah kena sebelum bot sempat pasang limit'
   const age = o.now - knownAt(c, o.entryTf)
   if (age > o.bot.maxSetupAgeMin * 60_000) return `setup sudah ${Math.round(age / 60_000)} menit (maks ${o.bot.maxSetupAgeMin})`
-  const tp = cancelLevel(s, p ? p.plan.exit : (o.exit ?? { tpMode: 'liquidity' }))
+  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' ? { tpMode: 'trail' } : (o.exit ?? { tpMode: 'liquidity' }))
   if (bull ? c.price >= tp : c.price <= tp) return 'harga sudah sampai TP (lewat TP)'
   if (bull ? c.price <= s.entry : c.price >= s.entry) return 'harga sudah di/lewat entry'
   return null

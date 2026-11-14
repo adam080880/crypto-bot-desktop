@@ -199,3 +199,27 @@ di PC karena DB-nya ada di sana.
 9. Bot bisa entry **tanpa Claude** (`bot.requireClaude`, default mati), murni dari analisa ICT.
 10. `pnpm test` / `pnpm typecheck` boleh dijalankan. **dev/build tidak.** Data uji = BTC/ETH/SOL dari
     data.binance.vision (disimpan di luar DB user).
+
+## 9. Strategi di luar SMC (2026-11-14, permintaan user "ada strategi lain yang efektif?")
+Lab: BTC/ETH/SOL 2 tahun, out-of-sample = 240 hari terakhir, fee + slippage, fill/exit di 1m.
+
+| Kandidat | Hasil | Status |
+|---|---|---|
+| 1. SMC naik TF (entry 1h, POI 4h/1d) | M4 + FVG + trend, TP 1R: 181 trade, WR 56%, +0,06R (OOS +0,10R). M1 lebih jelek dari 15m | Bisa lewat config `smc.entryTimeframe: '1h'` (global) |
+| 2. Killzone London/NY | Tidak ada edge (M1 di killzone −0,07R vs +0,03R di luar) | Konfluensi/filter `killzone` (`smc.killzonesUtc`, default 07–10 & 12–15 UTC), tanpa skor |
+| 3. Funding rate + open interest | Belum: butuh downloader data baru (data.binance.vision `fundingRate` / `metrics`) | Belum dikerjakan |
+| 4. Trend following 4h (Donchian) | Benchmark lab: +0,15–0,32R per trade, positif di IS dan OOS di hampir semua varian N20 + EMA200 | **M5** di app |
+| 5. Rotasi momentum antar koin | Butuh model portofolio (beda arsitektur dari bot per setup) | Belum dikerjakan |
+
+### M5 — trend breakout 4h (`setups.ts modelM5`)
+- Close `smc.trendTimeframe` (4h) di atas high / di bawah low `trendChannel` (20) candle sebelumnya, di sisi EMA
+  `trendEma` (200) yang benar, dan close sebelumnya masih di dalam channel (`trendFreshOnly`).
+- Limit di harga close itu (± `trendEntryOffsetAtr` × ATR), SL `trendAtrMult` (3) × ATR = 1R, expiry
+  `trendExpiryCandles` (16 × 15m). Close tembus SL sebelum fill = invalid.
+- Exit **khusus** (`trendExit()`): tanpa BE, tanpa partial, tanpa TP. Tiap 0,25R best baru, SL = best − 1R. Bot pakai
+  exit ini untuk M5 kecuali koin punya profil. Backtest punya plan `trend`.
+- Konfluensi wajib bot / filter "Wajib ada" Backtest **tidak berlaku** untuk M5 (itu konsep SMC).
+- Lewat kode app (tanpa aturan 1 posisi per koin): 627 trade, WR 46%, +0,08R (IS +0,08, OOS +0,10).
+- Risiko: periode OOS kebetulan trend kuat, cuma 3 koin. Tes ulang di Backtest app untuk banyak koin sebelum live.
+- Di live, kalau harga sudah balik ke bawah harga close breakout (long) saat bot lihat setup, bot melewatinya
+  (limit post-only tidak bisa dipasang di atas harga).

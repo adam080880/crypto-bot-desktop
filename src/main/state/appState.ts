@@ -20,6 +20,9 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
   ) {
     super()
     this.config = readSetting(db, 'app_config', appConfigSchema) ?? defaultAppConfig
+    // smc.models has no UI: configs saved before M5 existed get the new model detected (the bot still
+    // only trades what bot.models allows)
+    if (!this.config.smc.models.includes('M5')) this.config = { ...this.config, smc: { ...this.config.smc, models: [...this.config.smc.models, 'M5'] } }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {

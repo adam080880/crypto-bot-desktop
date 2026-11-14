@@ -23,7 +23,8 @@ export function applyFilter(setups: readonly BtSetup[], f: BtFilter): BtSetup[] 
       (!f.dirs.length || f.dirs.includes(s.dir)) &&
       (!f.pois.length || f.pois.includes(poiKey(s))) &&
       (!f.childKinds.length || f.childKinds.includes(s.childKind)) &&
-      f.conf.every((k) => s.conf.includes(k)) &&
+      // required confluences are SMC concepts; the M5 trend model is exempt (same rule as the bot gate)
+      (s.model === 'M5' || f.conf.every((k) => s.conf.includes(k))) &&
       s.score >= f.minScore
   )
 }

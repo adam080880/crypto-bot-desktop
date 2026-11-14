@@ -16,9 +16,9 @@ const POI_LOOKBACK = 1000 // ≈ 166 days of 4h / 41 days of 1h
 const BTC = 'BTCUSDT'
 const BTC_CACHE_MS = 30_000
 
-/** Timeframes analysed for setups: entry + POI timeframes (+1d for origin checks). */
+/** Timeframes analysed for setups: entry + POI timeframes (+1d for origin checks, + the M5 trend TF). */
 export function setupTimeframes(cfg: SmcConfig): Timeframe[] {
-  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d'])]
+  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe])]
 }
 
 export class SmcService {

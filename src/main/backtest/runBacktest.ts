@@ -47,9 +47,10 @@ export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, o
 
   progress('detect')
   const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc })
-  const plans = defaultPlans(config.exit)
+  const plans = defaultPlans(config.exit, cfg)
   const setups: BtSetup[] = []
-  const sim = { entry: c, entryTf: cfg.entryTimeframe, minute, fees, expiry: cfg.setupExpiryCandles, slBufferPct: cfg.slBufferPct }
+  // trend trades (M5) can run for weeks: follow every open trade up to 90 days
+  const sim = { entry: c, entryTf: cfg.entryTimeframe, minute, fees, expiry: cfg.setupExpiryCandles, slBufferPct: cfg.slBufferPct, maxHoldMs: 90 * 86_400_000 }
   detected.forEach((s, i) => {
     if (i % 100 === 0) progress('simulate', i, detected.length)
     setups.push({

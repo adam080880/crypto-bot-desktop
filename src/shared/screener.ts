@@ -21,6 +21,8 @@ export interface ScreenerSetup {
   poi: { kind: PoiKind; timeframe: Timeframe; origin: PoiOrigin | null }
   /** Where the limit sits. */
   child: { kind: ChildKind; timeframe: Timeframe }
+  /** Pending expiry in entry candles when the model has its own (M5). */
+  expiryCandles?: number
 }
 
 /** One symbol + direction that meets at least one criterion. */

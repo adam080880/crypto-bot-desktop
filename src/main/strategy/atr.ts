@@ -16,3 +16,11 @@ export function atrSeries(c: readonly Candle[], period: number): number[] {
   }
   return out
 }
+
+/** EMA of the closes (seeded with the first close). `out[i]` uses candles 0..i only. */
+export function emaSeries(c: readonly Candle[], period: number): number[] {
+  const out = new Array<number>(c.length)
+  const k = 2 / (period + 1)
+  for (let i = 0; i < c.length; i++) out[i] = i ? out[i - 1]! + k * (c[i]!.c - out[i - 1]!) : c[i]!.c
+  return out
+}

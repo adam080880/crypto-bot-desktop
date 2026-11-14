@@ -41,7 +41,8 @@ export function screenSymbol(input: ScreenInput, cfg: ScreenerConfig, now: numbe
       status: x.status as 'pending' | 'triggered',
       createdT: x.createdT,
       poi: { kind: x.poi.kind, timeframe: x.poi.timeframe, origin: x.poi.origin },
-      child: { kind: x.child.kind, timeframe: x.child.timeframe }
+      child: { kind: x.child.kind, timeframe: x.child.timeframe },
+      ...(x.expiryCandles !== undefined ? { expiryCandles: x.expiryCandles } : {})
     })
     const setups = input.setups
       .filter((x) => x.direction === dir && (x.status === 'pending' || x.status === 'triggered'))

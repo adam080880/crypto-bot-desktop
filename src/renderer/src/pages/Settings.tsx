@@ -430,7 +430,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
             </div>
           </div>
           <div className="col-span-2 space-y-1">
-            <Label>Konfluensi wajib (semua yang dicentang harus ada; kosong = bebas)</Label>
+            <Label>Konfluensi wajib untuk model SMC M0–M4 (semua yang dicentang harus ada; kosong = bebas). M5 trend tidak kena syarat ini</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
               {CONFLUENCE_CHOICES.map(({ key, label }) => {
                 const k = key as (typeof b.requireConfluence)[number]

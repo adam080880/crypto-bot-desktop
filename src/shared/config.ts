@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ENTRY_MODELS } from './smc'
 
 /**
  * Risk guard config. The limits are enforced in code (src/main/risk), never via prompts.
@@ -79,7 +80,7 @@ export const smcConfigSchema = z.object({
 
   // ---- entry v2 (docs/entry-v2.md) ----
   /** Entry models detected (screener/chart/backtest). M0 = old rule, kept as a baseline. */
-  models: z.array(z.enum(['M0', 'M1', 'M2a', 'M2b', 'M4'])).default(['M0', 'M1', 'M2a', 'M2b', 'M4']),
+  models: z.array(z.enum(ENTRY_MODELS)).default([...ENTRY_MODELS]),
   /** Pivot size for the small (entry-TF) structure used by CHoCH. */
   ltfPivot: z.number().int().min(1).max(10).default(2),
   /** M1/M2b: the LTF CHoCH must happen within N entry candles after the POI was hit. */
@@ -103,7 +104,35 @@ export const smcConfigSchema = z.object({
   /** Wyckoff range: N candles whose range ≤ wyRangeAtr × ATR (ATR measured before the range). */
   wyRangeCandles: z.number().int().min(5).max(200).default(24),
   wyRangeAtr: z.number().min(1).max(30).default(4),
-  wyckoffTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).default(['4h', '1h'])
+  wyckoffTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).default(['4h', '1h']),
+  /** Killzones (UTC hours [from, to)): London open 07–10, New York open 12–15 (winter time). Confluence 'killzone'. */
+  killzonesUtc: z
+    .array(z.tuple([z.number().int().min(0).max(23), z.number().int().min(1).max(24)]))
+    .max(6)
+    .default([
+      [7, 10],
+      [12, 15]
+    ]),
+
+  // ---- M5 trend following (not SMC; lab: docs/entry-v2.md §7) ----
+  /** Timeframe whose close must break the channel. */
+  trendTimeframe: z.enum(['1h', '4h', '1d']).default('4h'),
+  /** Donchian channel length (candles) the close must break. */
+  trendChannel: z.number().int().min(5).max(200).default(20),
+  /** Trend filter: close on the right side of this EMA (0 = off). */
+  trendEma: z.number().int().min(0).max(500).default(200),
+  /** SL = entry ∓ trendAtrMult × ATR (= 1R). */
+  trendAtrMult: z.number().min(0.5).max(10).default(3),
+  /** Limit entry at the breakout close ∓ N × ATR (0 = at the close). */
+  trendEntryOffsetAtr: z.number().min(0).max(3).default(0),
+  /** Only the first close beyond the channel (the previous close was still inside). */
+  trendFreshOnly: z.boolean().default(true),
+  trendLongOnly: z.boolean().default(false),
+  /** Pending limit expires after N entry-TF candles. */
+  trendExpiryCandles: z.number().int().min(1).max(500).default(16),
+  /** Exit: no break-even, no TP; every trailStepR of new best R the SL goes to best − trailGapR. */
+  trendTrailGapR: z.number().min(0.5).max(10).default(1),
+  trendTrailStepR: z.number().min(0.05).max(5).default(0.25)
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
@@ -262,10 +291,10 @@ export const botConfigSchema = z.object({
   /** Require a fresh Claude analysis (bias + confidence) before entering. Off = pure ICT/SMC math (user). */
   requireClaude: z.boolean().default(false),
   /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
-  models: z.array(z.enum(['M0', 'M1', 'M2a', 'M2b', 'M4'])).min(1).default(['M1', 'M2b', 'M4']),
-  /** Every one of these confluences must be present (backtest: FVG in the leg + trend of the POI TF). */
+  models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5']),
+  /** Every one of these confluences must be present on SMC setups (M0–M4; M5 trend is exempt). Backtest: FVG in the leg + trend of the POI TF. */
   requireConfluence: z
-    .array(z.enum(['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'wyckoff', 'manipulation', 'unicorn', 'prevOpposite']))
+    .array(z.enum(['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'wyckoff', 'manipulation', 'unicorn', 'prevOpposite', 'killzone']))
     .default(['fvg', 'trendParent']),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
@@ -309,6 +338,11 @@ export type RiskConfig = z.infer<typeof riskConfigSchema>
 export type AppConfig = z.infer<typeof appConfigSchema>
 
 export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
+
+/** Exit plan of M5 (trend): no break-even step, no partials, no TP — trailing only (best − gapR every stepR). */
+export function trendExit(smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> {
+  return { tpMode: 'trail', tpR: 20, ladder: [], trailStepR: smc.trendTrailStepR, trailGapR: smc.trendTrailGapR, orderFlowHold: false, orderFlowTf: '15m', orderFlowSignals: ['fvg', 'wick'], orderFlowWickRatio: 0.5 }
+}
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema

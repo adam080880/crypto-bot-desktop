@@ -48,6 +48,10 @@ dites ke exchange beneran.
 - Backtest lab 2 tahun BTC/ETH/SOL (fee + 1m): M0 −0,25R. M1 + FVG + trend di TP 1R: WR 53% (OOS 59%), ±0R.
   M4 + FVG + trend: WR 56%, ±0R. **Belum ada edge bersih yang konsisten setelah fee.** Fee ±0,15–0,2R per trade
   (SL median 0,4–0,6%). Order flow menaikkan WR 2–3 poin tapi avg R tidak naik. Script ada di scratchpad sesi, bukan repo.
+- **M5 trend breakout 4h** (bukan SMC, permintaan user 2026-11-14, `docs/entry-v2.md §9`): close 4h tembus channel 20 +
+  EMA200 → limit di close, SL 3×ATR, exit trailing saja (`trendExit`, tanpa BE/TP). Satu-satunya model yang positif di
+  IS dan OOS (lab +0,08R lewat kode app). Konfluensi wajib tidak berlaku untuk M5. `smc.models` lama otomatis ditambah M5
+  saat load (`appState`). Killzone (`killzone`, `smc.killzonesUtc`) = filter saja, di lab tidak ada edge.
 
 ## Screener (keputusan user)
 - Halaman **Screener**: scan **semua simbol yang punya histori 1m** (lolos `isSymbolAllowed`), dari data

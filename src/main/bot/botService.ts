@@ -12,7 +12,7 @@ import { readSetting, writeSetting } from '../db/settingsRepo'
 import { logger } from '../logger'
 import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTrade'
 import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
-import { accountGate, candidatesOf, claudeGate, knownAt, planTpFor, setupGate, type Candidate } from './gate'
+import { accountGate, candidatesOf, claudeGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
 import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
 import { pickLeverage, planOrder, roundStep, type LeverageBracket, type SymbolRules } from './sizing'
@@ -501,9 +501,9 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   private async enter(c: Candidate, a: { id: string; confidence: number } | null, equity: number): Promise<void> {
     const bot = this.deps.getBot()
     const profile = this.deps.getProfiles?.()[c.symbol] ?? null
-    const exit = { ...this.deps.getExit(), ...(profile?.plan.exit ?? {}) }
-    const risk = this.deps.getRisk()
     const smc = this.deps.getSmc()
+    const exit = exitFor(c.setup.model, this.deps.getExit(), profile, smc)
+    const risk = this.deps.getRisk()
     const mode = this.mode()
     const rules = this.rules.get(c.symbol)
     const dirLabel = c.direction === 'bullish' ? 'LONG' : 'SHORT'
@@ -568,7 +568,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       status: 'pending',
       reason: null,
       createdAt: Date.now(),
-      expiresAt: knownAt(c, smc.entryTimeframe) + smc.setupExpiryCandles * TF_MS[smc.entryTimeframe],
+      expiresAt: knownAt(c, smc.entryTimeframe) + (c.setup.expiryCandles ?? smc.setupExpiryCandles) * TF_MS[smc.entryTimeframe],
       filledAt: null,
       filledQty: null,
       closedAt: null,

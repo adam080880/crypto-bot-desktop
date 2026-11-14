@@ -128,7 +128,8 @@ export interface SmcAnalysis {
   wyckoff: WyckoffRange[]
 }
 
-export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK'
+/** BO = Donchian channel breakout (M5 trend model; not an SMC POI, it is the reason of a trend trade). */
+export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK' | 'BO'
 
 /** Display names (OB = Order Block; OCL Break is NOT an OB). */
 export const POI_LABEL: Record<PoiKind, string> = {
@@ -137,7 +138,8 @@ export const POI_LABEL: Record<PoiKind, string> = {
   SBR: 'SBR',
   QM: 'QM',
   OCL: 'OCL',
-  OCL_BREAK: 'OCL Break'
+  OCL_BREAK: 'OCL Break',
+  BO: 'Breakout'
 }
 
 /**
@@ -154,6 +156,7 @@ export const CONCEPT_LABEL: Record<PoiConcept, string> = { ...POI_LABEL, BREAKER
 /** "OB 4h → QM 15m"; M4 is just "Breaker 15m". */
 export function setupPath(model: string, poiKind: PoiKind, poiTf: string, childKind: string, childTf: string): string {
   if (model === 'M4') return `Breaker ${childTf}`
+  if (model === 'M5') return `Breakout ${poiTf}`
   return `${POI_LABEL[poiKind]} ${poiTf} → ${childKind === 'BREAKER' ? 'Breaker' : childKind} ${childTf}`
 }
 
@@ -173,18 +176,21 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *  M2a OB behind unswept liquidity (SSL/BSL in front of it) → limit at the OB
  *  M2b same OB, swept + tapped → LTF CHoCH → limit at the small POI (like M1)
  *  M4  breaker: OB broken after a liquidity sweep → limit on the retest (+FVG overlap = unicorn)
+ *  M5  trend following (not SMC): 4h close beyond the N-candle Donchian channel, on the EMA side →
+ *      limit at that close, SL k × ATR, exit by trailing only (no break-even, no TP). Lab 2y BTC/ETH/SOL: +0,15R.
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
   M1: 'M1 POI besar → POI kecil',
   M2a: 'M2a liquidity grab (limit di OB)',
   M2b: 'M2b liquidity grab + CHoCH',
-  M4: 'M4 breaker'
+  M4: 'M4 breaker',
+  M5: 'M5 trend breakout 4h'
 }
 
-export type ChildKind = 'OB' | 'QM' | 'BREAKER'
+export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT'
 
 /** Score/filter tags; FVG is information only (never an entry level). */
 export type Confluence =
@@ -202,6 +208,8 @@ export type Confluence =
   | 'wyckoffAgainst'
   | 'unicorn'
   | 'prevOpposite'
+  /** Setup became known inside a killzone (London / New York open, config smc.killzonesUtc). Filter only, no score. */
+  | 'killzone'
 
 /** Confluences that can be required (bot settings), with UI labels. */
 export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
@@ -216,7 +224,8 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'manipulation', label: 'spring/UTAD' },
   { key: 'unicorn', label: 'unicorn' },
   { key: 'equalLiq', label: 'equal H/L' },
-  { key: 'prevOpposite', label: 'candle sebelumnya berlawanan' }
+  { key: 'prevOpposite', label: 'candle sebelumnya berlawanan' },
+  { key: 'killzone', label: 'killzone London/NY' }
 ]
 
 /** A candidate entry (never an order by itself). */
@@ -245,4 +254,6 @@ export interface Setup {
   statusT: number | null
   /** Entry-TF candle on which the limit entry filled (null if it never did). */
   filledT: number | null
+  /** Pending limit expires after N entry candles (model-specific; default smc.setupExpiryCandles). */
+  expiryCandles?: number
 }
