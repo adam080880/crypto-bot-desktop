@@ -8,6 +8,7 @@ import { bodyHi, bodyLo } from './candle'
 import type { OrderBlockIdx } from './orderBlocks'
 import type { Pivot } from './swings'
 import { atrSeries, emaSeries } from './atr'
+import { flowConfluence, type FlowData } from './flow'
 import { wyckoffAt } from './wyckoff'
 
 /** A point of interest from any timeframe, normalised. */
@@ -162,6 +163,8 @@ export interface SetupInput {
   exit?: Pick<ExitConfig, 'tpMode' | 'tpR'>
   /** BTC trend sources for the score (omit for none). */
   btc?: { '4h'?: TrendSrc; '1h'?: TrendSrc }
+  /** Open interest / funding of this symbol (omit for none → no flow tags). */
+  flow?: FlowData
 }
 
 interface Draft {
@@ -657,7 +660,10 @@ const CONF_LABEL: Record<Confluence, string> = {
   wyckoffAgainst: 'fase Wyckoff berlawanan',
   unicorn: 'breaker + FVG (unicorn)',
   prevOpposite: 'candle sebelum OB berlawanan warna',
-  killzone: 'muncul di killzone London/NY'
+  killzone: 'muncul di killzone London/NY',
+  oiConfirm: 'open interest naik searah harga (24 jam)',
+  oiFlush: 'open interest flush (turun 4 jam)',
+  fundingContra: 'funding berlawanan dengan crowd'
 }
 
 function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft): Setup | null {
@@ -694,6 +700,10 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
 
   // killzone = when the setup became known (the order goes in then); filter only, no score
   if (inKillzone(known - 1, cfg.killzonesUtc)) conf.add('killzone')
+  // futures positioning (filter tags, no score)
+  const ago = lastClosedBy(c, entry.timeframe, known - 24 * 3_600_000)
+  const pxChg24h = ago >= 0 ? c[d.knownIdx]!.c / c[ago]!.c - 1 : null
+  for (const k of flowConfluence(input.flow, known, d.dir, pxChg24h, cfg)) conf.add(k)
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
   const tpLiquidity = d.model === 'M5' ? null : nearestTarget(all, bull, d.entry, known)

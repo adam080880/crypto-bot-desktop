@@ -52,6 +52,10 @@ dites ke exchange beneran.
   EMA200 → limit di close, SL 3×ATR, exit trailing saja (`trendExit`, tanpa BE/TP). Satu-satunya model yang positif di
   IS dan OOS (lab +0,08R lewat kode app). Konfluensi wajib tidak berlaku untuk M5. `smc.models` lama otomatis ditambah M5
   saat load (`appState`). Killzone (`killzone`, `smc.killzonesUtc`) = filter saja, di lab tidak ada edge.
+- **Open interest + funding** (`docs/entry-v2.md §10`): tag `oiConfirm` / `oiFlush` / `fundingContra` (filter, tanpa skor).
+  M5 + `oiConfirm` = +0,20R di IS dan OOS. Bot: `bot.trendRequireConfluence` (default `oiConfirm`) khusus M5. DB cuma
+  simpan OI 3 hari + funding 35 hari (`flow_oi`/`flow_funding`, `FlowSync` tiap jam). Backtest download histori dari
+  data.binance.vision saat run, tidak disimpan.
 
 ## Screener (keputusan user)
 - Halaman **Screener**: scan **semua simbol yang punya histori 1m** (lolos `isSymbolAllowed`), dari data

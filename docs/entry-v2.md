@@ -223,3 +223,27 @@ Lab: BTC/ETH/SOL 2 tahun, out-of-sample = 240 hari terakhir, fee + slippage, fil
 - Risiko: periode OOS kebetulan trend kuat, cuma 3 koin. Tes ulang di Backtest app untuk banyak koin sebelum live.
 - Di live, kalau harga sudah balik ke bawah harga close breakout (long) saat bot lihat setup, bot melewatinya
   (limit post-only tidak bisa dipasang di atas harga).
+
+## 10. Order flow futures: open interest + funding (2026-11-14)
+Lab (BTC/ETH/SOL, 2 tahun, data.binance.vision `metrics` + `fundingRate`), lewat kode app (`flowreal`):
+
+| Tag | Model | Ada tag | Tanpa tag |
+|---|---|---|---|
+| `oiConfirm` (OI 24 jam naik + harga 24 jam searah trade) | M5 trend | 363 trade, **+0,20R** (IS +0,19, OOS +0,20) | −0,07R (IS −0,06, OOS −0,08) |
+| `oiFlush` (OI turun ≥ 1% dalam 4 jam) | M1 | 35 trade, **+0,33R** (IS +0,26, OOS +0,50) | −0,09R |
+| `fundingContra` (funding di persentil ≤ 20% untuk long / ≥ 80% untuk short, ±90 settlement) | M5 / M1 | +0,24R / +0,11R | +0,06R / −0,03R |
+| semua tag | M4 | tidak membantu (fundingContra malah −0,12R) | |
+
+Studi event: funding tinggi justru diikuti harga lanjut naik (momentum, bukan sinyal kontra). Harga turun + OI turun
+(flush) diikuti pantulan +0,65% dalam 72 jam. Ini **filter**, bukan strategi yang berdiri sendiri.
+
+- `strategy/flow.ts` (murni): `flowAt` / `flowConfluence`. Hanya snapshot ≤ waktu setup diketahui (tanpa look-ahead).
+  Data hilang = tanpa tag. Tag tidak menambah skor.
+- Bot: `bot.requireConfluence` untuk M0–M4 dan `bot.trendRequireConfluence` (default `oiConfirm`) untuk M5. Profil koin
+  menyimpan satu daftar (diisi dari filter model itu).
+- **Penyimpanan (keputusan user: jangan simpan terus-terusan):** tabel `flow_oi` (snapshot 1 jam, **3 hari**) dan
+  `flow_funding` (**35 hari**, ±90 settlement untuk persentil). `FlowSync` di data worker tiap jam :00:40, satu request
+  OI + satu funding per simbol (limit Binance 1000 / 500 per 5 menit). Migration `drizzle/0006_flow.sql`.
+- **Backtest** tidak memakai DB: worker download `metrics` harian + `fundingRate` bulanan dari data.binance.vision saat
+  run (`flow/visionFlow.ts`, ±200 file kecil), ditambah REST untuk hari yang belum terbit. Tidak disimpan.
+- Catatan: file `metrics` yang lebih baru urutan barisnya acak, jadi parser selalu mengurutkan.

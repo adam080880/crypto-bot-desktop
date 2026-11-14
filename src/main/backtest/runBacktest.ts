@@ -7,6 +7,7 @@ import { symbolByName } from '../db/symbolsRepo'
 import { SmcService } from '../strategy/service'
 import { collectAllPois, detectSetups } from '../strategy/setups'
 import { poiTouch, reactionRows } from './engine'
+import type { FlowData } from '../strategy/flow'
 import { defaultPlans, simulateSetup, type SimStatus } from './simulate'
 
 const DAY = 86_400_000
@@ -28,7 +29,7 @@ const CODE: Record<SimStatus, BtResult['s']> = { win: 'w', be: 'b', loss: 'l', o
  * every exit plan side by side, fills and exits on stored 1m candles. The renderer filters the
  * per-setup results itself (no re-run for a different filter).
  */
-export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, onProgress?: (p: BacktestProgress) => void): BacktestResult | null {
+export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, onProgress?: (p: BacktestProgress) => void, flow?: FlowData): BacktestResult | null {
   const started = Date.now()
   const progress = (stage: BacktestProgress['stage'], done = 0, total = 0): void => onProgress?.({ symbol: params.symbol, stage, done, total })
   progress('load')
@@ -46,7 +47,7 @@ export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, o
   const fees = { makerFeePct: params.makerFeePct, takerFeePct: params.takerFeePct, slippagePct: params.slippagePct }
 
   progress('detect')
-  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc })
+  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc, flow })
   const plans = defaultPlans(config.exit, cfg)
   const setups: BtSetup[] = []
   // trend trades (M5) can run for weeks: follow every open trade up to 90 days
@@ -95,6 +96,7 @@ export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, o
     params: full,
     risk: { maxLeverage: config.risk.maxLeverage, maxDailyLossPct: config.risk.maxDailyLossPct },
     plans: plans.map(({ key, label, ...exit }) => ({ key, label, exit })),
+    flow: flow ? { oiFrom: flow.oi[0]?.t ?? null, oiTo: flow.oi.at(-1)?.t ?? null, funding: flow.funding.length } : null,
     setups,
     reactions
   }

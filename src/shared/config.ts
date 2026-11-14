@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ENTRY_MODELS } from './smc'
+import { ENTRY_MODELS, REQUIRABLE_CONFLUENCES } from './smc'
 
 /**
  * Risk guard config. The limits are enforced in code (src/main/risk), never via prompts.
@@ -132,7 +132,13 @@ export const smcConfigSchema = z.object({
   trendExpiryCandles: z.number().int().min(1).max(500).default(16),
   /** Exit: no break-even, no TP; every trailStepR of new best R the SL goes to best − trailGapR. */
   trendTrailGapR: z.number().min(0.5).max(10).default(1),
-  trendTrailStepR: z.number().min(0.05).max(5).default(0.25)
+  trendTrailStepR: z.number().min(0.05).max(5).default(0.25),
+
+  // ---- order flow from futures positioning (open interest / funding), docs/entry-v2.md §10 ----
+  /** oiFlush: open interest down at least this % over the last 4h. */
+  flowOiFlushPct: z.number().min(0).max(50).default(1),
+  /** fundingContra: funding percentile (last ~90 settlements) ≤ this for a long, ≥ 1 − this for a short. */
+  flowFundingPct: z.number().min(0).max(0.5).default(0.2)
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
@@ -292,10 +298,10 @@ export const botConfigSchema = z.object({
   requireClaude: z.boolean().default(false),
   /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
   models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5']),
-  /** Every one of these confluences must be present on SMC setups (M0–M4; M5 trend is exempt). Backtest: FVG in the leg + trend of the POI TF. */
-  requireConfluence: z
-    .array(z.enum(['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'wyckoff', 'manipulation', 'unicorn', 'prevOpposite', 'killzone']))
-    .default(['fvg', 'trendParent']),
+  /** Every one of these confluences must be present on SMC setups (M0–M4). Backtest: FVG in the leg + trend of the POI TF. */
+  requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent']),
+  /** Same for the M5 trend model. Lab: OI rising with the move = +0,19R vs −0,05R without (docs/entry-v2.md §10). */
+  trendRequireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['oiConfirm']),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),

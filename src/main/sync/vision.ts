@@ -47,16 +47,10 @@ export interface VisionFile {
 }
 
 /**
- * Download one zip, verify its SHA-256 against the published .CHECKSUM, unzip, parse.
+ * Download one zip, verify its SHA-256 against the published .CHECKSUM, unzip, return the CSV text.
  * Returns null when the file doesn't exist (404: not listed yet / not published yet).
  */
-export async function fetchVisionKlines(
-  symbol: string,
-  interval: string,
-  period: VisionPeriod,
-  signal?: AbortSignal
-): Promise<VisionFile | null> {
-  const url = visionUrl(symbol, interval, period)
+export async function fetchVisionCsv(url: string, signal?: AbortSignal): Promise<{ text: string; bytes: number } | null> {
   return withRetry(
     async () => {
       const res = await fetch(url, { signal: timeoutSignal(120_000, signal) })
@@ -76,8 +70,7 @@ export async function fetchVisionKlines(
       const files = unzipSync(zip)
       const csvName = Object.keys(files).find((n) => n.endsWith('.csv'))
       if (!csvName) throw new Error(`no csv inside ${url}`)
-      const text = new TextDecoder().decode(files[csvName])
-      return { candles: parseKlineCsv(text), bytes: zip.byteLength }
+      return { text: new TextDecoder().decode(files[csvName]), bytes: zip.byteLength }
     },
     {
       signal,
@@ -85,4 +78,10 @@ export async function fetchVisionKlines(
       onRetry: (attempt, err, delay) => log.warn({ url, attempt, delay, err: (err as Error).message }, 'retry vision')
     }
   )
+}
+
+/** Download + verify + parse one kline zip (null when it doesn't exist). */
+export async function fetchVisionKlines(symbol: string, interval: string, period: VisionPeriod, signal?: AbortSignal): Promise<VisionFile | null> {
+  const r = await fetchVisionCsv(visionUrl(symbol, interval, period), signal)
+  return r ? { candles: parseKlineCsv(r.text), bytes: r.bytes } : null
 }

@@ -58,8 +58,9 @@ export function setupGate(
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
   if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
-  // required confluences are SMC concepts (FVG, trend of the POI TF…); the M5 trend model is exempt
-  const missing = s.model === 'M5' ? [] : (p ? p.requireConfluence : o.bot.requireConfluence).filter((k) => !(s.confluence as string[]).includes(k))
+  // SMC models and the M5 trend model have their own required list (a profile, saved from one model, has one)
+  const required = p ? p.requireConfluence : s.model === 'M5' ? o.bot.trendRequireConfluence : o.bot.requireConfluence
+  const missing = required.filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
   const minScore = p ? p.minScore : o.bot.minScore
   if (s.score < minScore) return `skor ${s.score} < ${minScore}`

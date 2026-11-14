@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { exitConfigSchema, type ExitConfig } from './config'
-import { ENTRY_MODELS, type ChildKind, type Confluence, type Dir, type EntryModel, type PoiKind, type PoiOrigin } from './smc'
+import { ENTRY_MODELS, REQUIRABLE_CONFLUENCES, type ChildKind, type Confluence, type Dir, type EntryModel, type PoiKind, type PoiOrigin } from './smc'
 import type { Timeframe } from './timeframes'
 
 /** Backtest of one symbol over all stored data (Backtest v2, docs/entry-v2.md §5). */
@@ -96,13 +96,15 @@ export interface BacktestResult {
   /** Rules used by the equity simulation (snapshot of the risk config). */
   risk: { maxLeverage: number; maxDailyLossPct: number }
   plans: BtPlan[]
+  /** Open interest / funding history used for the flow confluences (null = not downloaded / failed). */
+  flow: { oiFrom: number | null; oiTo: number | null; funding: number } | null
   setups: BtSetup[]
   reactions: ReactionRow[]
 }
 
 export interface BacktestProgress {
   symbol: string
-  stage: 'load' | 'detect' | 'simulate' | 'done'
+  stage: 'load' | 'flow' | 'detect' | 'simulate' | 'done'
   done: number
   total: number
 }
@@ -124,7 +126,6 @@ export interface CoinProfile {
   stats: { trades: number; winrate: number | null; avgR: number | null; oosTrades: number; oosAvgR: number | null }
 }
 
-const CONFLUENCES = ['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'btcAgainst', 'wyckoff', 'manipulation', 'wyckoffAgainst', 'unicorn', 'prevOpposite', 'killzone'] as const
 
 /** Validation of a profile coming from the renderer. */
 export const coinProfileSchema = z
@@ -133,7 +134,7 @@ export const coinProfileSchema = z
     savedAt: z.number().int(),
     models: z.array(z.enum(ENTRY_MODELS)).min(1),
     pois: z.array(z.string().regex(/^[A-Z_]{2,10}\|(1m|5m|15m|1h|4h|1d|1w)$/)).max(50),
-    requireConfluence: z.array(z.enum(CONFLUENCES)).max(15),
+    requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).max(16),
     minScore: z.number().int().min(0).max(30),
     plan: z.object({
       key: z.string().max(30),

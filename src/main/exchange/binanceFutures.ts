@@ -77,6 +77,21 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Open interest history (value in USDT), oldest first. Binance keeps only the last ~30 days and
+   * limits these endpoints to 1000 requests / 5 min / IP.
+   */
+  async openInterestHist(symbol: string, period: '5m' | '1h', limit: number, signal?: AbortSignal): Promise<{ t: number; v: number }[]> {
+    const raw = await this.get<{ sumOpenInterestValue: string; timestamp: number }[]>('/futures/data/openInterestHist', { symbol, period, limit: Math.min(500, limit) }, 1, signal)
+    return raw.map((r) => ({ t: r.timestamp, v: Number(r.sumOpenInterestValue) })).filter((r) => Number.isFinite(r.v) && r.v > 0)
+  }
+
+  /** Settled funding rates, oldest first (shares 500 requests / 5 min / IP with fundingInfo). */
+  async fundingRates(symbol: string, limit: number, signal?: AbortSignal): Promise<{ t: number; r: number }[]> {
+    const raw = await this.get<{ fundingTime: number; fundingRate: string }[]>('/fapi/v1/fundingRate', { symbol, limit: Math.min(1000, limit) }, 1, signal)
+    return raw.map((r) => ({ t: r.fundingTime, r: Number(r.fundingRate) })).filter((r) => Number.isFinite(r.r))
+  }
+
+  /**
    * Closed klines with open time in [startTime, endTime), paging with limit 1000.
    * `endTime` should be the start of the currently forming candle so it's excluded.
    */

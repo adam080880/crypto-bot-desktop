@@ -6,6 +6,8 @@ import type { Db } from '../db/client'
 import { symbolByName } from '../db/symbolsRepo'
 import { analyzeSmc, toPublic, type SmcAnalysisFull } from './analyze'
 import { collectAllPois, detectSetups, type Poi, type SetupInput } from './setups'
+import { FlowRepo } from '../flow/flowRepo'
+import type { FlowData } from './flow'
 import type { ExitConfig } from '@shared/config'
 import type { Dir } from '@shared/smc'
 
@@ -24,9 +26,20 @@ export function setupTimeframes(cfg: SmcConfig): Timeframe[] {
 export class SmcService {
   private readonly repo: CandleRepo
   private btcCache: { at: number; v: SetupInput['btc'] } | null = null
+  private readonly flowRepo: FlowRepo
 
   constructor(private readonly db: Db) {
     this.repo = new CandleRepo(db)
+    this.flowRepo = new FlowRepo(db)
+  }
+
+  /** Stored open interest / funding (undefined when the tables don't exist yet, e.g. read-only DB before migration). */
+  private flow(symbolId: number): FlowData | undefined {
+    try {
+      return this.flowRepo.get(symbolId)
+    } catch {
+      return undefined
+    }
   }
 
   private analyzeFull(symbolId: number, tf: Timeframe, limit: number, cfg: SmcConfig): SmcAnalysisFull {
@@ -68,7 +81,7 @@ export class SmcService {
     const pois: Poi[] = collectAllPois(analyses, cfg).filter((p) => p.invalidT === null && p.activeFrom <= now)
     const liquidity = analyses.flatMap((a) => a.liquidity.filter((l) => l.kind === 'swing' && l.sweptT === null))
     const entry = analyses[0]!
-    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now) })
+    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id) })
     const lastBreak = Object.fromEntries(analyses.map((a) => [a.timeframe, a.breaks.at(-1) ?? null]))
     return { price, priceT, trend, pois, liquidity, setups, lastBreak }
   }
@@ -101,6 +114,6 @@ export class SmcService {
     const pois = setupTimeframes(cfg)
       .filter((tf) => tf !== cfg.entryTimeframe)
       .map((tf) => this.analyzeFull(sym.id, tf, POI_LOOKBACK, cfg))
-    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg) })
+    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg), flow: this.flow(sym.id) })
   }
 }

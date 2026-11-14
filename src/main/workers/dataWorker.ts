@@ -19,6 +19,7 @@ import { ScreenerService } from '../screener/screenerService'
 import { initLogger, logger } from '../logger'
 import { installCloudflareDns } from '../net/dns'
 import { AutoSync } from '../sync/autoSync'
+import { FlowSync } from '../flow/flowSync'
 import { Backfiller } from '../sync/backfill'
 import { estimateFullBackfill } from '../sync/estimate'
 import type { FromWorker, ServiceConfig, ToWorker, WorkerInit } from './protocol'
@@ -73,6 +74,13 @@ const autoSync = new AutoSync(
   (state) => send({ type: 'autosync', state }),
   () => manual === null
 )
+
+// open interest + funding for the flow confluences (docs/entry-v2.md §10)
+const flowSync = new FlowSync(db, {
+  symbols: () => backfiller.trackedSymbols([...config.watchlist, ...positions]),
+  getData: () => config.data,
+  canRun: () => manual === null
+})
 
 const news = new NewsService(db, {
   getConfig: () => config.news,
@@ -193,6 +201,7 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       }
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
+      flowSync.start()
       news.start()
       scheduleInterval()
       send({ type: 'claude-state', state: analyst.getState() })
@@ -278,6 +287,7 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
 process.on('exit', () => {
   live.dispose()
   autoSync.dispose()
+  flowSync.dispose()
   news.dispose()
   screener.dispose()
   bot.dispose()

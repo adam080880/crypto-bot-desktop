@@ -210,8 +210,35 @@ export type Confluence =
   | 'prevOpposite'
   /** Setup became known inside a killzone (London / New York open, config smc.killzonesUtc). Filter only, no score. */
   | 'killzone'
+  /** Order flow from futures positioning (docs/entry-v2.md §10). Filters only, no score:
+   *  oiConfirm = price moved in the trade direction over 24h and open interest rose (new money behind the move),
+   *  oiFlush = open interest fell ≥ smc.flowOiFlushPct over 4h (positions flushed out at the POI),
+   *  fundingContra = funding in the crowd's opposite tail (≤ 20th percentile of ~30 days for a long, ≥ 80th for a short). */
+  | 'oiConfirm'
+  | 'oiFlush'
+  | 'fundingContra'
 
-/** Confluences that can be required (bot settings), with UI labels. */
+/** Confluences a user can require (bot settings, coin profiles, backtest filter). */
+export const REQUIRABLE_CONFLUENCES = [
+  'fvg',
+  'sweep',
+  'equalLiq',
+  'displacement',
+  'htfParent',
+  'trendParent',
+  'btc4h',
+  'btc1h',
+  'wyckoff',
+  'manipulation',
+  'unicorn',
+  'prevOpposite',
+  'killzone',
+  'oiConfirm',
+  'oiFlush',
+  'fundingContra'
+] as const satisfies readonly Confluence[]
+
+/** Confluences that can be required, with UI labels. */
 export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'fvg', label: 'FVG' },
   { key: 'trendParent', label: 'searah trend POI' },
@@ -225,7 +252,10 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'unicorn', label: 'unicorn' },
   { key: 'equalLiq', label: 'equal H/L' },
   { key: 'prevOpposite', label: 'candle sebelumnya berlawanan' },
-  { key: 'killzone', label: 'killzone London/NY' }
+  { key: 'killzone', label: 'killzone London/NY' },
+  { key: 'oiConfirm', label: 'OI naik searah harga 24j' },
+  { key: 'oiFlush', label: 'OI 4j flush' },
+  { key: 'fundingContra', label: 'funding lawan crowd' }
 ]
 
 /** A candidate entry (never an order by itself). */

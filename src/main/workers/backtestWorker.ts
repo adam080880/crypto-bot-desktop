@@ -7,7 +7,11 @@ import type { BacktestParams, BacktestProgress, BacktestResult } from '@shared/b
 import type { AppConfig } from '@shared/config'
 import { runBacktest } from '../backtest/runBacktest'
 import { openDatabase } from '../db/client'
+import { symbolByName } from '../db/symbolsRepo'
+import { downloadFlow } from '../flow/visionFlow'
 import { initLogger, logger } from '../logger'
+import { installCloudflareDns } from '../net/dns'
+import type { FlowData } from '../strategy/flow'
 import type { WorkerInit } from './protocol'
 
 export type ToBacktestWorker = { type: 'run'; params: BacktestParams; config: AppConfig }
@@ -19,20 +23,39 @@ export type FromBacktestWorker =
 const port = process.parentPort
 const init = JSON.parse(process.argv[2] ?? '{}') as WorkerInit
 initLogger(init.logsDir, { stdout: false })
+installCloudflareDns() // the flow history is downloaded here (ISP blocks Binance by DNS)
 const log = logger('backtest-worker')
 const send = (m: FromBacktestWorker): void => port.postMessage(m)
 
-port.once('message', ({ data: msg }: { data: ToBacktestWorker }) => {
+port.once('message', async ({ data: msg }: { data: ToBacktestWorker }) => {
   let exitCode = 0
   try {
     const db = openDatabase({ path: init.dbPath, migrationsFolder: init.migrationsFolder, readonly: true })
     let last = 0
+    // open interest / funding history for the flow confluences (download only, never stored)
+    let flow: FlowData | undefined
+    const sym = symbolByName(db, msg.params.symbol)
+    const span = sym
+      ? (db.$client.prepare('SELECT min(open_time) AS a, max(open_time) AS b FROM candles_15m WHERE symbol_id = ?').get(sym.id) as { a: number | null; b: number | null })
+      : null
+    if (span?.a != null && span.b != null) {
+      try {
+        flow = await downloadFlow(msg.params.symbol, span.a, span.b, (done, total) => {
+          if (Date.now() - last > 250 || done === total) {
+            last = Date.now()
+            send({ type: 'progress', progress: { symbol: msg.params.symbol, stage: 'flow', done, total } })
+          }
+        })
+      } catch (err) {
+        log.warn({ err: (err as Error).message }, 'flow download failed; backtest without OI/funding')
+      }
+    }
     const result = runBacktest(db, msg.params, msg.config, (progress) => {
       if (progress.stage !== 'simulate' || Date.now() - last > 250) {
         last = Date.now()
         send({ type: 'progress', progress })
       }
-    })
+    }, flow)
     send({ type: 'result', result })
     db.$client.close()
   } catch (err) {

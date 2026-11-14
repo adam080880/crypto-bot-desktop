@@ -34,7 +34,10 @@ const CONF_CHIPS: { key: Confluence; label: string }[] = [
   { key: 'manipulation', label: 'spring/UTAD' },
   { key: 'unicorn', label: 'unicorn' },
   { key: 'equalLiq', label: 'equal H/L' },
-  { key: 'killzone', label: 'killzone London/NY' }
+  { key: 'killzone', label: 'killzone London/NY' },
+  { key: 'oiConfirm', label: 'OI naik searah' },
+  { key: 'oiFlush', label: 'OI flush 4j' },
+  { key: 'fundingContra', label: 'funding lawan crowd' }
 ]
 const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'model', label: 'Model', of: (s) => s.model },
@@ -47,7 +50,7 @@ const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'dir', label: 'Arah', of: (s) => (s.dir === 'bullish' ? 'long' : 'short') }
 ]
 const STATUS_LABEL: Record<string, string> = { w: 'TP/profit', b: 'BE', l: 'SL', o: 'masih jalan' }
-const DEFAULT_FILTER: BtFilter = { models: ['M1', 'M2b', 'M4'], dirs: [], pois: [], childKinds: [], conf: ['fvg', 'trendParent'], minScore: 0 }
+const DEFAULT_FILTER: BtFilter = { models: ['M1', 'M2b', 'M4'], dirs: [], pois: [], childKinds: [], conf: ['fvg', 'trendParent'], trendConf: ['oiConfirm'], minScore: 0 }
 
 interface Form {
   oosDays: number
@@ -236,9 +239,11 @@ export function Backtest() {
           <p className="text-xs text-muted-foreground">
             {stage?.stage === 'simulate'
               ? `Simulasi exit di candle 1m: ${stage.done}/${stage.total} setup`
-              : stage?.stage === 'detect'
-                ? 'Deteksi setup semua model…'
-                : 'Memuat candle…'}
+              : stage?.stage === 'flow'
+                ? `Download data open interest + funding (data.binance.vision): ${stage.done}/${stage.total} file`
+                : stage?.stage === 'detect'
+                  ? 'Deteksi setup semua model…'
+                  : 'Memuat candle…'}
           </p>
         </div>
       )}
@@ -338,7 +343,9 @@ function Results(p: {
       <p className="text-xs text-muted-foreground">
         Data {day(r.dataFrom)} → {day(r.dataTo)} · in-sample s/d {day(r.splitT)}
         {r.splitAdjusted && ' (histori pendek → dibagi 2:1)'} · {r.setups.length} setup terdeteksi · exit disimulasikan di {r.minuteResolution ? 'candle 1m' : 'candle 15m (1m belum ada)'} · fee maker{' '}
-        {r.params.makerFeePct}% / taker {r.params.takerFeePct}% + slippage {r.params.slippagePct}% · {formatTime(r.ranAt)}, {(r.ms / 1000).toFixed(1)} dtk
+        {r.params.makerFeePct}% / taker {r.params.takerFeePct}% + slippage {r.params.slippagePct}% · open interest{' '}
+        {r.flow?.oiFrom ? `${day(r.flow.oiFrom)} → ${day(r.flow.oiTo!)}, funding ${r.flow.funding} data` : <span className="text-bear">tidak ada (konfluensi OI/funding kosong)</span>} · {formatTime(r.ranAt)},{' '}
+        {(r.ms / 1000).toFixed(1)} dtk
       </p>
 
       <Card>
@@ -347,7 +354,8 @@ function Results(p: {
           <Chips label="Arah" options={[{ key: 'bullish', label: 'long' }, { key: 'bearish', label: 'short' }]} value={filter.dirs} onChange={(dirs) => setFilter({ ...filter, dirs })} />
           <Chips label="POI induk" options={poiOptions} value={filter.pois} onChange={(pois) => setFilter({ ...filter, pois })} />
           <Chips label="Entry di" options={childOptions} value={filter.childKinds} onChange={(childKinds) => setFilter({ ...filter, childKinds })} />
-          <Chips label="Wajib ada (SMC)" options={CONF_CHIPS} value={filter.conf} onChange={(conf) => setFilter({ ...filter, conf })} />
+          <Chips label="Wajib (SMC)" options={CONF_CHIPS} value={filter.conf} onChange={(conf) => setFilter({ ...filter, conf })} />
+          <Chips label="Wajib (M5)" options={CONF_CHIPS} value={filter.trendConf ?? []} onChange={(trendConf) => setFilter({ ...filter, trendConf })} />
           <div className="flex flex-wrap items-center gap-2">
             <span className="w-24 shrink-0 text-muted-foreground">Skor min</span>
             <Input type="number" className="num h-7 w-16 text-right" value={filter.minScore} onChange={(e) => setFilter({ ...filter, minScore: Number(e.target.value) || 0 })} />
@@ -564,7 +572,7 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
       savedAt: Date.now(),
       models: [row.model],
       pois: [row.poi],
-      requireConfluence: filter.conf,
+      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : filter.conf,
       minScore: filter.minScore,
       plan: r.plans[row.plan]!,
       stats: { trades: row.all.trades, winrate: row.all.winrate, avgR: row.all.avgR, oosTrades: row.oos.trades, oosAvgR: row.oos.avgR }

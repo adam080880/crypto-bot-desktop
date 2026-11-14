@@ -8,8 +8,10 @@ export interface BtFilter {
   /** "OB|4h"; empty = any. */
   pois: string[]
   childKinds: string[]
-  /** All must be present. */
+  /** All must be present (SMC models M0–M4). */
   conf: Confluence[]
+  /** All must be present (M5 trend). Optional for filters saved before M5. */
+  trendConf?: Confluence[]
   minScore: number
 }
 
@@ -23,8 +25,8 @@ export function applyFilter(setups: readonly BtSetup[], f: BtFilter): BtSetup[] 
       (!f.dirs.length || f.dirs.includes(s.dir)) &&
       (!f.pois.length || f.pois.includes(poiKey(s))) &&
       (!f.childKinds.length || f.childKinds.includes(s.childKind)) &&
-      // required confluences are SMC concepts; the M5 trend model is exempt (same rule as the bot gate)
-      (s.model === 'M5' || f.conf.every((k) => s.conf.includes(k))) &&
+      // SMC models and M5 have separate required lists (same rule as the bot gate)
+      (s.model === 'M5' ? (f.trendConf ?? []) : f.conf).every((k) => s.conf.includes(k)) &&
       s.score >= f.minScore
   )
 }

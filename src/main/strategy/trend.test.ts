@@ -109,8 +109,11 @@ describe('bot: M5', () => {
   const cand: Candidate = { symbol: 'XUSDT', direction: 'bullish', price: 101, dataT: 0, setup, setups: [setup], nearPoi: null, trendAligned: false, trend: { '4h': null, '1h': null, '15m': null }, recentBos: null }
   const bot = { ...defaultAppConfig.bot, models: ['M5' as const], requireConfluence: ['fvg' as const, 'trendParent' as const] }
 
-  it('is not blocked by the SMC confluence requirement', () => {
-    expect(setupGate(cand, { bot, entryTf: '15m', universe: new Set(['XUSDT']), now: 1_000_000 + M15 + 60_000, exit: defaultAppConfig.exit })).toBeNull()
+  it('uses its own required list (default: OI up with the move), not the SMC one', () => {
+    const o = { entryTf: '15m' as const, universe: new Set(['XUSDT']), now: 1_000_000 + M15 + 60_000, exit: defaultAppConfig.exit }
+    expect(setupGate(cand, { ...o, bot })).toMatch(/oiConfirm/)
+    expect(setupGate({ ...cand, setup: { ...setup, confluence: ['oiConfirm'] } }, { ...o, bot })).toBeNull()
+    expect(setupGate(cand, { ...o, bot: { ...bot, trendRequireConfluence: [] } })).toBeNull()
   })
 
   it('uses the trailing-only plan unless the coin has a profile', () => {

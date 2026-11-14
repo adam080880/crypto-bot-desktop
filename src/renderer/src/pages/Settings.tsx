@@ -429,26 +429,32 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
               })}
             </div>
           </div>
-          <div className="col-span-2 space-y-1">
-            <Label>Konfluensi wajib untuk model SMC M0–M4 (semua yang dicentang harus ada; kosong = bebas). M5 trend tidak kena syarat ini</Label>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {CONFLUENCE_CHOICES.map(({ key, label }) => {
-                const k = key as (typeof b.requireConfluence)[number]
-                return (
-                  <label key={key} className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={b.requireConfluence.includes(k)}
-                      onChange={(e) =>
-                        setB({ ...b, requireConfluence: e.target.checked ? [...b.requireConfluence, k] : b.requireConfluence.filter((x) => x !== k) })
-                      }
-                    />
-                    {label}
-                  </label>
-                )
-              })}
+          {(
+            [
+              ['requireConfluence', 'Konfluensi wajib untuk model SMC M0–M4 (semua yang dicentang harus ada; kosong = bebas)'],
+              ['trendRequireConfluence', 'Konfluensi wajib untuk M5 trend (default: OI naik searah harga)']
+            ] as const
+          ).map(([field, title]) => (
+            <div key={field} className="col-span-2 space-y-1">
+              <Label>{title}</Label>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                {CONFLUENCE_CHOICES.map(({ key, label }) => {
+                  const k = key as (typeof b.requireConfluence)[number]
+                  const list = b[field]
+                  return (
+                    <label key={key} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={list.includes(k)}
+                        onChange={(e) => setB({ ...b, [field]: e.target.checked ? [...list, k] : list.filter((x) => x !== k) })}
+                      />
+                      {label}
+                    </label>
+                  )
+                })}
+              </div>
             </div>
-          </div>
+          ))}
           <Label>POI HTF yang dipakai</Label>
           <div className="flex justify-end gap-3 text-xs">
             {(['1h', '4h', '1d'] as const).map((tf) => (
