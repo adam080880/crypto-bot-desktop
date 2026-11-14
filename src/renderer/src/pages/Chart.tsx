@@ -5,6 +5,7 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
   type SeriesMarker,
@@ -16,7 +17,7 @@ import { COLORS, DEFAULT_LAYERS, LAYERS, LAYER_LABEL, SmcOverlay, type Layers } 
 import { SetupList } from '@/components/SetupList'
 import type { Candle } from '@shared/candles'
 import type { SymbolListItem } from '@shared/ipc'
-import type { Timeframe } from '@shared/timeframes'
+import { TF_MS, type Timeframe } from '@shared/timeframes'
 import { LiveBadge } from '@/components/layout/LiveBadge'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -49,6 +50,26 @@ const toVol = (c: Candle) => ({
   value: c.v,
   color: c.c >= c.o ? `${BULL}66` : `${BEAR}66`
 })
+
+/** A backtest trade to show (set by the Backtest page, read once). */
+interface Focus {
+  symbol: string
+  t: number
+  until: number
+  entry: number
+  sl: number
+  dir: 'bullish' | 'bearish'
+}
+
+function takeFocus(): Focus | null {
+  try {
+    const raw = localStorage.getItem('chart.focus')
+    localStorage.removeItem('chart.focus')
+    return raw ? (JSON.parse(raw) as Focus) : null
+  } catch {
+    return null
+  }
+}
 
 /** Period start for 1d/1w (UTC; week = Monday) — used to merge live 1m into those bars. */
 function periodStart(t: number, tf: '1d' | '1w'): number {
@@ -90,6 +111,11 @@ export function Chart() {
   const [analysis, setAnalysis] = useState<SmcAnalysis | null>(null)
   const [setups, setSetups] = useState<Setup[]>([])
   const [smcTick, setSmcTick] = useState(0)
+  const [focus, setFocus] = useState<Focus | null>(() => {
+    const f = takeFocus()
+    return f && f.symbol === recall('chart.symbol', 'BTCUSDT') ? f : null
+  })
+  const focusLines = useRef<IPriceLine[]>([])
 
   const synced = useMemo(() => symbols.find((s) => s.symbol === symbol)?.synced ?? false, [symbols, symbol])
 
@@ -158,24 +184,37 @@ export function Chart() {
   // load history
   useEffect(() => {
     let cancelled = false
-    void window.api.invoke('candles:get', { symbol, timeframe: tf, limit: LIMIT }).then((rows) => {
+    const tfMs = TF_MS[tf]
+    const f = focus && focus.symbol === symbol ? focus : null
+    const before = f ? f.until + 300 * tfMs : undefined
+    void window.api.invoke('candles:get', { symbol, timeframe: tf, limit: LIMIT, ...(before ? { before } : {}) }).then((rows) => {
       if (cancelled || !price.current || !volume.current) return
       price.current.setData(rows.map(toBar))
       volume.current.setData(rows.map(toVol))
       last.current = rows[rows.length - 1] ?? null
       setInfo(rows.length ? null : 'Belum ada data untuk simbol ini — sedang disiapkan (backfill 6 bulan)…')
       price.current.priceScale().applyOptions({ autoScale: true })
-      chart.current?.timeScale().scrollToRealTime()
+      for (const l of focusLines.current) price.current.removePriceLine(l)
+      focusLines.current = []
+      if (f) {
+        const from = (Math.floor(f.t / tfMs) * tfMs - 80 * tfMs) / 1000
+        const to = (Math.floor(f.until / tfMs) * tfMs + 40 * tfMs) / 1000
+        chart.current?.timeScale().setVisibleRange({ from: from as UTCTimestamp, to: to as UTCTimestamp })
+        focusLines.current = [
+          price.current.createPriceLine({ price: f.entry, color: f.dir === 'bullish' ? BULL : BEAR, lineWidth: 2, title: 'ENTRY (backtest)' }),
+          price.current.createPriceLine({ price: f.sl, color: BEAR, lineWidth: 1, lineStyle: 2, title: 'SL' })
+        ]
+      } else chart.current?.timeScale().scrollToRealTime()
     })
     return () => {
       cancelled = true
     }
-  }, [symbol, tf, reload])
+  }, [symbol, tf, reload, focus])
 
   // live updates
   useEffect(() => {
     const offCandle = window.api.on('live:candle', (e) => {
-      if (e.symbol !== symbol || !price.current || !volume.current) return
+      if (e.symbol !== symbol || !price.current || !volume.current || focus) return
       let bar: Candle | undefined
       if (tf === '1d' || tf === '1w') {
         const m = e.candles['1m']
@@ -202,7 +241,7 @@ export function Chart() {
       offCandle()
       offSynced()
     }
-  }, [symbol, tf])
+  }, [symbol, tf, focus])
 
   // SMC analysis + setups (recomputed on symbol/TF change and after each closed 1m candle)
   useEffect(() => {
@@ -263,6 +302,7 @@ export function Chart() {
     if (!symbols.some((x) => x.symbol === s)) return
     setSymbol(s)
     setQuery(s)
+    setFocus(null)
     remember('chart.symbol', s)
   }
 
@@ -307,6 +347,14 @@ export function Chart() {
         {analysis?.trend && (
           <span className={cn('text-xs', analysis.trend === 'bullish' ? 'text-bull' : 'text-bear')}>
             Trend {tf}: {analysis.trend}
+          </span>
+        )}
+        {focus && (
+          <span className="flex items-center gap-2 rounded-md border border-warn/50 px-2 py-0.5 text-xs text-warn">
+            Lihat trade backtest {new Date(focus.t).toLocaleString('id-ID')} (overlay SMC tetap data terbaru)
+            <button type="button" className="underline" onClick={() => setFocus(null)}>
+              kembali ke live
+            </button>
           </span>
         )}
         <span className="ml-auto text-xs text-muted-foreground">Waktu lokal · bucket candle UTC</span>

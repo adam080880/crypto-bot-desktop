@@ -1,116 +1,111 @@
 import { describe, expect, it } from 'vitest'
+import type { BtResult, BtSetup } from '@shared/backtest'
+import { applyFilter, metaTable, simulateEquity, stats } from '@shared/backtestStats'
 import type { Candle } from '@shared/candles'
-import type { Setup } from '@shared/smc'
 import type { Poi } from '../strategy/setups'
-import { netR, poiTouch, simulateEquity, toTrades, tradeStats, type Trade } from './engine'
+import { poiTouch } from './engine'
 import { splitTime } from './runBacktest'
 
 const M = 15 * 60_000
 const T0 = Date.UTC(2026, 5, 1)
 const DAY = 86_400_000
-const NO_FEES = { makerFeePct: 0, takerFeePct: 0, slippagePct: 0 }
-const FEES = { makerFeePct: 0.02, takerFeePct: 0.05, slippagePct: 0.02 }
 
-const setup = (s: Partial<Setup>): Setup => ({
-  id: 'x',
-  symbol: 'T',
-  direction: 'bullish',
-  poi: { kind: 'OB', timeframe: '1h', level: 99, t: T0, hitT: T0 },
-  obValid: { timeframe: '15m', t: T0, line: 100, wickEnd: 99, hasFvg: true },
+const res = (r: number, f: number, x: number, s: BtResult['s'] = r > 0.05 ? 'w' : r < -0.05 ? 'l' : 'b'): BtResult => ({ s, f, x, r })
+const bt = (p: Partial<BtSetup> & { res: BtResult[] }): BtSetup => ({
+  id: Math.random().toString(36),
+  t: p.res[0]?.f ?? T0,
+  dir: 'bullish',
+  model: 'M1',
+  poiKind: 'OB',
+  poiTf: '4h',
+  origin: 'sweep',
+  childKind: 'QM',
+  childTf: '15m',
+  score: 5,
+  conf: ['fvg', 'trendParent'],
   entry: 100,
   sl: 99,
-  tp: 103,
-  rr: 3,
-  score: 3,
-  reasons: [],
-  createdT: T0,
-  status: 'win',
-  statusT: T0 + 4 * M,
-  filledT: T0 + M,
-  ...s
+  slPct: 1,
+  tpLiquidity: null,
+  ...p
 })
 
-describe('netR', () => {
-  it('is the plain RR without costs', () => {
-    expect(netR(setup({}), NO_FEES)).toBeCloseTo(3)
-    expect(netR(setup({ status: 'loss' }), NO_FEES)).toBeCloseTo(-1)
-  })
-
-  it('subtracts maker fees on a win and taker fee + slippage on a stop', () => {
-    // win: (3 − 0.02%·100 − 0.02%·103) / 1
-    expect(netR(setup({}), FEES)).toBeCloseTo(3 - 0.02 - 0.0206)
-    // loss: −(1 + 0.02%·99 + 0.02%·100 + 0.05%·99) / 1
-    expect(netR(setup({ status: 'loss' }), FEES)).toBeCloseTo(-(1 + 0.0198 + 0.02 + 0.0495))
-  })
-})
-
-describe('toTrades / tradeStats', () => {
-  it('keeps only filled setups that closed, and measures the R drawdown', () => {
-    const setups = [
-      setup({ id: 'a', statusT: T0 + 1 * DAY }),
-      setup({ id: 'b', status: 'loss', statusT: T0 + 2 * DAY }),
-      setup({ id: 'c', status: 'loss', statusT: T0 + 3 * DAY }),
-      setup({ id: 'd', status: 'missed', filledT: null }),
-      setup({ id: 'e', status: 'triggered', statusT: T0 + 5 * DAY })
+describe('backtest stats (renderer filters)', () => {
+  it('counts wins / break-even / losses and the funnel per plan', () => {
+    const list = [
+      bt({ res: [res(1, T0, T0 + M), res(-1, T0, T0 + M)] }),
+      bt({ res: [res(0, T0 + DAY, T0 + DAY + M), res(2, T0 + DAY, T0 + DAY + M)] }),
+      bt({ res: [{ s: 'm', f: null, x: T0, r: 0 }, res(-1, T0 + 2 * DAY, T0 + 2 * DAY + M)] })
     ]
-    const s = tradeStats(toTrades(setups, NO_FEES))
-    expect(s).toMatchObject({ trades: 3, wins: 1, totalR: 1, maxDdR: 2 })
-    expect(s.winrate).toBeCloseTo(1 / 3)
-    expect(s.profitFactor).toBeCloseTo(1.5)
+    expect(stats(list, 0)).toMatchObject({ trades: 2, wins: 1, be: 1, losses: 0, winrate: 0.5, noLoss: 1, totalR: 1, missed: 1, setups: 3 })
+    expect(stats(list, 1)).toMatchObject({ trades: 3, totalR: 0, maxDdR: 1 })
+  })
+
+  it('filters by model, POI and required confluences', () => {
+    const a = bt({ model: 'M4', poiTf: '15m', res: [] })
+    const b = bt({ conf: ['fvg'], res: [] })
+    const c = bt({ res: [] })
+    const f = { models: ['M1' as const], dirs: [], pois: ['OB|4h'], childKinds: [], conf: ['fvg' as const, 'trendParent' as const], minScore: 0 }
+    expect(applyFilter([a, b, c], f)).toEqual([c])
+  })
+
+  it('meta table: robust only when in-sample and out-of-sample are both positive', () => {
+    const split = T0 + 10 * DAY
+    const good = [0, 1, 2].map((i) => bt({ res: [res(1, T0 + i * DAY, T0 + i * DAY + M)] }))
+    const goodOos = bt({ res: [res(1, split + DAY, split + DAY + M)] })
+    const fitted = [0, 1, 2].map((i) => bt({ model: 'M4', res: [res(1, T0 + i * DAY, T0 + i * DAY + M)] }))
+    const fittedOos = bt({ model: 'M4', res: [res(-1, split + DAY, split + DAY + M)] })
+    const rows = metaTable([...good, goodOos, ...fitted, fittedOos].map((s) => ({ ...s, t: s.res[0]!.f! })), 1, split, 3)
+    expect(rows.map((r) => [r.model, r.robust])).toEqual([
+      ['M1', true],
+      ['M4', false]
+    ])
   })
 })
 
-describe('simulateEquity', () => {
-  const trade = (p: Partial<Trade> & { r: number; filledT: number; exitT: number }): Trade => ({
-    setup: setup({}),
-    slDist: 0.01,
-    ...p
-  })
+describe('simulateEquity (shared)', () => {
   const opts = { startEquity: 10, riskPct: 1, maxLeverage: 5, maxDailyLossPct: 3 }
 
   it('risks a fixed % of current equity per trade (compounding)', () => {
-    const sim = simulateEquity([trade({ r: -1, filledT: T0, exitT: T0 + M }), trade({ r: 2, filledT: T0 + DAY, exitT: T0 + DAY + M })], opts)
-    // 10 → 9.9 (−1% of 10) → 9.9 + 2 × 0.099
+    const sim = simulateEquity([bt({ res: [res(-1, T0, T0 + M)] }), bt({ res: [res(2, T0 + DAY, T0 + DAY + M)] })], 0, opts)
     expect(sim.endEquity).toBeCloseTo(9.9 + 0.198)
     expect(sim.taken).toBe(2)
     expect(sim.maxDdPct).toBeCloseTo(1)
   })
 
   it('skips a fill while a position on the symbol is still open', () => {
-    const sim = simulateEquity([trade({ r: 1, filledT: T0, exitT: T0 + 10 * M }), trade({ r: 1, filledT: T0 + 5 * M, exitT: T0 + 20 * M })], opts)
+    const sim = simulateEquity([bt({ res: [res(1, T0, T0 + 10 * M)] }), bt({ res: [res(1, T0 + 5 * M, T0 + 20 * M)] })], 0, opts)
     expect(sim).toMatchObject({ taken: 1, skippedOpen: 1 })
   })
 
   it('caps the size at max leverage when the stop is very tight', () => {
-    // SL 0.1% away: 1% risk would need 10× notional, capped at 5× → half the risk
-    const sim = simulateEquity([trade({ r: -1, slDist: 0.001, filledT: T0, exitT: T0 + M })], opts)
+    const sim = simulateEquity([bt({ slPct: 0.1, res: [res(-1, T0, T0 + M)] })], 0, opts)
     expect(sim.leverageCapped).toBe(1)
     expect(sim.endEquity).toBeCloseTo(10 - 0.05)
   })
 
   it('stops entering for the rest of the UTC day after the daily loss limit', () => {
-    const losses = [0, 1, 2, 3].map((i) => trade({ r: -1, filledT: T0 + i * 2 * M, exitT: T0 + (i * 2 + 1) * M }))
-    const next = trade({ r: 1, filledT: T0 + DAY, exitT: T0 + DAY + M })
-    const sim = simulateEquity([...losses, next], { ...opts, maxDailyLossPct: 2.5 })
-    // 3 losses (≈2.97%) pass the 2.5% limit → 4th entry skipped, trading resumes next day
+    const losses = [0, 1, 2, 3].map((i) => bt({ res: [res(-1, T0 + i * 2 * M, T0 + (i * 2 + 1) * M)] }))
+    const next = bt({ res: [res(1, T0 + DAY, T0 + DAY + M)] })
+    const sim = simulateEquity([...losses, next], 0, { ...opts, maxDailyLossPct: 2.5 })
     expect(sim).toMatchObject({ taken: 4, skippedHalt: 1, maxLosingStreak: 3 })
   })
 })
 
 describe('poiTouch', () => {
-  const poi: Poi = { kind: 'OB', timeframe: '1h', direction: 'bullish', level: 100, t: T0, activeFrom: T0, invalidT: null }
+  const poi: Poi = { kind: 'OB', timeframe: '1h', direction: 'bullish', level: 100, t: T0, activeFrom: T0, invalidT: null, origin: null }
   const c = (rows: [number, number, number, number][]): Candle[] => rows.map(([o, h, l, cl], i) => ({ t: T0 + i * M, o, h, l, c: cl, v: 1 }))
 
   it('races from the POI level: +X% before −X% counts as a win', () => {
     const t = poiTouch(poi, c([[101, 101.2, 100.6, 101], [101, 101.1, 99.9, 100.2], [100.2, 100.8, 100, 100.7], [100.7, 101.2, 100.6, 101.1]]), DAY)!
     expect(t.touchT).toBe(T0 + M)
-    expect(t.race).toEqual(['win', 'win', 'timeout']) // +0.5%, +1%, +2%
+    expect(t.race).toEqual(['win', 'win', 'timeout'])
     expect(t.maePct).toBeCloseTo(0.1)
   })
 
   it('counts the adverse side first, including the touch candle', () => {
     const t = poiTouch(poi, c([[101, 101, 99.4, 101.5], [101.5, 102.5, 101, 102.4]]), DAY)!
-    expect(t.race).toEqual(['loss', 'win', 'win']) // touch wick −0.6% already lost the 0.5% race
+    expect(t.race).toEqual(['loss', 'win', 'win'])
   })
 
   it('ignores touches after the POI was invalidated', () => {

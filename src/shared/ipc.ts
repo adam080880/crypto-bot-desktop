@@ -2,7 +2,7 @@ import type { AppConfig, ConfigPatch, TradingMode } from './config'
 import type { Candle } from './candles'
 import type { LiveCandleEvent, LiveState } from './live'
 import type { Setup, SmcAnalysis } from './smc'
-import type { BacktestParams, BacktestResult } from './backtest'
+import type { BacktestParams, BacktestProgress, BacktestResult, CoinProfile } from './backtest'
 import type { BotState, ConnTestResult } from './bot'
 import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
 import type { ScreenerState } from './screener'
@@ -83,6 +83,9 @@ export interface IpcInvokeMap {
   'smc:analyze': { req: { symbol: string; timeframe: Timeframe; limit: number }; res: SmcAnalysis | null }
   'smc:setups': { req: { symbol: string }; res: Setup[] }
   'backtest:run': { req: BacktestParams; res: BacktestResult | null }
+  'backtest:profiles': { req: void; res: Record<string, CoinProfile> }
+  'backtest:saveProfile': { req: CoinProfile; res: Record<string, CoinProfile> }
+  'backtest:deleteProfile': { req: { symbol: string }; res: Record<string, CoinProfile> }
   'news:list': { req: { from: number; to: number }; res: EconomicEvent[] }
   'news:candidates': { req: void; res: NewsCandidate[] }
   'news:reactions': { req: { eventId: string }; res: EventReaction[] }
@@ -123,6 +126,7 @@ export interface IpcEventMap {
   'claude:changed': { at: number }
   'screener:state': ScreenerState
   'bot:state': BotState
+  'backtest:progress': BacktestProgress
   'storage:progress': { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }
 }
 
@@ -165,6 +169,9 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'smc:analyze',
   'smc:setups',
   'backtest:run',
+  'backtest:profiles',
+  'backtest:saveProfile',
+  'backtest:deleteProfile',
   'news:list',
   'news:candidates',
   'news:reactions',
@@ -180,4 +187,4 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'storage:plan',
   'storage:move'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'storage:progress']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'backtest:progress', 'storage:progress']

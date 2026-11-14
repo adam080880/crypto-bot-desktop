@@ -1,8 +1,27 @@
 /** Screener: scans stored data for entry material (candidates only, never orders). */
-import type { Dir, PoiKind, SetupStatus } from './smc'
+import type { ChildKind, Confluence, Dir, EntryModel, PoiKind, PoiOrigin, SetupStatus } from './smc'
 import type { Timeframe } from './timeframes'
 
 export type ScreenerTrigger = 'manual' | 'auto' | 'startup'
+
+/** Compact setup for the screener / bot (docs/entry-v2.md). */
+export interface ScreenerSetup {
+  id: string
+  model: EntryModel
+  entry: number
+  sl: number
+  tp: number
+  tpLiquidity: number | null
+  rr: number
+  score: number
+  confluence: Confluence[]
+  status: Extract<SetupStatus, 'pending' | 'triggered'>
+  createdT: number
+  /** Parent POI (the reason). */
+  poi: { kind: PoiKind; timeframe: Timeframe; origin: PoiOrigin | null }
+  /** Where the limit sits. */
+  child: { kind: ChildKind; timeframe: Timeframe }
+}
 
 /** One symbol + direction that meets at least one criterion. */
 export interface ScreenerRow {
@@ -11,18 +30,10 @@ export interface ScreenerRow {
   price: number
   /** Open time of the newest stored 1m candle (data freshness). */
   dataT: number
-  /** Active §8 setup (POI hit → OB valid) in this direction, newest one. */
-  setup: {
-    id: string
-    entry: number
-    sl: number
-    tp: number
-    rr: number
-    score: number
-    status: Extract<SetupStatus, 'pending' | 'triggered'>
-    createdT: number
-    poi: { kind: PoiKind; timeframe: Timeframe }
-  } | null
+  /** Best active setup in this direction (highest score, then newest). */
+  setup: ScreenerSetup | null
+  /** Every active (pending / triggered) setup in this direction, newest first. The bot reads these. */
+  setups: ScreenerSetup[]
   /** Nearest active POI on the entry side of price, within `nearPoiPct`. */
   nearPoi: { kind: PoiKind; timeframe: Timeframe; level: number; distPct: number } | null
   /** 4h, 1h and 15m trend all equal `direction`. */

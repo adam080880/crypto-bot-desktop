@@ -1,19 +1,35 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { botConfigSchema, newsConfigSchema, riskConfigSchema, smcConfigSchema } from '@shared/config'
-import type { ScreenerRow } from '@shared/screener'
+import { botConfigSchema, exitConfigSchema, newsConfigSchema, riskConfigSchema, smcConfigSchema } from '@shared/config'
+import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { openDatabase } from '../db/client'
 import { BotService, type BotDeps } from './botService'
 
 const RULES = { tickSize: 0.001, stepSize: 1, minQty: 1, minNotional: 5 }
+const SETUP = (now: number): ScreenerSetup => ({
+  id: 'set-1',
+  model: 'M1',
+  entry: 1,
+  sl: 0.99,
+  tp: 1.05,
+  tpLiquidity: 1.05,
+  rr: 5,
+  score: 5,
+  confluence: ['fvg', 'trendParent'],
+  status: 'pending',
+  createdT: now - 20 * 60_000,
+  poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },
+  child: { kind: 'QM', timeframe: '15m' }
+})
 
-function setup(overrides: Partial<BotDeps> = {}) {
+function setup(overrides: Partial<BotDeps> = {}, botCfg: object = { requireClaude: true }) {
   const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
   const now = Date.now()
   const claudeCalls: string[][] = []
   let killed = false
   const deps: BotDeps = {
-    getBot: () => botConfigSchema.parse({ enabled: true, paperEquity: 100 }),
+    getBot: () => botConfigSchema.parse({ enabled: true, paperEquity: 100, ...botCfg }),
+    getExit: () => exitConfigSchema.parse({ orderFlowHold: false }),
     getRisk: () => riskConfigSchema.parse({}),
     getSmc: () => smcConfigSchema.parse({}),
     getNews: () => newsConfigSchema.parse({}),
@@ -50,7 +66,8 @@ function setup(overrides: Partial<BotDeps> = {}) {
     direction: 'bullish',
     price: 1.01,
     dataT: now,
-    setup: { id: 'set-1', entry: 1, sl: 0.99, tp: 1.05, rr: 5, score: 5, status: 'pending', createdT: now - 20 * 60_000, poi: { kind: 'OB', timeframe: '4h' } },
+    setup: SETUP(now),
+    setups: [SETUP(now)],
     nearPoi: null,
     trendAligned: true,
     trend: { '4h': 'bullish', '1h': 'bullish', '15m': 'bullish' },
@@ -136,11 +153,45 @@ describe('BotService (paper, end to end)', () => {
     db.$client
       .prepare(`INSERT INTO claude_analyses (id, run_id, created_at, symbol, bias, confidence, price, forced_skip, payload) VALUES ('x', 'r', ?, 'AAAUSDT', 'long', 50, 1, 0, '{}')`)
       .run(Date.now())
-    await bot.onScreener([row, { ...row, symbol: 'XAUUSDT', setup: { ...row.setup!, id: 'set-x' } }])
+    await bot.onScreener([row, { ...row, symbol: 'XAUUSDT', setup: { ...row.setup!, id: 'set-x' }, setups: [{ ...row.setup!, id: 'set-x' }] }])
     const states: import('@shared/bot').BotState[] = []
     bot.on('state', (s) => states.push(s))
     await bot.publish()
     expect(states[0]!.trades).toHaveLength(0)
     expect(states[0]!.events.map((e) => e.message).join('\n')).toMatch(/confidence 50 < 70/)
+  })
+
+  it('enters without Claude when requireClaude is off (pure ICT math)', async () => {
+    const { bot, row, claudeCalls } = setup({}, { requireClaude: false })
+    const states: import('@shared/bot').BotState[] = []
+    bot.on('state', (s) => states.push(s))
+    await bot.onScreener([row])
+    await bot.publish()
+    expect(claudeCalls).toHaveLength(0)
+    expect(states.at(-1)!.trades[0]).toMatchObject({ status: 'pending', model: 'M1', analysisId: null, confidence: null })
+  })
+
+  it('tiered exit: 1R → BE incl. fee, 3R → half off + SL to 1R, rest stopped in profit', async () => {
+    const { bot, row } = setup({}, { requireClaude: false })
+    const states: import('@shared/bot').BotState[] = []
+    bot.on('state', (s) => states.push(s))
+    await bot.onScreener([row])
+    bot.onKline('AAAUSDT', 1.005, 0.999, 1.0) // fills
+    await bot.tick()
+    const m = Math.floor(Date.now() / 60_000) * 60_000 + 60_000
+    await bot.onClosed1m('AAAUSDT', { t: m, o: 1.0, h: 1.011, l: 1.0, c: 1.01, v: 1 }) // ≥ 1R
+    await bot.publish()
+    expect(states.at(-1)!.trades[0]!.sl).toBe(1.001) // BE + fees, nearest tick
+    await bot.onClosed1m('AAAUSDT', { t: m + 60_000, o: 1.01, h: 1.031, l: 1.009, c: 1.03, v: 1 }) // ≥ 3R
+    await bot.publish()
+    const t = states.at(-1)!.trades[0]!
+    expect(t).toMatchObject({ closedQty: 42, partials: 1, sl: 1.01 })
+    expect(t.realized).toBeGreaterThan(0)
+    bot.onKline('AAAUSDT', 1.012, 1.0095, 1.0098) // back to 1R
+    await bot.tick()
+    await bot.publish()
+    const done = states.at(-1)!.trades[0]!
+    expect(done).toMatchObject({ status: 'closed', reason: 'trail' })
+    expect(done.pnl!).toBeGreaterThan(t.realized) // the rest also closed in profit
   })
 })

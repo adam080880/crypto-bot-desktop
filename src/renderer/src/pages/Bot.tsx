@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
 import type { BotEvent, BotState, BotTrade, ConnTestResult } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
+import { POI_LABEL } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +16,7 @@ const usd = (n: number | null, d = 2): string => (n === null ? '—' : `${n >= 0
 const REASON: Record<string, string> = {
   tp: 'TP',
   sl: 'SL',
+  trail: 'SL profit (BE/trailing)',
   missed: 'lewat TP',
   expired: 'expired',
   kill: 'kill switch',
@@ -44,6 +46,9 @@ export function Bot() {
 
   const setEnabled = async (enabled: boolean): Promise<void> => {
     setCfg(await window.api.invoke('config:update', { bot: { enabled } }))
+  }
+  const setRequireClaude = async (requireClaude: boolean): Promise<void> => {
+    setCfg(await window.api.invoke('config:update', { bot: { requireClaude } }))
   }
   const setLive = async (live: boolean): Promise<void> => {
     setErr(null)
@@ -116,7 +121,7 @@ export function Bot() {
           <div>
             <div className="text-xs text-muted-foreground">Trade selesai ({live ? 'live' : 'paper'})</div>
             <div className="text-lg font-semibold">
-              {closed.length} · TP {wins} / SL {closed.length - wins}
+              {closed.length} · untung {wins} / rugi {closed.length - wins}
             </div>
           </div>
           <div>
@@ -134,8 +139,14 @@ export function Bot() {
               <span className="text-bull">Siap entry.</span>
             )}{' '}
             · Universe {st?.universe.count ?? 0} koin crypto top {cfg.bot.topVolume} volume
-            {st?.universe.updatedAt ? ` (update ${formatTime(st.universe.updatedAt)})` : ''} · setup POI {cfg.bot.poiTimeframes.join('/')} → OB valid {cfg.smc.entryTimeframe} · Claude
-            wajib ≥ {cfg.bot.minConfidence}
+            {st?.universe.updatedAt ? ` (update ${formatTime(st.universe.updatedAt)})` : ''} · model {cfg.bot.models.join(', ')} · wajib{' '}
+            {cfg.bot.requireConfluence.length ? cfg.bot.requireConfluence.join(' + ') : '—'}
+            {cfg.bot.minScore ? ` · skor ≥ ${cfg.bot.minScore}` : ''} · exit {cfg.exit.tpMode === 'trail' ? 'trailing tanpa TP' : cfg.exit.tpMode === 'fixedR' ? `TP ${cfg.exit.tpR}R` : 'TP liquidity'}
+            {cfg.exit.ladder.length ? ` + bertingkat (${cfg.exit.ladder.map((l) => `${l.atR}R→${l.closePct ? `tutup ${l.closePct}% + ` : ''}SL ${l.slToR ? `${l.slToR}R` : 'BE'}`).join(', ')})` : ''}
+            {cfg.exit.orderFlowHold ? ` + tahan order flow (${cfg.exit.orderFlowSignals.join('/')} ${cfg.exit.orderFlowTf})` : ''} ·{' '}
+            <button type="button" className="underline decoration-dotted" onClick={() => void setRequireClaude(!cfg.bot.requireClaude)} title="Klik untuk ganti">
+              {cfg.bot.requireClaude ? `Claude wajib ≥ ${cfg.bot.minConfidence}` : 'tanpa Claude (murni ICT)'}
+            </button>
             {st?.awaitingClaude.length ? <span className="text-warn"> · nunggu Claude: {st.awaitingClaude.join(', ')}</span> : ''}
             {st?.lastError && <span className="text-bear"> · error terakhir: {st.lastError}</span>}
           </div>
@@ -254,7 +265,7 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
     <table className="num w-full text-xs">
       <thead className="text-muted-foreground">
         <tr className="border-b">
-          {['waktu', 'mode', 'simbol', 'arah', 'POI', 'Claude', 'entry / SL / TP', 'qty', 'risk', 'status', 'PnL', ''].map((h) => (
+          {['waktu', 'mode', 'simbol', 'arah', 'setup', 'Claude', 'entry / SL / TP', 'qty', 'risk', 'status', 'PnL', ''].map((h) => (
             <th key={h} className="px-3 py-2 text-left font-normal whitespace-nowrap">
               {h}
             </th>
@@ -271,11 +282,13 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
             <td className="px-3 py-1.5 font-medium">{t.symbol}</td>
             <td className={cn('px-3 py-1.5', t.direction === 'bullish' ? 'text-bull' : 'text-bear')}>{t.direction === 'bullish' ? 'LONG' : 'SHORT'}</td>
             <td className="px-3 py-1.5 whitespace-nowrap">
-              {t.poi.kind} {t.poi.timeframe} · skor {t.score}
+              {t.model} · {POI_LABEL[t.poi.kind]} {t.poi.timeframe} · skor {t.score}
             </td>
-            <td className="px-3 py-1.5">{t.confidence}</td>
+            <td className="px-3 py-1.5">{t.confidence ?? '—'}</td>
             <td className="px-3 py-1.5 whitespace-nowrap">
-              {px(t.entry)} / <span className="text-bear">{px(t.sl)}</span> / <span className="text-bull">{px(t.tp)}</span>
+              {px(t.entry)} / <span className="text-bear">{px(t.sl)}</span>
+              {t.sl !== t.slInitial && <span className="text-muted-foreground"> (awal {px(t.slInitial)})</span>} /{' '}
+              <span className="text-bull">{t.tp === null ? 'trailing' : px(t.tp)}</span>
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap">
               {t.filledQty ?? t.qty} <span className="text-muted-foreground">({(t.qty * t.entry).toFixed(2)}$ · {t.leverage}×)</span>
@@ -285,7 +298,12 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
               {t.status === 'pending' ? (
                 <Badge variant="warn">limit nunggu</Badge>
               ) : t.status === 'open' ? (
-                <Badge variant="warn">posisi buka</Badge>
+                <span className="flex items-center gap-1">
+                  <Badge variant="warn">posisi buka</Badge>
+                  {t.exitState?.holding && <Badge variant="bull">order flow: tahan</Badge>}
+                  {t.exitState && <span className="text-muted-foreground">best {t.exitState.bestR}R</span>}
+                  {t.closedQty > 0 && <span className="text-muted-foreground">· {t.closedQty} sudah TP</span>}
+                </span>
               ) : (
                 <span className="text-muted-foreground">{REASON[t.reason ?? ''] ?? t.reason}</span>
               )}

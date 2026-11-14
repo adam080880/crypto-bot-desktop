@@ -58,7 +58,8 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       news: { ...this.config.news, ...(patch.news ?? {}) },
       claude: { ...this.config.claude, ...(patch.claude ?? {}) },
       screener: { ...this.config.screener, ...(patch.screener ?? {}) },
-      bot: { ...this.config.bot, ...(patch.bot ?? {}) }
+      bot: { ...this.config.bot, ...(patch.bot ?? {}) },
+      exit: { ...this.config.exit, ...(patch.exit ?? {}) }
     })
     this.config = next
     writeSetting(this.db, 'app_config', next)

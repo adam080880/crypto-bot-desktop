@@ -2,17 +2,21 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { BotEventLevel, BotState, BotTrade } from '@shared/bot'
-import type { BotConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
+import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
+import type { Candle } from '@shared/candles'
+import { MODEL_LABEL, POI_LABEL } from '@shared/smc'
 import type { ScreenerRow } from '@shared/screener'
 import { TF_MS } from '@shared/timeframes'
 import type { Db } from '../db/client'
 import { readSetting, writeSetting } from '../db/settingsRepo'
 import { logger } from '../logger'
 import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTrade'
-import { FEES, LiveBroker, PaperBroker, type Bar, type Broker } from './brokers'
-import { accountGate, claudeGate, knownAt, setupGate, type Candidate } from './gate'
+import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
+import { accountGate, candidatesOf, claudeGate, knownAt, planTpFor, setupGate, type Candidate } from './gate'
+import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
-import { planOrder, type SymbolRules } from './sizing'
+import { planOrder, roundStep, type SymbolRules } from './sizing'
+import { ExitTracker } from '../strategy/exit'
 
 const log = logger('bot')
 const TICK_MS = 5_000
@@ -24,6 +28,8 @@ export interface BotDeps {
   getBot: () => BotConfig
   getRisk: () => RiskConfig
   getSmc: () => SmcConfig
+  /** Tiered exit / order flow plan (frozen into each trade at entry). */
+  getExit: () => ExitConfig
   getNews: () => NewsConfig
   getKeys: () => { key: string; secret: string } | null
   isKilled: () => boolean
@@ -35,6 +41,10 @@ export interface BotDeps {
   setStreams: (symbols: string[]) => void
   /** Symbols with local 1m history (the screener only scans these). */
   syncedSymbols: () => Set<string>
+  /** Coin profiles chosen in the backtest Meta table (symbol → profile). */
+  getProfiles?: () => Record<string, CoinProfile>
+  /** Stored 1m candles of a symbol from `from` (to rebuild exit trackers after a restart). */
+  minuteCandles?: (symbol: string, from: number) => Candle[]
   /** Public market metadata (injectable for tests). */
   market?: Pick<BinanceTradeClient, 'exchangeSymbols' | 'quoteVolumes'>
 }
@@ -62,6 +72,9 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   private busy = false
   private equityCache: { v: number; at: number } | null = null
   private lastError: string | null = null
+  /** Tiered exit per open trade (id → tracker), fed with closed 1m candles. */
+  private trackers = new Map<string, ExitTracker>()
+  private reconciling = new Set<string>()
 
   constructor(
     private readonly db: Db,
@@ -122,6 +135,76 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       b.low = Math.min(b.low, l)
       b.last = c
     } else this.bars.set(symbol, { high: h, low: l, last: c })
+  }
+
+  /**
+   * Closed 1m candle of a streamed symbol: drives the tiered exit + order flow of open trades
+   * (same ExitTracker as the backtest), then applies stop moves / partials through the broker.
+   */
+  async onClosed1m(symbol: string, k: Candle): Promise<void> {
+    for (const t of this.repo.active()) {
+      if (t.symbol !== symbol || t.status !== 'open' || !t.exitPlan) continue
+      if (t.filledAt !== null && k.t + 60_000 <= t.filledAt) continue
+      const tr = this.tracker(t, k.t)
+      if (!tr) continue
+      tr.bar(k, t.filledAt !== null && k.t <= t.filledAt && t.filledAt < k.t + 60_000)
+      await this.reconcile(t, tr)
+    }
+  }
+
+  /** Tracker of an open trade; rebuilt from stored 1m candles (open time < `before`) after a restart. */
+  private tracker(t: BotTrade, before: number): ExitTracker | null {
+    let tr = this.trackers.get(t.id)
+    if (tr || !t.exitPlan) return tr ?? null
+    tr = new ExitTracker(t.direction, t.entry, t.slInitial, t.tp, t.exitPlan, { makerFeePct: FEES.makerPct, takerFeePct: FEES.takerPct, slippagePct: FEES.slippagePct }, this.deps.getSmc().slBufferPct)
+    const fillMinute = Math.floor((t.filledAt ?? Date.now()) / 60_000) * 60_000
+    for (const k of this.deps.minuteCandles?.(t.symbol, fillMinute) ?? []) if (k.t < before) tr.bar(k, k.t === fillMinute)
+    this.trackers.set(t.id, tr)
+    return tr
+  }
+
+  /** Apply the tracker's decisions: ladder partials first, then the stop. */
+  private async reconcile(t: BotTrade, tr: ExitTracker): Promise<void> {
+    if (this.reconciling.has(t.id)) return
+    this.reconciling.add(t.id)
+    try {
+      const b = this.broker(t.mode)
+      const rules = this.rules.get(t.symbol)
+      if (!b || !rules) return
+      let cur = t
+      const r = tr.result()
+      const ladder = r.fills.filter((f) => f.reason === 'ladder')
+      for (const f of ladder.slice(cur.partials ?? 0)) {
+        const total = cur.filledQty ?? cur.qty
+        const qty = Math.min(roundStep(total * f.frac, rules.stepSize, 'floor'), openQty(cur))
+        if (qty <= 0 || qty >= openQty(cur)) {
+          cur = { ...cur, partials: (cur.partials ?? 0) + 1 }
+          continue
+        }
+        cur = { ...cur, ...(await b.partialClose(cur, qty, f.price, rules)) }
+        this.event('order', t.symbol, `TP sebagian ${qty} @${f.price} (${Math.round(f.frac * 100)}%)`)
+      }
+      const bull = t.direction === 'bullish'
+      // nearest tick: a break-even stop rounded away from price would no longer cover the fees
+      const sl = roundStep(r.sl, rules.tickSize, 'round')
+      if (!r.done && (bull ? sl > cur.sl : sl < cur.sl)) {
+        cur = { ...cur, ...(await b.moveStop(cur, sl, rules)) }
+        const why = r.holding ? 'order flow' : (bull ? sl >= t.entry : sl <= t.entry) ? 'BE/trailing' : 'trailing'
+        this.event('order', t.symbol, `SL dipindah ke ${sl} (${why})`)
+      }
+      const state = { bestR: Math.round(r.mfeR * 100) / 100, holding: r.holding, holds: r.orderFlowHolds }
+      if (r.holding && !t.exitState?.holding) this.event('info', t.symbol, 'order flow terkonfirmasi → posisi ditahan sampai TP / close manual')
+      if (!r.holding && t.exitState?.holding) this.event('warn', t.symbol, 'order flow patah → trailing bertingkat jalan lagi')
+      cur = { ...cur, exitState: state }
+      if (JSON.stringify(cur) !== JSON.stringify(t)) {
+        this.repo.save(cur)
+        void this.publish()
+      }
+    } catch (err) {
+      this.event('error', t.symbol, `kelola exit gagal: ${(err as Error).message}`)
+    } finally {
+      this.reconciling.delete(t.id)
+    }
   }
 
   onScreener(rows: ScreenerRow[]): Promise<void> {
@@ -304,7 +387,8 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     }
     const smc = this.deps.getSmc()
     const now = Date.now()
-    const candidates = this.lastRows.filter((r): r is Candidate => !!r.setup)
+    const exit = this.deps.getExit()
+    const candidates = candidatesOf(this.lastRows)
     const wantClaude: string[] = []
 
     for (const c of candidates) {
@@ -312,10 +396,11 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       if (this.repo.hasSetup(c.setup.id, mode)) continue
       const live = this.bars.get(c.symbol)
       const row = live ? { ...c, price: live.last } : c
-      const sg = setupGate(row, { bot, entryTf: smc.entryTimeframe, universe: this.universe, now })
+      const profile = this.deps.getProfiles?.()[c.symbol] ?? null
+      const sg = setupGate(row, { bot, entryTf: smc.entryTimeframe, universe: this.universe, now, exit, profile })
       if (sg) {
-        // only log setups that were plausible for the bot (in universe, HTF POI)
-        if (this.universe.has(c.symbol) && (bot.poiTimeframes as string[]).includes(c.setup.poi.timeframe)) this.skip(key, c.symbol, sg)
+        // only log setups that were plausible for the bot (in universe, a model it trades)
+        if (this.universe.has(c.symbol) && ((profile?.models ?? bot.models) as string[]).includes(c.setup.model)) this.skip(key, c.symbol, sg)
         continue
       }
       const equity = await this.equity()
@@ -327,6 +412,10 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       }
       if (this.repo.active().some((t) => t.symbol === c.symbol)) {
         this.skip(key, c.symbol, 'sudah ada order/posisi bot di koin ini')
+        continue
+      }
+      if (!bot.requireClaude) {
+        await this.enter(row, null, equity)
         continue
       }
       const a = this.repo.latestAnalysis(c.symbol)
@@ -358,8 +447,10 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     }
   }
 
-  private async enter(c: Candidate, a: { id: string; confidence: number }, equity: number): Promise<void> {
+  private async enter(c: Candidate, a: { id: string; confidence: number } | null, equity: number): Promise<void> {
     const bot = this.deps.getBot()
+    const profile = this.deps.getProfiles?.()[c.symbol] ?? null
+    const exit = { ...this.deps.getExit(), ...(profile?.plan.exit ?? {}) }
     const risk = this.deps.getRisk()
     const smc = this.deps.getSmc()
     const mode = this.mode()
@@ -370,7 +461,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       direction: c.direction,
       entry: c.setup.entry,
       sl: c.setup.sl,
-      tp: c.setup.tp,
+      tp: planTpFor(c.setup, c.direction === 'bullish', exit),
       equity,
       riskPct: bot.riskPerTradePct,
       maxLeverage: risk.maxLeverage,
@@ -385,14 +476,31 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       setupId: c.setup.id,
       symbol: c.symbol,
       direction: c.direction,
+      model: c.setup.model,
+      confluence: c.setup.confluence,
       poi: { kind: c.setup.poi.kind, timeframe: c.setup.poi.timeframe },
       score: c.setup.score,
-      analysisId: a.id,
-      confidence: a.confidence,
+      analysisId: a?.id ?? null,
+      confidence: a?.confidence ?? null,
       entry: plan.entry,
       sl: plan.sl,
+      slInitial: plan.sl,
       tp: plan.tp,
       qty: plan.qty,
+      closedQty: 0,
+      realized: 0,
+      partials: 0,
+      slSeq: 0,
+      exitPlan: {
+        ladder: exit.ladder,
+        trailStepR: exit.trailStepR,
+        trailGapR: exit.trailGapR,
+        orderFlowHold: exit.orderFlowHold,
+        orderFlowTf: exit.orderFlowTf,
+        orderFlowSignals: exit.orderFlowSignals,
+        orderFlowWickRatio: exit.orderFlowWickRatio
+      },
+      exitState: null,
       equity,
       riskUsd: plan.riskUsd,
       leverage: plan.leverage,
@@ -422,7 +530,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.event(
       'order',
       c.symbol,
-      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} · TP ${plan.tp} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}×) · risk ${plan.riskUsd.toFixed(3)} USDT · ${c.setup.poi.kind} ${c.setup.poi.timeframe} · Claude ${a.confidence}`
+      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} · TP ${plan.tp ?? 'trailing'} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}×) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${POI_LABEL[c.setup.poi.kind]} ${c.setup.poi.timeframe} → ${c.setup.child.kind} ${c.setup.child.timeframe} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
     )
     this.updateStreams()
   }
@@ -465,7 +573,8 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
           if (t.mode === 'live') patch = await b.sync(t, bar, this.rules.get(t.symbol))
           if (!patch) {
             // TP reached before the fill → missed (same conservative rule as the detector/backtest)
-            if (bar && (bull ? bar.high >= t.tp : bar.low <= t.tp)) {
+            const cancelAt = t.tp ?? null
+            if (bar && cancelAt !== null && (bull ? bar.high >= cancelAt : bar.low <= cancelAt)) {
               await this.cancelTrade(t, 'missed')
               changed = true
               continue
@@ -482,7 +591,8 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         const next = { ...t, ...patch }
         this.repo.save(next)
         changed = true
-        if (next.status === 'open' && t.status === 'pending') this.event('order', t.symbol, `entry terisi @${t.entry} (qty ${next.filledQty}), SL ${t.sl} / TP ${t.tp} aktif`)
+        if (next.status === 'open' && t.status === 'pending') this.event('order', t.symbol, `entry terisi @${t.entry} (qty ${next.filledQty}), SL ${t.sl} / TP ${t.tp ?? 'trailing'} aktif`)
+        if (next.status === 'closed' || next.status === 'cancelled') this.trackers.delete(t.id)
         if (next.status === 'closed') {
           this.equityCache = null
           this.event(next.pnl! >= 0 ? 'order' : 'warn', t.symbol, `posisi ditutup (${next.reason}) @${next.exitPrice ?? '?'} · PnL ${next.pnl!.toFixed(3)} USDT`)

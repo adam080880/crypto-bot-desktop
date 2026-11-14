@@ -1,10 +1,15 @@
 import type { Candle } from '@shared/candles'
-import type { SmcConfig } from '@shared/config'
-import type { Dir, PoiKind, Setup, SetupStatus } from '@shared/smc'
+import type { ExitConfig, SmcConfig } from '@shared/config'
+import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Setup, SetupStatus } from '@shared/smc'
+import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 import type { SmcAnalysisFull } from './analyze'
+import { bodyHi, bodyLo } from './candle'
+import type { OrderBlockIdx } from './orderBlocks'
+import type { Pivot } from './swings'
+import { wyckoffAt } from './wyckoff'
 
-/** A point of interest from any timeframe, normalised for §8. */
+/** A point of interest from any timeframe, normalised. */
 export interface Poi {
   kind: PoiKind
   timeframe: Timeframe
@@ -15,28 +20,12 @@ export interface Poi {
   activeFrom: number
   /** Open time of the candle that invalidated it on its own timeframe. */
   invalidT: number | null
+  /** Why the POI formed (null = no sweep and no HTF tap → not tradable as a reason). */
+  origin: PoiOrigin | null
 }
 
 const closeTime = (t: number, tf: Timeframe): number => t + TF_MS[tf]
-
-/** Collect active-able POIs (OB, RBS/SBR, QM, OCL/OCL break) from one analysis. */
-export function collectPois(a: SmcAnalysisFull): Poi[] {
-  const tf = a.timeframe
-  const pois: Poi[] = []
-  for (const ob of a.orderBlocks)
-    pois.push({ kind: 'OB', timeframe: tf, direction: ob.direction, level: ob.line, t: ob.t, activeFrom: closeTime(ob.confirmedT, tf), invalidT: ob.invalidT })
-  for (const f of a.srFlips)
-    pois.push({ kind: f.kind, timeframe: tf, direction: f.direction, level: f.level, t: f.sourceT, activeFrom: closeTime(f.breakT, tf), invalidT: f.invalidT })
-  for (const q of a.qms)
-    pois.push({ kind: 'QM', timeframe: tf, direction: q.direction, level: q.level, t: q.points.h1, activeFrom: closeTime(q.activeT, tf), invalidT: q.invalidT })
-  for (const o of a.ocls) {
-    if (o.kind === 'OCL')
-      pois.push({ kind: 'OCL', timeframe: tf, direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.invalidT })
-    else if (o.breakT !== null)
-      pois.push({ kind: 'OCL_BREAK', timeframe: tf, direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.breakT, tf), invalidT: o.invalidT })
-  }
-  return pois
-}
+const TF_RANK: Record<Timeframe, number> = { '1m': 0, '5m': 1, '15m': 2, '1h': 3, '4h': 4, '1d': 5, '1w': 6 }
 
 /** First index with candle open time ≥ t (binary search). */
 export function indexAtOrAfter(c: readonly Candle[], t: number): number {
@@ -50,36 +39,208 @@ export function indexAtOrAfter(c: readonly Candle[], t: number): number {
   return lo
 }
 
-const TF_RANK: Record<Timeframe, number> = { '1m': 0, '5m': 1, '15m': 2, '1h': 3, '4h': 4, '1d': 5, '1w': 6 }
+/** Index of the last candle that has closed by time `t` (−1 if none). */
+const lastClosedBy = (c: readonly Candle[], tf: Timeframe, t: number): number => indexAtOrAfter(c, t - TF_MS[tf] + 1) - 1
+
+// ---------------------------------------------------------------------------------------------
+// POIs + origin
+// ---------------------------------------------------------------------------------------------
+
+interface RawPoi extends Poi {
+  /** Candle (own TF) whose reaction created the POI: checked for sweep / HTF tap. */
+  originIdx: number
+  /** QM: mountain 2 takes mountain 1's liquidity by definition. */
+  inherentSweep: boolean
+}
+
+/** Extreme (lowest low for bullish, highest high for bearish) in [from, to]. */
+function extremeIdx(c: readonly Candle[], from: number, to: number, bull: boolean): number {
+  let e = Math.max(0, from)
+  for (let m = e; m <= Math.min(to, c.length - 1); m++) if (bull ? c[m]!.l < c[e]!.l : c[m]!.h > c[e]!.h) e = m
+  return e
+}
+
+function rawPois(a: SmcAnalysisFull): RawPoi[] {
+  const tf = a.timeframe
+  const c = a.candles
+  const idx = (t: number): number => indexAtOrAfter(c, t)
+  const out: RawPoi[] = []
+  const base = { timeframe: tf, origin: null, inherentSweep: false }
+  for (const ob of a.orderBlocksIdx)
+    out.push({ ...base, kind: 'OB', direction: ob.direction, level: ob.line, t: ob.t, activeFrom: closeTime(ob.confirmedT, tf), invalidT: ob.invalidT, originIdx: ob.i })
+  for (const f of a.srFlips) {
+    const bull = f.direction === 'bullish'
+    // the leg that broke the level started at the extreme between the source swing and the break
+    const e = extremeIdx(c, idx(f.sourceT), idx(f.breakT), bull)
+    out.push({ ...base, kind: f.kind, direction: f.direction, level: f.level, t: f.sourceT, activeFrom: closeTime(f.breakT, tf), invalidT: f.invalidT, originIdx: e })
+  }
+  for (const q of a.qms)
+    out.push({ ...base, kind: 'QM', direction: q.direction, level: q.level, t: q.points.h1, activeFrom: closeTime(q.activeT, tf), invalidT: q.invalidT, originIdx: idx(q.points.h2), inherentSweep: true })
+  for (const o of a.ocls) {
+    const i = idx(o.t)
+    const bull = o.direction === 'bullish'
+    if (o.kind === 'OCL')
+      out.push({ ...base, kind: 'OCL', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.invalidT, originIdx: extremeIdx(c, i - 2, i + 1, bull) })
+    else if (o.breakT !== null)
+      out.push({ ...base, kind: 'OCL_BREAK', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.breakT, tf), invalidT: o.invalidT, originIdx: extremeIdx(c, i, idx(o.breakT), bull) })
+  }
+  return out
+}
+
+/** Did candle `e` sweep one of the last `n` swings on its side (unswept until then)? */
+export function sweptSwing(c: readonly Candle[], pivots: readonly Pivot[], e: number, bull: boolean, n: number, lookback = 300): Pivot | null {
+  const x = c[e]
+  if (!x) return null
+  let seen = 0
+  for (let k = pivots.length - 1; k >= 0 && seen < n; k--) {
+    const p = pivots[k]!
+    if (p.kind !== (bull ? 'low' : 'high') || p.i >= e || p.confirmedAt > e) continue
+    if (e - p.i > lookback) break
+    seen++
+    if (bull ? x.l >= p.price : x.h <= p.price) continue
+    let clean = true
+    for (let m = p.i + 1; m < e && clean; m++) if (bull ? c[m]!.l < p.price : c[m]!.h > p.price) clean = false
+    if (clean) return p
+  }
+  return null
+}
+
+/** Did candle `e` (of `tf`) react at an active POI of a higher timeframe in the same direction? */
+function tappedHtf(x: Candle, tf: Timeframe, bull: boolean, higher: readonly Poi[], nearPct: number): boolean {
+  const near = nearPct / 100
+  const known = closeTime(x.t, tf)
+  for (const p of higher) {
+    if ((p.direction === 'bullish') !== bull || p.activeFrom > known) continue
+    if (p.invalidT !== null && p.invalidT <= x.t) continue
+    if (bull ? x.l <= p.level * (1 + near) && x.c >= p.level * (1 - near) : x.h >= p.level * (1 - near) && x.c <= p.level * (1 + near)) return true
+  }
+  return false
+}
+
+const joinOrigin = (sweep: boolean, htf: boolean): PoiOrigin | null => (sweep && htf ? 'sweep+htfPoi' : sweep ? 'sweep' : htf ? 'htfPoi' : null)
+
+/**
+ * Every POI of every analysis, with its origin (docs/entry-v2.md: "a POI must be created by
+ * something": a liquidity sweep or a tap of a higher-TF POI).
+ */
+export function collectAllPois(analyses: readonly SmcAnalysisFull[], cfg: Pick<SmcConfig, 'originNearPct' | 'originSwings'>): Poi[] {
+  const sorted = [...analyses].sort((a, b) => TF_RANK[b.timeframe] - TF_RANK[a.timeframe])
+  const done: Poi[] = []
+  for (const a of sorted) {
+    const higher = done.filter((p) => TF_RANK[p.timeframe] > TF_RANK[a.timeframe])
+    for (const r of rawPois(a)) {
+      const bull = r.direction === 'bullish'
+      const x = a.candles[r.originIdx]
+      const sweep = r.inherentSweep || sweptSwing(a.candles, a.pivots, r.originIdx, bull, cfg.originSwings) !== null
+      const htf = !!x && tappedHtf(x, a.timeframe, bull, higher, cfg.originNearPct)
+      const { originIdx: _i, inherentSweep: _s, ...poi } = r
+      done.push({ ...poi, origin: joinOrigin(sweep, htf) })
+    }
+  }
+  return done
+}
+
+/** POIs of one analysis without origin (kept for callers that only need levels). */
+export function collectPois(a: SmcAnalysisFull): Poi[] {
+  return rawPois(a).map(({ originIdx: _i, inherentSweep: _s, ...p }) => p)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Setups
+// ---------------------------------------------------------------------------------------------
+
+type TrendSrc = Pick<SmcAnalysisFull, 'timeframe' | 'trendChanges'>
 
 export interface SetupInput {
   symbol: string
   entry: SmcAnalysisFull
-  /** Higher-timeframe analyses providing POIs (4h, 1h by default). */
+  /** Higher-timeframe analyses providing POIs (1d, 4h, 1h by default). */
   poiAnalyses: readonly SmcAnalysisFull[]
   cfg: SmcConfig
+  /** TP plan (only tpMode/tpR matter here). Default: liquidity with 5R fallback. */
+  exit?: Pick<ExitConfig, 'tpMode' | 'tpR'>
+  /** BTC trend sources for the score (omit for none). */
+  btc?: { '4h'?: TrendSrc; '1h'?: TrendSrc }
+}
+
+interface Draft {
+  model: EntryModel
+  dir: Dir
+  poi: Setup['poi']
+  child: Setup['child']
+  entry: number
+  sl: number
+  /** Entry-TF index on whose close the setup is known; the order is followed from the next candle. */
+  knownIdx: number
+  /** Close beyond this before the fill → invalid. */
+  invalidLevel: number
+  confluence: Confluence[]
+  reasons: string[]
 }
 
 /**
- * §8 "POI hit POI → OB valid":
- *  1. a POI is active (known, not yet invalidated on its own TF);
- *  2. price hits it on the entry TF;
- *  3. within `obValidMaxCandles` an entry-TF OB of the same direction forms whose wick reaches the
- *     POI (± obValidNearPct) while its body stays on the right side → OB valid;
- *  4. limit at the OB valid line, SL beyond its wick (+buffer), TP at the nearest unswept opposite
- *     swing; skipped when RR < minRR.
- * Status is then followed on the entry TF: pending → triggered → win/loss, or invalid/expired.
+ * Entry models of docs/entry-v2.md. Entries only at an OB, QM or breaker; FVG is information.
+ * Every model reports a pending limit order that is then followed on the entry TF:
+ * pending → triggered → win/loss (by the planned SL/TP), or missed/invalid/expired.
  */
-export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): Setup[] {
+export function detectSetups(input: SetupInput): Setup[] {
+  const { entry, poiAnalyses, cfg } = input
   const c = entry.candles
   if (!c.length) return []
-  const pois = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])]
-  const near = cfg.obValidNearPct / 100
-  const best = new Map<string, Setup>()
+  const models = new Set(cfg.models)
+  const all = [entry, ...poiAnalyses.filter((a) => a.timeframe !== entry.timeframe)]
+  const pois = collectAllPois(all, cfg)
+  const drafts: Draft[] = []
 
-  for (const poi of pois) {
+  if (models.has('M0')) drafts.push(...modelM0(input, pois))
+  if (models.has('M1')) drafts.push(...modelM1(input, pois))
+  if (models.has('M2a') || models.has('M2b')) drafts.push(...modelM2(input, all, pois, models))
+  if (models.has('M4')) drafts.push(...modelM4(input, all))
+
+  const best = new Map<string, Setup>()
+  for (const d of drafts) {
+    const s = finalize(input, all, d)
+    if (!s) continue
+    const prev = best.get(s.id)
+    if (!prev || s.score > prev.score) best.set(s.id, s)
+  }
+  return [...best.values()].sort((a, b) => a.createdT - b.createdT || a.id.localeCompare(b.id))
+}
+
+/** Parent POIs allowed as the reason of a trade. */
+function parentPois(input: SetupInput, pois: readonly Poi[]): Poi[] {
+  const { cfg, entry } = input
+  const tfs = new Set<Timeframe>(cfg.poiTimeframes)
+  if (cfg.sameTfPoi) tfs.add(entry.timeframe)
+  return pois.filter(
+    (p) =>
+      tfs.has(p.timeframe) &&
+      (p.kind !== 'OCL' || (cfg.oclParentTimeframes as Timeframe[]).includes(p.timeframe)) &&
+      (!cfg.parentNeedsOrigin || p.origin !== null)
+  )
+}
+
+/** First entry-TF touch of a POI while it is still valid (−1 if none). */
+function firstTouch(c: readonly Candle[], poi: Poi, fromT = poi.activeFrom): number {
+  const bull = poi.direction === 'bullish'
+  for (let m = indexAtOrAfter(c, fromT); m < c.length; m++) {
+    if (poi.invalidT !== null && c[m]!.t >= closeTime(poi.invalidT, poi.timeframe)) return -1
+    if (bull ? c[m]!.l <= poi.level : c[m]!.h >= poi.level) return m
+  }
+  return -1
+}
+
+const poiRef = (p: Poi, hitT: number | null): Setup['poi'] => ({ kind: p.kind, timeframe: p.timeframe, level: p.level, t: p.t, hitT, origin: p.origin })
+
+// ---------- M0: old rule (baseline) ----------
+
+function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
+  const c = entry.candles
+  const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])]
+  const near = cfg.obValidNearPct / 100
+  const out: Draft[] = []
+  for (const poi of raw) {
     const bull = poi.direction === 'bullish'
-    // 1–2: first touch on the entry TF while the POI is valid
     let hitIdx = -1
     for (let m = indexAtOrAfter(c, poi.activeFrom); m < c.length; m++) {
       if (poi.invalidT !== null && c[m]!.t >= poi.invalidT) break
@@ -89,8 +250,6 @@ export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): S
       }
     }
     if (hitIdx < 0) continue
-
-    // 3: OB valid
     const ob = entry.orderBlocksIdx.find(
       (o) =>
         o.direction === poi.direction &&
@@ -100,79 +259,431 @@ export function detectSetups({ symbol, entry, poiAnalyses, cfg }: SetupInput): S
         (poi.invalidT === null || o.confirmedT < poi.invalidT)
     )
     if (!ob) continue
-
-    // 4: levels
-    const entryPx = ob.line
     const sl = bull ? ob.wickEnd * (1 - cfg.slBufferPct / 100) : ob.wickEnd * (1 + cfg.slBufferPct / 100)
-    const risk = Math.abs(entryPx - sl)
-    if (risk <= 0) continue
-    const createdT = ob.confirmedT
-    const known = closeTime(createdT, entry.timeframe)
-    const tp = nearestTarget([entry, ...poiAnalyses], bull, entryPx, known)
-    if (tp === null) continue
-    const rr = Math.abs(tp - entryPx) / risk
-    if (rr < cfg.minRR) continue
-
-    // score (§9 + Q5b)
-    const reasons: string[] = [`${poi.kind} ${poi.timeframe} kena → OB valid ${entry.timeframe}`]
-    let score = 3
-    if (ob.hasFvg) {
-      score += 2
-      reasons.push('OB valid punya FVG')
-    } else {
-      score -= 2
-      reasons.push('OB valid tanpa FVG (low probability)')
-    }
-    if (TF_RANK[poi.timeframe] > TF_RANK[entry.timeframe]) {
-      score += 1
-      reasons.push(`POI dari TF lebih tinggi (${poi.timeframe})`)
-    }
-    const poiA = poiAnalyses.find((a) => a.timeframe === poi.timeframe) ?? entry
-    const trend = trendKnownAt(poiA, known)
-    if (trend === poi.direction) {
-      score += 1
-      reasons.push(`searah trend ${poi.timeframe}`)
-    }
-    if (ob.prevOpposite) {
-      score += 1
-      reasons.push('candle sebelum OB berlawanan warna')
-    }
-
-    const { status, statusT, filledT } = followSetup(c, ob.confirmedAt, bull, entryPx, sl, tp, ob.wickEnd, cfg.setupExpiryCandles)
-    const setup: Setup = {
-      id: `${symbol}-${entry.timeframe}-${ob.t}-${poi.direction}`,
-      symbol,
-      direction: poi.direction,
-      poi: { kind: poi.kind, timeframe: poi.timeframe, level: poi.level, t: poi.t, hitT: c[hitIdx]!.t },
-      obValid: { timeframe: entry.timeframe, t: ob.t, line: ob.line, wickEnd: ob.wickEnd, hasFvg: ob.hasFvg },
-      entry: entryPx,
+    out.push({
+      model: 'M0',
+      dir: poi.direction,
+      poi: poiRef(poi, c[hitIdx]!.t),
+      child: { kind: 'OB', timeframe: entry.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: ob.hasFvg, origin: null },
+      entry: ob.line,
       sl,
-      tp,
-      rr: Math.round(rr * 100) / 100,
-      score,
-      reasons,
-      createdT,
-      status,
-      statusT,
-      filledT
-    }
-    const prev = best.get(setup.id)
-    if (!prev || setup.score > prev.score) best.set(setup.id, setup)
+      knownIdx: ob.confirmedAt,
+      invalidLevel: ob.wickEnd,
+      confluence: ob.prevOpposite ? ['prevOpposite'] : [],
+      reasons: [`${POI_LABEL[poi.kind]} ${poi.timeframe} kena → OB ${entry.timeframe} (aturan lama)`]
+    })
   }
-  return [...best.values()].sort((a, b) => a.createdT - b.createdT)
+  return out
+}
+
+// ---------- refinement: POI hit → LTF CHoCH → small POI (M1 / M2b) ----------
+
+interface Refined {
+  child: Setup['child']
+  entry: number
+  sl: number
+  knownIdx: number
+  invalidLevel: number
+  confluence: Confluence[]
+  reasons: string[]
+}
+
+/**
+ * After the parent POI is hit at `hitIdx`: track the reaction extreme; a CHoCH is a close beyond the
+ * last small swing (ltfPivot) that formed before that extreme. The leg must show displacement.
+ * Entry at the small POI that leg created: QM (L1 body, mountain 2 = the extreme) > OB with FVG > OB.
+ */
+export function refine(entry: SmcAnalysisFull, cfg: SmcConfig, dir: Dir, hitIdx: number, parentDeadAt: number | null): Refined | null {
+  const c = entry.candles
+  const bull = dir === 'bullish'
+  const piv = entry.ltfPivots
+  const look = hitIdx - 3 * cfg.refineWindow
+  const end = Math.min(c.length - 1, hitIdx + cfg.refineWindow)
+  const tfMs = TF_MS[entry.timeframe]
+  let ext = hitIdx
+  let chochIdx = -1
+  let ref: Pivot | null = null
+
+  for (let j = hitIdx; j <= end; j++) {
+    if (parentDeadAt !== null && c[j]!.t + tfMs > parentDeadAt) return null
+    if (bull ? c[j]!.l < c[ext]!.l : c[j]!.h > c[ext]!.h) ext = j
+    if (j === ext) continue
+    ref = null
+    for (let k = piv.length - 1; k >= 0; k--) {
+      const p = piv[k]!
+      if (p.i < look) break
+      if (p.kind === (bull ? 'high' : 'low') && p.i < ext && p.confirmedAt <= j) {
+        ref = p
+        break
+      }
+    }
+    if (ref && (bull ? c[j]!.c > ref.price : c[j]!.c < ref.price)) {
+      chochIdx = j
+      break
+    }
+  }
+  if (chochIdx < 0 || !ref) return null
+  const j = chochIdx
+  const x = c[ext]!
+  const extreme = bull ? x.l : x.h
+
+  // displacement: a big body in the leg, or the leg leaves an FVG
+  let bigBody = false
+  for (let m = ext + 1; m <= j && !bigBody; m++) if (Math.abs(c[m]!.c - c[m]!.o) >= cfg.dispBodyAtr * (entry.atr[m - 1] ?? Infinity)) bigBody = true
+  const legFvg = entry.fvgsIdx.some((f) => f.direction === dir && f.i >= ext - 1 && f.i + 2 <= j)
+  if (cfg.requireDisplacement && !bigBody && !legFvg) return null
+
+  const confluence: Confluence[] = ['displacement']
+  const reasons = [`CHoCH ${entry.timeframe} (close ${bull ? '>' : '<'} swing ${ref.price})`]
+  if (legFvg) confluence.push('fvg')
+  const swept = sweptSwing(c, piv, ext, bull, cfg.originSwings)
+  if (swept) {
+    confluence.push('sweep')
+    reasons.push(`sweep liquidity ${entry.timeframe} @ ${swept.price}`)
+  }
+
+  // child: QM first (L1 = small swing before the CHoCH swing, mountain 2 = the extreme)
+  let child: Setup['child'] | null = null
+  let knownIdx = j
+  let l1: Pivot | null = null
+  for (let k = piv.length - 1; k >= 0; k--) {
+    const p = piv[k]!
+    if (p.i < look) break
+    if (p.kind === (bull ? 'low' : 'high') && p.i < ref.i && p.confirmedAt <= j) {
+      l1 = p
+      break
+    }
+  }
+  if (l1) {
+    const k1 = c[l1.i]!
+    const deeper = bull ? x.l < l1.price : x.h > l1.price
+    const bodyBreak = !cfg.qmRequireBodyBreak || (bull ? bodyLo(x) < k1.l : bodyHi(x) > k1.h)
+    const level = bull ? bodyLo(k1) : bodyHi(k1)
+    const inside = bull ? level < c[j]!.c && level > extreme : level > c[j]!.c && level < extreme
+    if (deeper && bodyBreak && inside)
+      child = { kind: 'QM', timeframe: entry.timeframe, t: k1.t, level, extreme, hasFvg: legFvg, origin: null }
+  }
+  if (!child) {
+    let ob: OrderBlockIdx | null = null
+    for (const o of entry.orderBlocksIdx) {
+      if (o.direction !== dir || o.i < ext - 1 || o.i > j) continue
+      if (!ob || (o.hasFvg && !ob.hasFvg) || (o.hasFvg === ob.hasFvg && (bull ? o.wickEnd < ob.wickEnd : o.wickEnd > ob.wickEnd))) ob = o
+    }
+    if (!ob) return null
+    knownIdx = Math.max(j, ob.confirmedAt)
+    child = {
+      kind: 'OB',
+      timeframe: entry.timeframe,
+      t: ob.t,
+      level: ob.line,
+      extreme: bull ? Math.min(extreme, ob.wickEnd) : Math.max(extreme, ob.wickEnd),
+      hasFvg: ob.hasFvg || legFvg,
+      origin: null
+    }
+    if (ob.prevOpposite) confluence.push('prevOpposite')
+  }
+  child.origin = joinOrigin(!!swept, true)
+  reasons.push(`entry di ${child.kind} ${entry.timeframe}`)
+  const buf = cfg.slBufferPct / 100
+  return {
+    child,
+    entry: child.level,
+    sl: bull ? child.extreme * (1 - buf) : child.extreme * (1 + buf),
+    knownIdx,
+    invalidLevel: child.extreme,
+    confluence,
+    reasons
+  }
+}
+
+function modelM1(input: SetupInput, pois: readonly Poi[]): Draft[] {
+  const { entry, cfg } = input
+  const out: Draft[] = []
+  for (const p of parentPois(input, pois)) {
+    const hit = firstTouch(entry.candles, p)
+    if (hit < 0) continue
+    const dead = p.invalidT === null ? null : closeTime(p.invalidT, p.timeframe)
+    const r = refine(entry, cfg, p.direction, hit, dead)
+    if (!r) continue
+    out.push({
+      model: 'M1',
+      dir: p.direction,
+      poi: poiRef(p, entry.candles[hit]!.t),
+      ...r,
+      reasons: [`${POI_LABEL[p.kind]} ${p.timeframe} (asal: ${p.origin ?? '—'}) kena`, ...r.reasons]
+    })
+  }
+  return out
+}
+
+// ---------- M2: liquidity grab (OB behind unswept liquidity) ----------
+
+function modelM2(input: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[], models: ReadonlySet<EntryModel>): Draft[] {
+  const { entry, cfg } = input
+  const c = entry.candles
+  const tfs = new Set<Timeframe>([entry.timeframe, ...cfg.poiTimeframes])
+  const dist = cfg.grabObDistPct / 100
+  const out: Draft[] = []
+  const originOf = new Map(pois.filter((p) => p.kind === 'OB').map((p) => [`${p.timeframe}|${p.t}|${p.direction}`, p.origin]))
+
+  for (const a of all) {
+    if (!tfs.has(a.timeframe)) continue
+    for (const ob of a.orderBlocksIdx) {
+      const origin = originOf.get(`${a.timeframe}|${ob.t}|${ob.direction}`) ?? null
+      if (!origin) continue
+      const bull = ob.direction === 'bullish'
+      const obActive = closeTime(ob.confirmedT, a.timeframe)
+      // nearest unswept swing in front of the OB (formed after it), on any analysed TF
+      let best: { price: number; knownT: number; equal: boolean; tf: Timeframe } | null = null
+      for (const b of all) {
+        if (TF_RANK[b.timeframe] > TF_RANK[a.timeframe]) continue
+        for (const p of b.alternating) {
+          if (p.kind !== (bull ? 'low' : 'high')) continue
+          const k = b.candles[p.i]!
+          if (k.t <= ob.t) continue
+          const price = p.price
+          const inFront = bull ? price > ob.line && price <= ob.line * (1 + dist) : price < ob.line && price >= ob.line * (1 - dist)
+          if (!inFront) continue
+          if (best && (bull ? price >= best.price : price <= best.price)) continue
+          const liq = b.liquidity.find((l) => l.kind === 'swing' && l.t === k.t && l.side === (bull ? 'sell' : 'buy'))
+          best = { price, knownT: closeTime(b.candles[p.confirmedAt]!.t, b.timeframe), equal: !!liq?.equal, tf: b.timeframe }
+        }
+      }
+      if (!best) continue
+      const T = Math.max(obActive, best.knownT)
+      if (ob.invalidT !== null && closeTime(ob.invalidT, a.timeframe) <= T) continue
+      if (ob.hitT !== null && closeTime(ob.hitT, a.timeframe) <= T) continue // OB no longer fresh
+      const knownIdx = lastClosedBy(c, entry.timeframe, T)
+      if (knownIdx < 0) continue
+      // liquidity still there when the order goes in
+      let swept = false
+      for (let m = indexAtOrAfter(c, T - 3 * TF_MS[a.timeframe]); m <= knownIdx && !swept; m++) if (bull ? c[m]!.l < best.price : c[m]!.h > best.price) swept = true
+      if (swept) continue
+
+      const confluence: Confluence[] = ['sweep']
+      if (best.equal) confluence.push('equalLiq')
+      if (ob.hasFvg) confluence.push('fvg')
+      if (ob.prevOpposite) confluence.push('prevOpposite')
+      const poi: Setup['poi'] = { kind: 'OB', timeframe: a.timeframe, level: ob.line, t: ob.t, hitT: null, origin }
+      const liqName = `${bull ? 'SSL' : 'BSL'} ${best.tf} ${best.price}${best.equal ? ' (equal)' : ''}`
+      const buf = cfg.slBufferPct / 100
+
+      if (models.has('M2a'))
+        out.push({
+          model: 'M2a',
+          dir: ob.direction,
+          poi,
+          child: { kind: 'OB', timeframe: a.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: ob.hasFvg, origin },
+          entry: ob.line,
+          sl: bull ? ob.wickEnd * (1 - buf) : ob.wickEnd * (1 + buf),
+          knownIdx,
+          invalidLevel: ob.wickEnd,
+          confluence,
+          reasons: [`OB ${a.timeframe} (asal: ${origin}) di balik ${liqName}`, 'limit di OB, nunggu liquidity disapu']
+        })
+
+      if (models.has('M2b')) {
+        const p: Poi = { kind: 'OB', timeframe: a.timeframe, direction: ob.direction, level: ob.line, t: ob.t, activeFrom: T, invalidT: ob.invalidT, origin }
+        const hit = firstTouch(c, p, closeTime(c[knownIdx]!.t, entry.timeframe))
+        if (hit < 0) continue
+        const r = refine(entry, cfg, ob.direction, hit, ob.invalidT === null ? null : closeTime(ob.invalidT, a.timeframe))
+        if (!r) continue
+        out.push({
+          model: 'M2b',
+          dir: ob.direction,
+          poi: { ...poi, hitT: c[hit]!.t },
+          ...r,
+          confluence: [...new Set<Confluence>([...confluence, ...r.confluence])],
+          reasons: [`${liqName} disapu → OB ${a.timeframe} kena`, ...r.reasons]
+        })
+      }
+    }
+  }
+  return out
+}
+
+// ---------- M4: breaker ----------
+
+function modelM4({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): Draft[] {
+  const c = entry.candles
+  const tfs = new Set<Timeframe>([entry.timeframe, ...cfg.poiTimeframes])
+  const buf = cfg.slBufferPct / 100
+  const out: Draft[] = []
+  for (const a of all) {
+    if (!tfs.has(a.timeframe)) continue
+    const ac = a.candles
+    for (const ob of a.orderBlocksIdx) {
+      if (ob.invalidT === null) continue
+      const b = indexAtOrAfter(ac, ob.invalidT)
+      if (b >= ac.length) continue
+      // a bearish OB broken upward becomes a bullish breaker (and vice versa)
+      const bull = ob.direction === 'bearish'
+      const dir: Dir = bull ? 'bullish' : 'bearish'
+      // the break must follow a sweep of the swing before the OB
+      const e = extremeIdx(ac, ob.i + 1, b, bull)
+      let prev: Pivot | null = null
+      for (let k = a.pivots.length - 1; k >= 0; k--) {
+        const p = a.pivots[k]!
+        if (p.kind === (bull ? 'low' : 'high') && p.i < ob.i && p.confirmedAt <= e) {
+          prev = p
+          break
+        }
+      }
+      if (!prev || (bull ? ac[e]!.l >= prev.price : ac[e]!.h <= prev.price)) continue
+      const level = ob.line // body edge facing the retest
+      const far = ob.bodyFar
+      const T = closeTime(ac[b]!.t, a.timeframe)
+      const knownIdx = lastClosedBy(c, entry.timeframe, T)
+      if (knownIdx < 0) continue
+      const confluence: Confluence[] = ['sweep']
+      const lo = Math.min(far, ob.wickEnd)
+      const hi = Math.max(far, ob.wickEnd)
+      if (a.fvgsIdx.some((f) => f.direction === dir && f.i >= e - 1 && f.i <= b && f.bottom <= hi && f.top >= lo)) confluence.push('unicorn', 'fvg')
+      out.push({
+        model: 'M4',
+        dir,
+        poi: { kind: 'OB', timeframe: a.timeframe, level: ob.line, t: ob.t, hitT: null, origin: 'sweep' },
+        child: { kind: 'BREAKER', timeframe: a.timeframe, t: ob.t, level, extreme: far, hasFvg: confluence.includes('fvg'), origin: 'sweep' },
+        entry: level,
+        sl: bull ? far * (1 - buf) : far * (1 + buf),
+        knownIdx,
+        invalidLevel: far,
+        confluence,
+        reasons: [`OB ${ob.direction === 'bullish' ? 'bullish' : 'bearish'} ${a.timeframe} dijebol setelah sweep ${prev.price} → breaker`]
+      })
+    }
+  }
+  return out
+}
+
+// ---------- score, TP, status ----------
+
+const SCORE: Partial<Record<Confluence, number>> = {
+  fvg: 1,
+  sweep: 1,
+  equalLiq: 1,
+  displacement: 1,
+  htfParent: 1,
+  trendParent: 1,
+  btc4h: 1,
+  btc1h: 1,
+  btcAgainst: -1,
+  wyckoff: 1,
+  manipulation: 1,
+  wyckoffAgainst: -1,
+  unicorn: 1,
+  prevOpposite: 1
+}
+
+const CONF_LABEL: Record<Confluence, string> = {
+  fvg: 'ada FVG (info)',
+  sweep: 'liquidity disapu',
+  equalLiq: 'equal high/low',
+  displacement: 'displacement',
+  htfParent: 'POI dari TF lebih tinggi',
+  trendParent: 'searah trend TF POI',
+  btc4h: 'searah trend BTC 4h',
+  btc1h: 'searah trend BTC 1h',
+  btcAgainst: 'melawan trend BTC',
+  wyckoff: 'fase Wyckoff searah',
+  manipulation: 'ada manipulation (spring/UTAD) searah',
+  wyckoffAgainst: 'fase Wyckoff berlawanan',
+  unicorn: 'breaker + FVG (unicorn)',
+  prevOpposite: 'candle sebelum OB berlawanan warna'
+}
+
+function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft): Setup | null {
+  const { entry, cfg, symbol } = input
+  const c = entry.candles
+  const bull = d.dir === 'bullish'
+  const risk = Math.abs(d.entry - d.sl)
+  if (!(risk > 0) || d.knownIdx >= c.length) return null
+  if (bull ? d.sl >= d.entry : d.sl <= d.entry) return null
+  const known = closeTime(c[d.knownIdx]!.t, entry.timeframe)
+  const conf = new Set<Confluence>(d.confluence)
+
+  if (TF_RANK[d.poi.timeframe] > TF_RANK[entry.timeframe]) conf.add('htfParent')
+  const parentA = all.find((a) => a.timeframe === d.poi.timeframe)
+  if (parentA && trendKnownAt(parentA, known) === d.dir) conf.add('trendParent')
+  if (input.btc) {
+    const t4 = input.btc['4h'] ? trendKnownAt(input.btc['4h'], known) : null
+    const t1 = input.btc['1h'] ? trendKnownAt(input.btc['1h'], known) : null
+    if (t4 === d.dir) conf.add('btc4h')
+    if (t1 === d.dir) conf.add('btc1h')
+    if (t4 && t1 && t4 !== d.dir && t1 !== d.dir) conf.add('btcAgainst')
+  }
+  // Wyckoff: highest timeframe that has a phase at that time
+  for (const a of [...all].sort((x, y) => TF_RANK[y.timeframe] - TF_RANK[x.timeframe])) {
+    if (!a.wyckoff.length) continue
+    const st = wyckoffAt(a.wyckoff, known)
+    if (!st || st.dir === null) continue
+    if (st.dir === d.dir) {
+      conf.add('wyckoff')
+      if (st.manipulation) conf.add('manipulation')
+    } else conf.add('wyckoffAgainst')
+    break
+  }
+
+  const tpLiquidity = nearestTarget(all, bull, d.entry, known)
+  const exit = input.exit ?? { tpMode: 'liquidity', tpR: 5 }
+  const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
+  const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
+  const rr = Math.abs(tp - d.entry) / risk
+  if (d.model === 'M0' && (tpLiquidity === null || Math.abs(tpLiquidity - d.entry) / risk < cfg.minRR)) return null
+
+  let score = 3
+  for (const k of conf) score += SCORE[k] ?? 0
+  const confluence = [...conf]
+  const { status, statusT, filledT } = followSetup(c, d.knownIdx, bull, d.entry, d.sl, tp, d.invalidLevel, cfg.setupExpiryCandles)
+  return {
+    id: `${symbol}-${d.model}-${d.child.timeframe}-${d.child.t}-${d.dir}`,
+    symbol,
+    model: d.model,
+    direction: d.dir,
+    poi: d.poi,
+    child: d.child,
+    entry: d.entry,
+    sl: d.sl,
+    tp,
+    tpLiquidity,
+    rr: Math.round(rr * 100) / 100,
+    score,
+    confluence,
+    reasons: [...d.reasons, ...confluence.filter((k) => !d.confluence.includes(k)).map((k) => CONF_LABEL[k])],
+    createdT: c[d.knownIdx]!.t,
+    status,
+    statusT,
+    filledT
+  }
+}
+
+/** Swing liquidity per analysis, prepared once per array (WeakMap cache). */
+const targetCache = new WeakMap<readonly unknown[], { price: number; knownT: number; sweptT: number | null; side: 'buy' | 'sell' }[]>()
+
+function targets(a: SmcAnalysisFull) {
+  let t = targetCache.get(a.liquidity)
+  if (!t) {
+    const sw = new Map(a.swings.map((s) => [s.t, s]))
+    t = []
+    for (const l of a.liquidity) {
+      if (l.kind !== 'swing') continue
+      const s = sw.get(l.t)
+      if (!s) continue
+      t.push({ price: l.top, knownT: closeTime(s.confirmedT, a.timeframe), sweptT: l.sweptT, side: l.side })
+    }
+    targetCache.set(a.liquidity, t)
+  }
+  return t
 }
 
 /** Nearest unswept opposite swing (from any analysed TF) known at `knownAt`. */
 function nearestTarget(analyses: readonly SmcAnalysisFull[], bull: boolean, entry: number, knownAt: number): number | null {
   let best: number | null = null
   for (const a of analyses) {
-    for (const l of a.liquidity) {
-      if (l.kind !== 'swing' || l.side !== (bull ? 'buy' : 'sell')) continue
-      const sw = a.swings.find((s) => s.t === l.t)
-      if (!sw || closeTime(sw.confirmedT, a.timeframe) > knownAt) continue
+    for (const l of targets(a)) {
+      if (l.side !== (bull ? 'buy' : 'sell') || l.knownT > knownAt) continue
       if (l.sweptT !== null && l.sweptT < knownAt) continue
-      if (bull ? l.top > entry && (best === null || l.top < best) : l.bottom < entry && (best === null || l.bottom > best))
-        best = bull ? l.top : l.bottom
+      if (bull ? l.price > entry && (best === null || l.price < best) : l.price < entry && (best === null || l.price > best)) best = l.price
     }
   }
   return best
@@ -192,18 +703,18 @@ export function trendKnownAt(a: Pick<SmcAnalysisFull, 'timeframe' | 'trendChange
 }
 
 /**
- * Walk entry-TF candles after the OB valid is known. Same-candle SL/TP counts as a loss, and a
+ * Walk entry-TF candles after the setup is known. Same-candle SL/TP counts as a loss, and a
  * pending limit is cancelled ('missed') once price reaches the TP first, including a candle that
  * touches both entry and TP (order inside the candle is unknown → conservative, no trade).
  */
-function followSetup(
+export function followSetup(
   c: readonly Candle[],
   from: number,
   bull: boolean,
   entry: number,
   sl: number,
   tp: number,
-  wickEnd: number,
+  invalidLevel: number,
   expiry: number
 ): { status: SetupStatus; statusT: number | null; filledT: number | null } {
   let triggered = false
@@ -216,7 +727,7 @@ function followSetup(
       if (bull ? x.l <= entry : x.h >= entry) {
         triggered = true
         triggeredT = x.t
-      } else if (bull ? x.c < wickEnd : x.c > wickEnd) return { status: 'invalid', statusT: x.t, filledT: null }
+      } else if (bull ? x.c < invalidLevel : x.c > invalidLevel) return { status: 'invalid', statusT: x.t, filledT: null }
       else continue
     }
     const hitSl = bull ? x.l <= sl : x.h >= sl
@@ -226,3 +737,4 @@ function followSetup(
   }
   return triggered ? { status: 'triggered', statusT: triggeredT, filledT: triggeredT } : { status: 'pending', statusT: null, filledT: null }
 }
+

@@ -1,5 +1,7 @@
-import type { BotConfig, RiskConfig } from '@shared/config'
-import type { ScreenerRow } from '@shared/screener'
+import type { CoinProfile } from '@shared/backtest'
+import type { BotConfig, ExitConfig, RiskConfig } from '@shared/config'
+import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
+import { MODEL_LABEL, POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 
 export interface AnalysisLite {
@@ -10,25 +12,48 @@ export interface AnalysisLite {
   forcedSkip: boolean
 }
 
-/** Setup facts the bot needs (from a screener row). */
-export type Candidate = ScreenerRow & { setup: NonNullable<ScreenerRow['setup']> }
+/** One setup of a screener row (the bot looks at every active setup, not only the best). */
+export type Candidate = ScreenerRow & { setup: ScreenerSetup }
+
+/** Every active setup of every row as a candidate. */
+export const candidatesOf = (rows: readonly ScreenerRow[]): Candidate[] => rows.flatMap((r) => (r.setups ?? (r.setup ? [r.setup] : [])).map((s) => ({ ...r, setup: s })))
+
+/** Pending limits are cancelled when price reaches this first (same rule as the backtest). */
+export const cancelLevel = (s: Pick<ScreenerSetup, 'entry' | 'sl' | 'tp' | 'tpLiquidity'>, exit: Pick<ExitConfig, 'tpMode'> & Partial<Pick<ExitConfig, 'tpR'>>): number => {
+  if (exit.tpMode === 'trail') return s.tpLiquidity ?? s.tp
+  if (exit.tpMode === 'fixedR' && exit.tpR !== undefined) return planTpFor(s, s.sl < s.entry, { tpMode: 'fixedR', tpR: exit.tpR })!
+  return s.tp
+}
 
 /** When the setup became known: close of the OB valid confirmation candle. */
 export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.createdT + TF_MS[entryTf]
 
 /**
- * Setup-level rules (no Claude, no account state). HTF POI → OB valid on the entry TF, still
- * pending, fresh, and price hasn't reached the TP or the entry yet.
+ * Setup-level rules (no Claude, no account state): model allowed, required confluences, score,
+ * parent POI timeframe (M1/M2b), still pending, fresh, and price hasn't reached the TP or the entry.
  */
-export function setupGate(c: Candidate, o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number }): string | null {
+export function setupGate(
+  c: Candidate,
+  o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number; exit?: Pick<ExitConfig, 'tpMode'>; profile?: CoinProfile | null }
+): string | null {
   const s = c.setup
   const bull = c.direction === 'bullish'
+  const p = o.profile ?? null
   if (!o.universe.has(c.symbol)) return `bukan top ${o.bot.topVolume} crypto by volume`
-  if (!(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe)) return `POI ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
+  const models: string[] = p ? p.models : o.bot.models
+  if (!models.includes(s.model)) return `${MODEL_LABEL[s.model]} tidak dipakai bot${p ? ` (profil ${c.symbol})` : ''}`
+  if (p && p.pois.length && !p.pois.includes(`${s.poi.kind}|${s.poi.timeframe}`)) return `POI ${POI_LABEL[s.poi.kind]} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
+  if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
+    return `POI ${POI_LABEL[s.poi.kind]} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
+  const missing = (p ? p.requireConfluence : o.bot.requireConfluence).filter((k) => !(s.confluence as string[]).includes(k))
+  if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
+  const minScore = p ? p.minScore : o.bot.minScore
+  if (s.score < minScore) return `skor ${s.score} < ${minScore}`
   if (s.status !== 'pending') return 'entry sudah kena sebelum bot sempat pasang limit'
   const age = o.now - knownAt(c, o.entryTf)
   if (age > o.bot.maxSetupAgeMin * 60_000) return `setup sudah ${Math.round(age / 60_000)} menit (maks ${o.bot.maxSetupAgeMin})`
-  if (bull ? c.price >= s.tp : c.price <= s.tp) return 'harga sudah sampai TP (lewat TP)'
+  const tp = cancelLevel(s, p ? p.plan.exit : (o.exit ?? { tpMode: 'liquidity' }))
+  if (bull ? c.price >= tp : c.price <= tp) return 'harga sudah sampai TP (lewat TP)'
   if (bull ? c.price <= s.entry : c.price >= s.entry) return 'harga sudah di/lewat entry'
   return null
 }
@@ -64,4 +89,13 @@ export function accountGate(o: {
   if (o.newsWindow && !o.newsStrategy) return `news window: ${o.newsWindow}`
   if (o.activeTrades >= o.risk.maxOpenPositions) return `posisi/order aktif sudah ${o.activeTrades} (maks ${o.risk.maxOpenPositions})`
   return null
+}
+
+/** Planned TP for a setup under an exit plan (null = no TP order). */
+export function planTpFor(s: Pick<ScreenerSetup, 'entry' | 'sl' | 'tp' | 'tpLiquidity'>, bull: boolean, exit: Pick<ExitConfig, 'tpMode' | 'tpR'>): number | null {
+  const risk = Math.abs(s.entry - s.sl)
+  const at = (r: number): number => (bull ? s.entry + r * risk : s.entry - r * risk)
+  if (exit.tpMode === 'trail') return null
+  if (exit.tpMode === 'fixedR') return at(exit.tpR)
+  return s.tpLiquidity ?? at(exit.tpR)
 }

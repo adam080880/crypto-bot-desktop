@@ -3,6 +3,21 @@ import type { Db } from '../db/client'
 import type { AnalysisLite } from './gate'
 
 /** Bot audit trail: trades (payload = BotTrade JSON) and the decision log. */
+/** Rows saved before entry v2 lack the new fields. */
+export const normalizeTrade = (t: Partial<BotTrade> & Pick<BotTrade, 'sl'>): BotTrade =>
+  ({
+    model: 'M0',
+    confluence: [],
+    slInitial: t.sl,
+    closedQty: 0,
+    realized: 0,
+    partials: 0,
+    slSeq: 0,
+    exitPlan: null,
+    exitState: null,
+    ...t
+  }) as BotTrade
+
 export class BotRepo {
   constructor(private readonly db: Db) {}
 
@@ -23,13 +38,13 @@ export class BotRepo {
 
   active(): BotTrade[] {
     return (this.c.prepare(`SELECT payload FROM bot_trades WHERE status IN ('pending', 'open') ORDER BY created_at`).pluck().all() as string[]).map(
-      (p) => JSON.parse(p) as BotTrade
+      (p) => normalizeTrade(JSON.parse(p))
     )
   }
 
   recent(limit = 100): BotTrade[] {
     return (this.c.prepare(`SELECT payload FROM bot_trades ORDER BY created_at DESC LIMIT ?`).pluck().all(limit) as string[]).map(
-      (p) => JSON.parse(p) as BotTrade
+      (p) => normalizeTrade(JSON.parse(p))
     )
   }
 

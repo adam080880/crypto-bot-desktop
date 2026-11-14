@@ -13,7 +13,8 @@ export default defineConfig({
         input: {
           index: resolve('src/main/index.ts'),
           backfill: resolve('src/cli/backfill.ts'),
-          dataWorker: resolve('src/main/workers/dataWorker.ts')
+          dataWorker: resolve('src/main/workers/dataWorker.ts'),
+          backtestWorker: resolve('src/main/workers/backtestWorker.ts')
         }
       }
     }

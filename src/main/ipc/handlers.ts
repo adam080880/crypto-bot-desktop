@@ -3,8 +3,8 @@ import { is } from '@electron-toolkit/utils'
 import { moveDatabase, planMove, storageInfo } from '../storage'
 import { z } from 'zod'
 import { configPatchSchema } from '@shared/config'
-import { backtestParamsSchema } from '@shared/backtest'
-import { runBacktest } from '../backtest/runBacktest'
+import { backtestParamsSchema, coinProfileSchema, type CoinProfile } from '@shared/backtest'
+import { deleteProfile, readProfiles, saveProfile } from '../backtest/profiles'
 import { SECRET_NAMES, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc'
 import { TIMEFRAMES } from '@shared/timeframes'
 import { CandleRepo } from '../db/candles'
@@ -156,13 +156,25 @@ export function registerIpcHandlers(deps: {
   })
   handle('smc:setups', (req) => {
     const { symbol } = z.object({ symbol: symbolSchema }).strict().parse(req)
-    return smc.setups(symbol, state.getConfig().smc)
+    return smc.setups(symbol, state.getConfig().smc, state.getConfig().exit)
   })
-  handle('backtest:run', (req) => {
+  handle('backtest:run', async (req, event) => {
     const params = backtestParamsSchema.parse(req)
-    const result = runBacktest(db, params, state.getConfig())
-    if (result) log.info({ symbol: params.symbol, ms: result.ms, trades: result.stats.all.trades }, 'backtest done')
+    const result = await data.runBacktest(params, (p) => !event.sender.isDestroyed() && event.sender.send('backtest:progress', p))
+    if (result) log.info({ symbol: params.symbol, ms: result.ms, setups: result.setups.length }, 'backtest done')
     return result
+  })
+  handle('backtest:profiles', () => readProfiles(db))
+  handle('backtest:saveProfile', (req) => {
+    const p = coinProfileSchema.parse(req)
+    const all = saveProfile(db, { ...p, savedAt: Date.now() } as CoinProfile)
+    data.pushConfig() // the bot (data worker) reads profiles from its config
+    return all
+  })
+  handle('backtest:deleteProfile', (req) => {
+    const all = deleteProfile(db, z.object({ symbol: symbolSchema }).strict().parse(req).symbol)
+    data.pushConfig()
+    return all
   })
   handle('news:list', (req) => {
     const { from, to } = z.object({ from: z.number().int(), to: z.number().int() }).strict().parse(req)

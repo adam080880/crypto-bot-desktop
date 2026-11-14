@@ -7,6 +7,7 @@ import { installCloudflareDns } from './net/dns'
 import { paths, pinUserData } from './paths'
 import { SecretStore } from './security/secrets'
 import { AppState } from './state/appState'
+import { readProfiles } from './backtest/profiles'
 import { DataController } from './sync/dataController'
 import { readSetting } from './db/settingsRepo'
 import { createTray } from './tray'
@@ -76,7 +77,8 @@ function bootstrap(): void {
       const key = secrets.get('binance.apiKey')
       const secret = secrets.get('binance.apiSecret')
       return key && secret ? { key, secret } : null
-    }
+    },
+    () => readProfiles(db)
   )
 
   registerIpcHandlers({

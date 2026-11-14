@@ -9,6 +9,8 @@ import { detectOrderBlocks, type OrderBlockIdx } from './orderBlocks'
 import { detectQms } from './qm'
 import { detectSrFlips } from './srFlip'
 import { analyzeStructure, findPivots, type Pivot } from './swings'
+import { atrSeries } from './atr'
+import { detectWyckoff } from './wyckoff'
 
 /** Analysis plus index-level data the setup detector needs. */
 export interface SmcAnalysisFull extends SmcAnalysis {
@@ -17,6 +19,11 @@ export interface SmcAnalysisFull extends SmcAnalysis {
   trendAt: SmcAnalysis['trend'][]
   orderBlocksIdx: OrderBlockIdx[]
   fvgsIdx: FvgIdx[]
+  /** Raw pivots (cfg.pivot), before the alternating filter (needed to see which swing got swept). */
+  pivots: Pivot[]
+  /** Small-structure pivots (cfg.ltfPivot) for CHoCH on the entry TF. */
+  ltfPivots: Pivot[]
+  atr: number[]
 }
 
 /** Run every detector on one timeframe. Pure: same candles + config → same output (live & backtest). */
@@ -25,6 +32,10 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
   const structure = analyzeStructure(candles, pivots)
   const fvgs = detectFvgs(candles, cfg.fvgMinPct)
   const orderBlocks = detectOrderBlocks(candles, pivots, fvgs, cfg)
+  const atr = atrSeries(candles, cfg.atrPeriod)
+  const wyckoff = (cfg.wyckoffTimeframes as string[]).includes(timeframe)
+    ? detectWyckoff(candles, timeframe, atr, { rangeCandles: cfg.wyRangeCandles, rangeAtr: cfg.wyRangeAtr, reclaimCandles: cfg.sweepReclaimCandles })
+    : []
   // §6: plain OCL only on HTF (1d/1w by default); lower timeframes keep OCL Break only
   const plainOcl = (cfg.oclPlainTimeframes as string[]).includes(timeframe)
   const ocls = detectOcls(candles, cfg.oclBreakMaxCandles).filter((o) => o.kind === 'OCL_BREAK' || plainOcl)
@@ -40,11 +51,15 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
     ocls,
     qms: detectQms(candles, structure.alternating, cfg.qmRequireBodyBreak),
     liquidity: detectLiquidity(candles, orderBlocks, structure.alternating, cfg.equalPct),
+    wyckoff,
     candles,
     alternating: structure.alternating,
     trendAt: structure.trendAt,
     orderBlocksIdx: orderBlocks,
-    fvgsIdx: fvgs
+    fvgsIdx: fvgs,
+    pivots,
+    ltfPivots: cfg.ltfPivot === cfg.pivot ? pivots : findPivots(candles, cfg.ltfPivot),
+    atr
   }
 }
 
@@ -63,6 +78,7 @@ export function toPublic(a: SmcAnalysisFull): SmcAnalysis {
     srFlips: a.srFlips.map((f) => strip(f, ['breakAt'])),
     ocls: a.ocls,
     qms: a.qms,
-    liquidity: a.liquidity
+    liquidity: a.liquidity,
+    wyckoff: a.wyckoff
   }
 }

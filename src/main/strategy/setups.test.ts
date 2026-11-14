@@ -29,36 +29,37 @@ const ROWS: Row[] = [
 
 describe('setups: POI hit → OB valid (§8)', () => {
   it('builds a scored long setup and follows it to the target', () => {
-    const c = cfg({ minRR: 2 })
+    const c = cfg({ minRR: 2, models: ['M0'] })
     const entry = analyzeSmc(bars(ROWS), '15m', c)
     const setups = detectSetups({ symbol: 'TESTUSDT', entry, poiAnalyses: [], cfg: c })
-    const s = setups.find((x) => x.obValid.t === at(14))!
+    const s = setups.find((x) => x.child.t === at(14))!
     expect(s).toBeDefined()
     expect(s.direction).toBe('bullish')
+    expect(s.model).toBe('M0')
     expect(s.poi).toMatchObject({ level: 8.0, hitT: at(14) })
     expect(s.entry).toBe(8.4)
     expect(s.sl).toBeCloseTo(7.95 * 0.999, 6)
     expect(s.tp).toBe(10)
     expect(s.rr).toBeGreaterThanOrEqual(2)
-    expect(s.obValid.hasFvg).toBe(true)
+    expect(s.child.hasFvg).toBe(true)
     expect(s.createdT).toBe(at(16))
     expect(s.status).toBe('win')
     expect(s.statusT).toBe(at(19))
-    expect(s.reasons).toContain('OB valid punya FVG')
+    expect(s.confluence).toContain('prevOpposite')
   })
 
   it('skips the setup when RR is below the minimum', () => {
-    const c = cfg({ minRR: 5 })
+    const c = cfg({ minRR: 5, models: ['M0'] })
     const entry = analyzeSmc(bars(ROWS), '15m', c)
-    expect(detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).filter((x) => x.obValid.t === at(14))).toHaveLength(0)
+    expect(detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).filter((x) => x.child.t === at(14))).toHaveLength(0)
   })
 
   it('needs a green OB valid for a long (colour rule)', () => {
     const rows = ROWS.map((r) => [...r] as Row)
     rows[14] = [8.6, 8.9, 7.95, 8.4] // red instead of green
-    const c = cfg()
+    const c = cfg({ models: ['M0'] })
     const entry = analyzeSmc(bars(rows), '15m', c)
-    expect(detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).filter((x) => x.obValid.t === at(14))).toHaveLength(0)
+    expect(detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).filter((x) => x.child.t === at(14))).toHaveLength(0)
   })
 })
 
@@ -82,18 +83,18 @@ describe('setups: limit cancelled when price reaches the TP first', () => {
   it("marks the setup 'missed' (no trade) instead of filling it later", () => {
     const rows = ROWS.map((r) => [...r] as Row)
     rows[17] = [9.5, 10.2, 9.4, 10.1] // TP 10.0 reached before the limit 8.4 filled
-    const c = cfg({ minRR: 2 })
+    const c = cfg({ minRR: 2, models: ['M0'] })
     const entry = analyzeSmc(bars(rows), '15m', c)
-    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.obValid.t === at(14))!
+    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.child.t === at(14))!
     expect(s.status).toBe('missed')
     expect(s.statusT).toBe(at(17))
     expect(s.filledT).toBeNull()
   })
 
   it('records the fill candle of a closed trade', () => {
-    const c = cfg({ minRR: 2 })
+    const c = cfg({ minRR: 2, models: ['M0'] })
     const entry = analyzeSmc(bars(ROWS), '15m', c)
-    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.obValid.t === at(14))!
+    const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.child.t === at(14))!
     expect(s.filledT).toBe(at(18))
   })
 })

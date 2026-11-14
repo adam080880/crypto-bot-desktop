@@ -1,5 +1,5 @@
 import type { ScreenerConfig } from '@shared/config'
-import type { ScreenerRow } from '@shared/screener'
+import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import type { Dir, Setup, StructureBreak } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 import type { Poi } from '../strategy/setups'
@@ -28,22 +28,26 @@ export function screenSymbol(input: ScreenInput, cfg: ScreenerConfig, now: numbe
   const trend = { '4h': input.trend['4h'] ?? null, '1h': input.trend['1h'] ?? null, '15m': input.trend['15m'] ?? null }
 
   for (const dir of ['bullish', 'bearish'] as const) {
-    const s = input.setups
+    const toRow = (x: Setup): ScreenerSetup => ({
+      id: x.id,
+      model: x.model,
+      entry: x.entry,
+      sl: x.sl,
+      tp: x.tp,
+      tpLiquidity: x.tpLiquidity,
+      rr: x.rr,
+      score: x.score,
+      confluence: x.confluence,
+      status: x.status as 'pending' | 'triggered',
+      createdT: x.createdT,
+      poi: { kind: x.poi.kind, timeframe: x.poi.timeframe, origin: x.poi.origin },
+      child: { kind: x.child.kind, timeframe: x.child.timeframe }
+    })
+    const setups = input.setups
       .filter((x) => x.direction === dir && (x.status === 'pending' || x.status === 'triggered'))
-      .reduce<Setup | null>((a, b) => (a && a.createdT >= b.createdT ? a : b), null)
-    const setup: ScreenerRow['setup'] = s
-      ? {
-          id: s.id,
-          entry: s.entry,
-          sl: s.sl,
-          tp: s.tp,
-          rr: s.rr,
-          score: s.score,
-          status: s.status as 'pending' | 'triggered',
-          createdT: s.createdT,
-          poi: { kind: s.poi.kind, timeframe: s.poi.timeframe }
-        }
-      : null
+      .sort((a, b) => b.createdT - a.createdT)
+      .map(toRow)
+    const setup = setups.reduce<ScreenerSetup | null>((a, b) => (a && (a.score > b.score || (a.score === b.score && a.createdT >= b.createdT)) ? a : b), null)
 
     // bullish POIs are bought from below price, bearish ones sold from above
     let nearPoi: ScreenerRow['nearPoi'] = null
@@ -66,7 +70,7 @@ export function screenSymbol(input: ScreenInput, cfg: ScreenerConfig, now: numbe
 
     if (!setup && !nearPoi && !recentBos) continue
     const trendAligned = trend['4h'] === dir && trend['1h'] === dir && trend['15m'] === dir
-    rows.push({ symbol, direction: dir, price, dataT: input.priceT, setup, nearPoi, trendAligned, trend, recentBos })
+    rows.push({ symbol, direction: dir, price, dataT: input.priceT, setup, setups, nearPoi, trendAligned, trend, recentBos })
   }
   return rows
 }

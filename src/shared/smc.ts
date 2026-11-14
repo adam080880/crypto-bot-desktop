@@ -92,6 +92,26 @@ export interface Liquidity {
   equal: boolean
 }
 
+/**
+ * Wyckoff trading range (indicator, score only). Accumulation = range after a decline, distribution =
+ * range after a rally. Manipulation = spring (sweep below the range, close back in) / UTAD (above).
+ * Breakout = closes outside the range for longer than the reclaim window → markup / markdown.
+ */
+export interface WyckoffRange {
+  startT: number
+  /** Close time of the candle on which the range became known. */
+  knownT: number
+  endT: number | null
+  top: number
+  bottom: number
+  kind: 'accumulation' | 'distribution' | 'range'
+  /** t = close time of the candle that confirmed the event. */
+  manipulations: { t: number; kind: 'spring' | 'utad'; price: number }[]
+  breakout: { t: number; direction: Dir } | null
+}
+
+export type WyckoffPhase = 'accumulation' | 'distribution' | 'range' | 'manipulation' | 'markup' | 'markdown'
+
 export interface SmcAnalysis {
   timeframe: Timeframe
   /** Trend as of the last candle (null until the first structure break). */
@@ -105,27 +125,88 @@ export interface SmcAnalysis {
   ocls: Ocl[]
   qms: Qm[]
   liquidity: Liquidity[]
+  wyckoff: WyckoffRange[]
 }
 
 export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK'
 
+/** Display names (OB = Order Block; OCL Break is NOT an OB). */
+export const POI_LABEL: Record<PoiKind, string> = {
+  OB: 'OB',
+  RBS: 'RBS',
+  SBR: 'SBR',
+  QM: 'QM',
+  OCL: 'OCL',
+  OCL_BREAK: 'OCL Break'
+}
+
+/**
+ * Why a POI exists (docs/entry-v2.md §1): it formed because liquidity was swept, or because price
+ * tapped an active POI of a higher timeframe. A POI without an origin is not traded.
+ */
+export type PoiOrigin = 'sweep' | 'htfPoi' | 'sweep+htfPoi'
+
 /** missed = price reached the TP before the limit entry filled (cancelled, no trade). */
 export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' | 'expired' | 'missed'
 
-/** §8 Confirmed entry: POI hit → OB valid on the entry timeframe. A candidate, never an order. */
+/**
+ * Entry models (docs/entry-v2.md §2). Entries are only ever at an OB, QM or breaker (never at an FVG/OCL).
+ *  M0  old rule: POI hit → OB-shaped candle nearby (baseline for comparison only)
+ *  M1  HTF POI hit → LTF CHoCH + displacement → limit at the small POI the leg created (QM > OB)
+ *  M2a OB behind unswept liquidity (SSL/BSL in front of it) → limit at the OB
+ *  M2b same OB, swept + tapped → LTF CHoCH → limit at the small POI (like M1)
+ *  M4  breaker: OB broken after a liquidity sweep → limit on the retest (+FVG overlap = unicorn)
+ */
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4'] as const
+export type EntryModel = (typeof ENTRY_MODELS)[number]
+export const MODEL_LABEL: Record<EntryModel, string> = {
+  M0: 'M0 lama (POI → OB valid)',
+  M1: 'M1 POI besar → POI kecil',
+  M2a: 'M2a liquidity grab (limit di OB)',
+  M2b: 'M2b liquidity grab + CHoCH',
+  M4: 'M4 breaker'
+}
+
+export type ChildKind = 'OB' | 'QM' | 'BREAKER'
+
+/** Score/filter tags; FVG is information only (never an entry level). */
+export type Confluence =
+  | 'fvg'
+  | 'sweep'
+  | 'equalLiq'
+  | 'displacement'
+  | 'htfParent'
+  | 'trendParent'
+  | 'btc4h'
+  | 'btc1h'
+  | 'btcAgainst'
+  | 'wyckoff'
+  | 'manipulation'
+  | 'wyckoffAgainst'
+  | 'unicorn'
+  | 'prevOpposite'
+
+/** A candidate entry (never an order by itself). */
 export interface Setup {
   id: string
   symbol: string
+  model: EntryModel
   direction: Dir
-  poi: { kind: PoiKind; timeframe: Timeframe; level: number; t: number; hitT: number }
-  obValid: { timeframe: Timeframe; t: number; line: number; wickEnd: number; hasFvg: boolean }
+  /** The reason for the trade: higher-TF POI that was hit (or the OB behind the liquidity for M2). */
+  poi: { kind: PoiKind; timeframe: Timeframe; level: number; t: number; hitT: number | null; origin: PoiOrigin | null }
+  /** Where the limit sits: the small POI created by the reaction. */
+  child: { kind: ChildKind; timeframe: Timeframe; t: number; level: number; extreme: number; hasFvg: boolean; origin: PoiOrigin | null }
   entry: number
   sl: number
+  /** Planned final TP (liquidity target, or entry ± exit.tpR when none / fixed-R mode). */
   tp: number
+  /** Nearest unswept opposite liquidity at the time the setup became known. */
+  tpLiquidity: number | null
   rr: number
   score: number
+  confluence: Confluence[]
   reasons: string[]
-  /** Candle on which the OB valid was confirmed (setup known from its close). */
+  /** Entry-TF candle on whose close the setup became known. */
   createdT: number
   status: SetupStatus
   statusT: number | null

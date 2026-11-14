@@ -11,7 +11,7 @@ export interface SymbolRules {
 export interface OrderPlan {
   entry: number
   sl: number
-  tp: number
+  tp: number | null
   qty: number
   notional: number
   /** Loss at the SL incl. estimated fees (USDT). */
@@ -44,7 +44,8 @@ export function planOrder(p: {
   direction: Dir
   entry: number
   sl: number
-  tp: number
+  /** null = no TP order (trailing only). */
+  tp: number | null
   equity: number
   riskPct: number
   maxLeverage: number
@@ -56,8 +57,9 @@ export function planOrder(p: {
   const r = p.rules
   const entry = roundStep(p.entry, r.tickSize, 'round')
   const sl = roundStep(p.sl, r.tickSize, bull ? 'floor' : 'ceil')
-  const tp = roundStep(p.tp, r.tickSize, bull ? 'floor' : 'ceil')
-  if (bull ? !(sl < entry && entry < tp) : !(tp < entry && entry < sl)) return 'level SL/entry/TP tidak valid setelah dibulatkan ke tick'
+  const tp = p.tp === null ? null : roundStep(p.tp, r.tickSize, bull ? 'floor' : 'ceil')
+  const far = tp ?? (bull ? Infinity : -Infinity)
+  if (bull ? !(sl < entry && entry < far) : !(far < entry && entry < sl)) return 'level SL/entry/TP tidak valid setelah dibulatkan ke tick'
   if (!(p.equity > 0)) return 'equity 0'
   const dist = Math.abs(entry - sl)
   const budget = p.equity * (p.riskPct / 100)

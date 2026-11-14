@@ -1,14 +1,15 @@
 import { z } from 'zod'
-import type { Dir, PoiKind } from './smc'
+import { exitConfigSchema, type ExitConfig } from './config'
+import type { ChildKind, Confluence, Dir, EntryModel, PoiKind, PoiOrigin } from './smc'
 import type { Timeframe } from './timeframes'
 
-/** Backtest of one symbol over all stored data (the symbol open on the chart). */
+/** Backtest of one symbol over all stored data (Backtest v2, docs/entry-v2.md §5). */
 export const backtestParamsSchema = z
   .object({
     symbol: z.string().regex(/^[A-Z0-9]{2,30}$/),
     /** Last N days are out-of-sample; everything before is in-sample. */
     oosDays: z.number().int().min(1).max(365).default(60),
-    /** Fees in % of notional: limit entry/TP = maker, SL = taker (+ slippage). */
+    /** Fees in % of notional: limit entry/TP = maker, stops = taker (+ slippage). */
     makerFeePct: z.number().min(0).max(1).default(0.02),
     takerFeePct: z.number().min(0).max(1).default(0.05),
     slippagePct: z.number().min(0).max(2).default(0.02),
@@ -23,38 +24,47 @@ export type BacktestParams = z.infer<typeof backtestParamsSchema>
 
 export type PeriodKey = 'all' | 'is' | 'oos'
 
-/** Outcome stats of closed setups (win/loss), in R after fees. */
-export interface TradeStats {
-  trades: number
-  wins: number
-  winrate: number | null
-  /** Average net R per trade (expectancy). */
-  avgR: number | null
-  totalR: number
-  profitFactor: number | null
-  /** Max drawdown of the cumulative R curve (positive number). */
-  maxDdR: number
-  avgRr: number | null
+/** Outcome of one setup under one exit plan (compact; index = plan order). */
+export interface BtResult {
+  /** w = win, b = break-even (|R| ≤ 0.05), l = loss, o = still open at the end, m = missed (TP first),
+   *  i = invalid, e = expired, p = never filled / still pending. */
+  s: 'w' | 'b' | 'l' | 'o' | 'm' | 'i' | 'e' | 'p'
+  /** Fill time (entry-TF candle / 1m bar). */
+  f: number | null
+  /** Exit time. */
+  x: number | null
+  /** Net R after fees. */
+  r: number
 }
 
-export interface SetupFunnel {
-  setups: number
-  win: number
-  loss: number
-  /** Filled but still open at the end of the data. */
-  open: number
-  pending: number
-  missed: number
-  invalid: number
-  expired: number
+/** One detected setup with its result under every plan (filters run in the UI). */
+export interface BtSetup {
+  id: string
+  /** Close of the candle on which the setup became known (entry TF open time). */
+  t: number
+  dir: Dir
+  model: EntryModel
+  poiKind: PoiKind
+  poiTf: Timeframe
+  origin: PoiOrigin | null
+  childKind: ChildKind
+  childTf: Timeframe
+  score: number
+  conf: Confluence[]
+  entry: number
+  sl: number
+  /** |entry − SL| / entry × 100. */
+  slPct: number
+  tpLiquidity: number | null
+  res: BtResult[]
 }
 
-export interface GroupRow {
+export interface BtPlan {
   key: string
-  stats: Record<PeriodKey, TradeStats>
+  label: string
+  /** The plan as an exit config (saved into a coin profile when chosen). */
+  exit: Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'>
 }
-
-export type BreakdownKey = 'poiKind' | 'poiTf' | 'score' | 'fvg' | 'direction'
 
 export interface ReactionRow {
   kind: PoiKind
@@ -70,24 +80,8 @@ export interface ReactionRow {
   medianMaePct: number | null
 }
 
-export interface EquitySim {
-  startEquity: number
-  endEquity: number
-  returnPct: number
-  maxDdPct: number
-  riskPerTradePct: number
-  taken: number
-  /** Skipped because a position on this symbol was still open. */
-  skippedOpen: number
-  /** Skipped because the daily loss limit had halted trading that UTC day. */
-  skippedHalt: number
-  /** Trades whose size was reduced by the max leverage cap. */
-  leverageCapped: number
-  maxLosingStreak: number
-  curve: { t: number; equity: number }[]
-}
-
 export interface BacktestResult {
+  version: 2
   symbol: string
   ranAt: number
   ms: number
@@ -96,27 +90,56 @@ export interface BacktestResult {
   splitT: number
   /** History shorter than 3× oosDays → split at 2/3 of the data instead. */
   splitAdjusted: boolean
+  /** True when stored 1m candles were used for fills/exits (else entry-TF candles). */
+  minuteResolution: boolean
   params: Required<BacktestParams>
   /** Rules used by the equity simulation (snapshot of the risk config). */
   risk: { maxLeverage: number; maxDailyLossPct: number }
-  funnel: Record<PeriodKey, SetupFunnel>
-  stats: Record<PeriodKey, TradeStats>
-  /** Same trades without fees/slippage, to show how much the costs take. */
-  grossStats: Record<PeriodKey, TradeStats>
-  breakdown: Record<BreakdownKey, GroupRow[]>
-  equity: EquitySim
+  plans: BtPlan[]
+  setups: BtSetup[]
   reactions: ReactionRow[]
-  /** Last closed trades, newest first (for a quick sanity check against the chart). */
-  recent: {
-    direction: Dir
-    poi: string
-    score: number
-    entry: number
-    sl: number
-    tp: number
-    rr: number
-    filledT: number
-    exitT: number
-    r: number
-  }[]
 }
+
+export interface BacktestProgress {
+  symbol: string
+  stage: 'load' | 'detect' | 'simulate' | 'done'
+  done: number
+  total: number
+}
+
+/**
+ * Coin profile chosen from the backtest "Meta" table (user clicks "Pakai"): the bot then only takes
+ * these models / parent POIs on this coin, with this exit plan.
+ */
+export interface CoinProfile {
+  symbol: string
+  savedAt: number
+  models: EntryModel[]
+  /** Parent POIs allowed ("OB|4h"); empty = any. */
+  pois: string[]
+  requireConfluence: Confluence[]
+  minScore: number
+  plan: BtPlan
+  /** Stats at the time it was saved (for display). */
+  stats: { trades: number; winrate: number | null; avgR: number | null; oosTrades: number; oosAvgR: number | null }
+}
+
+const CONFLUENCES = ['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'btcAgainst', 'wyckoff', 'manipulation', 'wyckoffAgainst', 'unicorn', 'prevOpposite'] as const
+
+/** Validation of a profile coming from the renderer. */
+export const coinProfileSchema = z
+  .object({
+    symbol: z.string().regex(/^[A-Z0-9]{2,30}$/),
+    savedAt: z.number().int(),
+    models: z.array(z.enum(['M0', 'M1', 'M2a', 'M2b', 'M4'])).min(1),
+    pois: z.array(z.string().regex(/^[A-Z_]{2,10}\|(1m|5m|15m|1h|4h|1d|1w)$/)).max(50),
+    requireConfluence: z.array(z.enum(CONFLUENCES)).max(14),
+    minScore: z.number().int().min(0).max(30),
+    plan: z.object({
+      key: z.string().max(30),
+      label: z.string().max(100),
+      exit: exitConfigSchema.pick({ tpMode: true, tpR: true, ladder: true, trailStepR: true, trailGapR: true, orderFlowHold: true, orderFlowTf: true, orderFlowSignals: true, orderFlowWickRatio: true })
+    }),
+    stats: z.object({ trades: z.number(), winrate: z.number().nullable(), avgR: z.number().nullable(), oosTrades: z.number(), oosAvgR: z.number().nullable() })
+  })
+  .strict()

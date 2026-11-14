@@ -4,11 +4,16 @@
  * symbol by Backfiller.locks. The main process only relays messages and reads.
  */
 import { join } from 'node:path'
-import { botConfigSchema, claudeConfigSchema, dataConfigSchema, newsConfigSchema, riskConfigSchema, screenerConfigSchema, smcConfigSchema } from '@shared/config'
+import {
+  botConfigSchema,
+  exitConfigSchema,
+  claudeConfigSchema, dataConfigSchema, newsConfigSchema, riskConfigSchema, screenerConfigSchema, smcConfigSchema } from '@shared/config'
 import { BotService } from '../bot/botService'
 import { ClaudeAnalyst } from '../claude/analyst'
 import { NewsService } from '../news/newsService'
 import { openDatabase } from '../db/client'
+import { CandleRepo } from '../db/candles'
+import { symbolByName } from '../db/symbolsRepo'
 import { LiveService } from '../live/liveService'
 import { ScreenerService } from '../screener/screenerService'
 import { initLogger, logger } from '../logger'
@@ -46,6 +51,8 @@ let config: ServiceConfig = {
   claude: claudeConfigSchema.parse({}),
   screener: screenerConfigSchema.parse({}),
   bot: botConfigSchema.parse({}),
+  exit: exitConfigSchema.parse({}),
+  profiles: {},
   risk: riskConfigSchema.parse({}),
   killSwitch: false,
   binance: null,
@@ -94,6 +101,7 @@ analyst.on('done', () => send({ type: 'claude-changed' }))
 const screener = new ScreenerService(db, {
   getConfig: () => config.screener,
   getSmc: () => config.smc,
+  getExit: () => config.exit,
   getData: () => config.data,
   canAutoRun: () => manual === null
 })
@@ -111,6 +119,8 @@ const bot: BotService = new BotService(db, {
   getBot: () => config.bot,
   getRisk: () => config.risk,
   getSmc: () => config.smc,
+  getExit: () => config.exit,
+  getProfiles: () => config.profiles,
   getNews: () => config.news,
   getKeys: () => config.binance,
   isKilled: () => config.killSwitch,
@@ -120,6 +130,10 @@ const bot: BotService = new BotService(db, {
   },
   requestClaude: (symbols) => analyst.runFor(symbols),
   setStreams: (symbols) => live.setSources({ bot: symbols }),
+  minuteCandles: (symbol, from) => {
+    const sym = symbolByName(db, symbol)
+    return sym ? new CandleRepo(db).range('1m', sym.id, from, Date.now()) : []
+  },
   syncedSymbols: () =>
     new Set(db.$client.prepare(`SELECT s.symbol FROM symbols s JOIN sync_state ss ON ss.symbol_id = s.id AND ss.timeframe = '1m'`).pluck().all() as string[])
 })
@@ -157,7 +171,10 @@ const scheduleInterval = (): void => {
 backfiller.on('event', (event) => send({ type: 'event', event }))
 live.on('state', (state) => send({ type: 'live-state', state }))
 live.on('candle', (event) => send({ type: 'live-candle', event }))
-live.on('kline', (k) => bot.onKline(k.symbol, k.candle.h, k.candle.l, k.candle.c))
+live.on('kline', (k) => {
+  bot.onKline(k.symbol, k.candle.h, k.candle.l, k.candle.c)
+  if (k.closed) void bot.onClosed1m(k.symbol, k.candle)
+})
 live.on('synced', (symbol) => send({ type: 'live-synced', symbol }))
 
 let started = false

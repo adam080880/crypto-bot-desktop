@@ -1,0 +1,201 @@
+# Entry v2: rencana perombakan entry, backtest, dan bot
+
+Status: **dikonfirmasi user (2026-11-14)**. 8B (mesin entry + exit) ✅, 8C (Backtest v2 + Meta + profil koin) ✅, 8D (bot) ✅, 8E (UX screener/chart/settings) belum. Keputusan user ada di bagian
+"Keputusan" (paling bawah) dan mengalahkan isi draft di atasnya kalau bertentangan.
+
+---
+
+## 0. Diagnosis entry sekarang (kenapa WR 12–20%)
+
+Data dari backtest sebelumnya (lihat CLAUDE.md → Backtest):
+1. **Entry = "candle berbentuk OB muncul di dekat POI".** Sesudah POI kena, kode cuma mencari candle 15m
+   berbentuk OB dalam 10 candle (`detectSetups`). Kode **tidak** mengecek apakah struktur LTF benar-benar berbalik,
+   apakah ada sweep, atau apakah ada displacement. Akibatnya setup tetap muncul di POI yang sedang ditembus.
+2. **SL kekecilan dibanding fee.** Median jarak SL 0,2–0,28%. Fee + slippage ±0,07% per trade, jadi ongkosnya
+   **0,3–0,4R per trade**. Sebelum fee hasilnya kira-kira impas, setelah fee minus.
+3. **TP selalu di liquidity berlawanan terdekat dengan minRR 2**, jadi RR rata-rata 4–5. Dengan RR segitu,
+   WR 20% itu wajar dan sebenarnya hampir impas. **WR dan RR saling tukar**. WR 50–60% realistis kalau
+   target ±1–1,5R (atau partial TP + BE), bukan 4R.
+4. Skor setup tidak berkorelasi dengan hasil, jadi skornya belum berguna.
+
+➡️ Yang dikejar di v2: **expectancy (avg R bersih) dan profit factor setelah fee**, dengan WR sebagai
+informasi. Backtest v2 akan menampilkan WR untuk beberapa pilihan TP sekaligus, supaya kelihatan berapa WR
+yang dibutuhkan di RR berapa.
+
+---
+
+## 1. Bahan dasar baru (fungsi murni, tidak repaint)
+
+| Bahan | Definisi usulan |
+|---|---|
+| **Sweep** (liquidity diambil) | Wick menembus swing high/low (BSL/SSL) yang belum disapu, lalu candle yang sama **close kembali di dalam** (atau paling lambat `sweepReclaimCandles` = 2 candle berikutnya). Kalau close di luar dan bertahan = breakout, bukan sweep. |
+| **CHoCH LTF** (flip struktur kecil) | Di TF entry, setelah sweep/POI kena: close menembus swing LTF terakhir yang berlawanan (long: close > swing high LTF terakhir). Ini sama dengan "BOS = pembalikan" versi materi, cuma dihitung di TF kecil dengan pivot lebih kecil (`ltfPivot` = 2). |
+| **Displacement** | Leg yang menghasilkan CHoCH punya minimal satu candle dengan body ≥ `dispBodyAtr` × ATR(14) (default 1,2) **atau** meninggalkan FVG. |
+| **POI kecil (anak)** | POI yang tercipta di TF entry oleh leg displacement itu, yaitu OB (bentuk + warna, §3), QM (§7), atau FVG. Yang dipakai adalah **OB paling ujung (asal leg)**, bukan OB pertama di dekat harga. |
+| **Breaker** ❓ | OB yang ditembus close (invalid) setelah sweep lalu dipakai dari sisi sebaliknya. Konsep ICT, belum ada di materi. |
+| **Trend BTC** | Hasil `analyzeStructure` BTCUSDT 4h dan 1h (`trendKnownAt`, tanpa look-ahead). |
+
+Catatan istilah: **OB = Order Block (§3), bukan OCL Break.** Sekarang setup dengan POI OCL Break
+ditampilkan sebagai "OCL_BREAK 1h → OB valid", dan label "OB valid" itu bikin kesannya OCL Break = OB. Di v2,
+setiap setup menampilkan **POI induk** (mis. "OCL Break 1h") dan **POI anak** (mis. "OB 15m") secara terpisah.
+Kode `OCL_BREAK` di UI akan ditulis "OCL Break".
+
+---
+
+## 2. Model entry (masing-masing bisa dinyalakan atau dimatikan, dan ditest terpisah)
+
+Semua model menghasilkan `Setup` dengan field baru `model`, `parent` (POI induk), `child` (POI anak/entry),
+dan `confluence[]`.
+
+### M1. POI besar → POI kecil (refinement)
+Ini yang lo maksud: "sentuh OB TF besar, tercipta QM di TF kecil, entry di QM itu".
+1. POI induk aktif di 4h/1h (OB / RBS-SBR / QM / OCL Break / OCL HTF) kena.
+2. Di TF entry, dalam `refineWindow` candle (default 16 × 15m = 4 jam) sejak kena:
+   harga **tidak close tembus batas invalid induk**, lalu terjadi **CHoCH LTF searah POI** dengan displacement.
+3. Entry = limit di POI anak yang tercipta oleh leg itu, dengan prioritas **QM LTF > OB LTF (dengan FVG) > OB LTF**.
+4. SL = di luar ekstrem leg (titik terendah/tertinggi sejak POI kena) + buffer. Jadi SL di bawah titik
+   reaksi di POI induk, bukan cuma di bawah wick satu candle.
+5. Bedanya dengan sekarang: wajib ada **flip struktur LTF + displacement**, dan entry di POI asal leg.
+
+### M2. Liquidity grab reversal (teknik lo)
+"Di bawah SSL / di atas BSL ada OB. Market sapu liquidity, ambil OB-nya, baru terbang."
+1. Ada swing low (SSL) yang belum disapu, dan **di bawahnya** dalam jarak ≤ `grabObDistPct` (default 1%)
+   ada OB bullish aktif (HTF atau TF entry). Equal lows (§10) diberi nilai lebih.
+2. Harga menyapu SSL dan menyentuh garis OB di bawahnya, lalu close kembali di atas garis OB.
+3. Dua varian entry (dua-duanya dibacktest):
+   - **M2a agresif:** limit di garis OB itu sendiri (dipasang begitu SSL tersapu). SL di luar wick OB.
+   - **M2b konfirmasi:** tunggu CHoCH LTF setelah sweep, lalu entry di POI anak seperti M1.
+4. Short = cerminan (BSL + OB bearish di atasnya).
+
+### M3. Sweep → CHoCH → FVG (ICT "2022 model")
+1. Sweep swing liquidity di TF entry atau HTF.
+2. CHoCH LTF dengan displacement yang meninggalkan FVG.
+3. Limit di FVG itu, pada edge dekat atau 50% (❓ default **50%**). SL di luar ekstrem sweep.
+4. Ini **bertentangan dengan §4 materi** ("limit di OB, bukan di FVG"). Karena itu default-nya **mati**,
+   cuma ada buat dibandingkan di backtest. ❓
+
+### M4. Breaker / Unicorn ❓ (di luar materi)
+OB yang dijebol setelah sweep jadi breaker. Entry saat retest breaker, terutama kalau overlap dengan FVG
+("unicorn"). Diusulkan **diimplementasi sebagai model opsional** supaya backtest bisa menilai.
+
+### Yang ditolak / tidak diusulkan
+Killzone/sesi, fibonacci OTE: materi tidak memakai sesi, dan crypto jalan 24 jam. Bisa ditambah nanti
+sebagai **filter** kalau lo mau dites. ❓ Premium/discount (entry long hanya di bawah 50% range HTF) diusulkan
+jadi **filter opsional**, default mati.
+
+---
+
+## 3. Filter & konfluensi (berlaku untuk semua model)
+
+| Filter | Default usulan |
+|---|---|
+| **Trend BTC** | Koin selain BTC: long hanya kalau trend BTC **1h dan 4h** bullish, short sebaliknya. Mode: `strict` (1h+4h) / `4h` / `off`. Untuk BTC sendiri dipakai trend 4h BTC. ❓ |
+| Trend TF POI induk searah | flag + filter opsional (default mati, nanti backtest yang memutuskan) |
+| **Jarak SL minimum** | SL ≥ `minSlPct` (default 0,35%) **atau** ≥ 0,5 × ATR(14) TF entry. Kalau lebih kecil, SL diperlebar ke angka itu, bukan setupnya dibuang. Tujuannya biar fee turun ke ≤ 0,2R. ❓ |
+| News window | tetap seperti sekarang |
+| FVG di leg | konfluensi (dicatat, tidak wajib) |
+
+## 4. Exit (TP) — dibacktest berdampingan
+
+| Mode | Isi |
+|---|---|
+| `fixedR` | TP di 1R / 1,5R / 2R / 3R (semuanya dihitung sekaligus di backtest) |
+| `liquidity` | seperti sekarang: liquidity berlawanan terdekat, min RR |
+| `partial` | 50% di 1R lalu SL ke BE + fee, sisanya ke liquidity |
+
+Default bot = yang terbaik di backtest out-of-sample koin itu (lihat §5 profil), fallback `partial`. ❓
+
+---
+
+## 5. Backtest v2 + "POI meta" per koin
+
+Masih **satu koin** (keputusan lama), tapi dalam satu run:
+1. Semua model (M1–M4) × semua jenis POI induk × TF induk × arah × mode TP dihitung **sekali**. Hasil per trade
+   dikirim ke UI, lalu **filter berjalan di UI tanpa run ulang** (checkbox model, POI, TF, arah, filter BTC,
+   FVG, sweep, mode TP).
+2. **Tabel "Meta"**: kombinasi (model × POI induk × TF) diurutkan berdasarkan **avg R bersih out-of-sample**,
+   dengan syarat minimal `minTrades` (default 20) trade di in-sample **dan** positif juga di in-sample.
+   Kolom: trade, WR, avg R, PF, max DD, untuk IS / OOS. Kombinasi yang cuma bagus di salah satu periode diberi
+   tanda ⚠️ (kemungkinan overfit).
+3. **Simpan sebagai profil koin**: tombol "Pakai kombinasi ini untuk {koin}" menyimpan setting `profiles[SYMBOL]`
+   = model + POI + TF + mode TP yang diizinkan. Bot dan screener memakai profil itu kalau ada. Kalau tidak ada,
+   dipakai default global. ❓
+4. Tetap ada: reaksi POI (B), simulasi equity, IS/OOS.
+5. Data **1m** dipakai untuk menentukan urutan SL/TP di candle yang sama (sekarang konservatif = rugi).
+   Hasilnya jadi lebih jujur, tapi run lebih lama (±3–5 dtk per koin). ❓
+
+## 6. UX (dari keluhan "muter-muter")
+
+- **Backtest:** pilih koin langsung di halaman (combobox + koin terakhir), tidak perlu lewat Chart. Ada preset
+  ("Default", "Konservatif", "Semua model"). Hasil dibagi ke tab: Ringkasan · Meta · Trade · Reaksi POI.
+  Klik baris trade akan membuka Chart di waktu itu dengan setup, POI induk, dan anak tergambar.
+- **Chart:** label setup jadi "M1 · OB 4h → QM 15m · 1,5R". Ada tombol "Backtest koin ini".
+- **Screener:** kolom model + status trend BTC di header, filter per model, klik untuk ke chart.
+- **Bot:** status tiap gate (setup / akun / BTC / Claude) kelihatan per kandidat, plus saklar "Butuh Claude".
+
+## 7. Bot
+
+- `bot.requireClaude` (default **false** sesuai permintaan lo). Kalau mati, gate Claude dilewati dan entry
+  murni dari model + filter. `minConfidence` cuma dipakai kalau saklarnya nyala.
+- `bot.models` = model yang boleh dieksekusi (default M1 + M2b), dibatasi juga oleh profil koin kalau ada.
+- Filter trend BTC dan min SL berlaku di gate.
+- Exit `partial` butuh order tambahan di live: TP1 reduce-only 50%, lalu setelah fill SL dipindah ke BE (cancel
+  + pasang ulang algo order). Ini ditambah ke `LiveBroker` dan `PaperBroker`.
+
+---
+
+## 8. Urutan kerja (per fase, berhenti tiap fase)
+
+| Fase | Isi | Selesai kalau |
+|---|---|---|
+| **8A** | Konfirmasi dokumen ini → update `smc-rules.md` §11–§14 | lo bilang go |
+| **8B** | Bahan dasar (sweep, CHoCH LTF, displacement, ATR, breaker, trend BTC) + model M1–M4 + unit test | test lulus |
+| **8C** | Backtest v2: multi-model, mode TP, resolusi 1m, meta, profil koin, filter di UI | lo jalankan di PC & cek angka |
+| **8D** | Screener + bot: model, filter BTC, tanpa Claude, partial TP | paper jalan di PC lo |
+| **8E** | UX: backtest, chart, screener, bot | — |
+
+Angka WR 50–60% **tidak bisa gua janjikan**. Yang bisa gua janjikan: backtest yang jujur (fee, 1m, IS/OOS)
+yang menunjukkan model + POI + TP mana yang benar-benar punya edge di tiap koin. Lo yang menjalankan backtest
+di PC karena DB-nya ada di sana.
+
+## ❓ Pertanyaan
+1. **Target:** setuju yang dioptimasi itu avg R bersih / PF, dan WR 50–60% dicapai lewat TP lebih dekat
+   (1–1,5R / partial)?
+2. **Konsep baru di luar materi**, mana yang boleh: sweep ✅ (lo sendiri), CHoCH LTF ✅ (lo sendiri: "tercipta QM
+   di TF kecil"), displacement, breaker/unicorn (M4), FVG entry (M3, lawan materi §4), premium/discount filter?
+3. **Trend BTC:** pakai struktur (HH/HL, BOS materi) di 1h + 4h? Mode strict (dua-duanya searah) atau 4h saja?
+   Dipakai sebagai filter wajib atau cuma skor?
+4. **Min SL 0,35% / 0,5 ATR**, SL diperlebar (bukan setupnya di-skip): oke?
+5. **Profil koin dari backtest** otomatis dipakai bot, atau cuma info dan lo yang klik "pakai"?
+6. **Resolusi 1m** untuk SL/TP di candle yang sama, walaupun backtest jadi ±2–3× lebih lambat?
+7. **Label OCL Break dibilang OB**: lo lihat di halaman mana? Gua tebak di label setup ("→ OB valid") dan
+   kolom "setup OB valid" di Screener. Kalau ada tempat lain, kasih tahu.
+8. Di sesi ini **boleh jalanin `pnpm test` dan `pnpm typecheck`?** Dua-duanya tidak menyentuh DB dan bukan
+   dev/build. Kalau tidak boleh, gua cuma nulis kode + test dan lo yang jalankan.
+
+
+---
+
+## ✅ Keputusan user (2026-11-14)
+1. **Tidak ada entry di FVG.** M3 dibuang. FVG cuma informasi tambahan (konfluensi/skor/filter), karena SL-nya
+   kelebaran.
+2. **Entry hanya di OB (Order Block), QM, atau breaker.** OB ≠ OCL Break. **OCL / OCL Break tidak pernah jadi
+   titik entry.** OCL cuma boleh jadi alasan (POI induk), dan harus dari HTF (`oclParentTimeframes` 4h/1d/1w).
+3. **Setiap POI harus dilihat asal-usulnya**: terbentuk karena **liquidity sweep** atau karena **nyentuh POI TF
+   lebih besar** (`Poi.origin`). POI induk tanpa asal-usul tidak dipakai (`parentNeedsOrigin`). POI anak di M1/M2b
+   otomatis punya asal (POI induk kena, plus sweep kalau ada). OB di M2a wajib punya asal sendiri.
+4. Semua konsep di luar materi boleh dipakai (kecuali entry di FVG), termasuk breaker/unicorn, displacement,
+   CHoCH LTF. POI baru hasil riset juga boleh (kandidat: mitigation block, rejection block), tapi harus dinilai
+   lewat backtest dulu.
+5. **Trend BTC 4h/1h dan Wyckoff (akumulasi / distribusi / manipulation = spring/UTAD) cuma nambah skor**, bukan
+   syarat.
+6. **Lebar SL ikut setup.** Size diatur dari `bot.riskPerTradePct`. Tidak ada SL minimum yang dipaksakan.
+7. **Trailing bertingkat** (`exit`): 1R → SL ke BE (termasuk fee), 3R → TP sebagian (default 50%) + SL ke 1R,
+   lalu trailing (best − 2R tiap 1R baru).
+8. **Order flow untuk menahan posisi** (bagian dari trailing): setelah entry, reaksi brutal yang meninggalkan
+   FVG lalu FVG itu diretest dan mantul, **atau** wick reaktif yang menolak area entry → posisi ditahan sampai TP
+   / close manual. Ladder tidak mengambil partial, trailing berhenti, SL ke ujung retest/wick. Langkah BE tetap
+   berlaku. Close yang menembus FVG berarti order flow patah dan trailing bertingkat jalan lagi.
+9. Bot bisa entry **tanpa Claude** (`bot.requireClaude`, default mati), murni dari analisa ICT.
+10. `pnpm test` / `pnpm typecheck` boleh dijalankan. **dev/build tidak.** Data uji = BTC/ETH/SOL dari
+    data.binance.vision (disimpan di luar DB user).

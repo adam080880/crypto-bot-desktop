@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { Cron } from 'croner'
 import { z } from 'zod'
-import { isSymbolAllowed, type DataConfig, type ScreenerConfig, type SmcConfig } from '@shared/config'
+import { isSymbolAllowed, type DataConfig, type ExitConfig, type ScreenerConfig, type SmcConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerRun, ScreenerState, ScreenerTrigger } from '@shared/screener'
 import type { Db } from '../db/client'
 import { readSetting, writeSetting } from '../db/settingsRepo'
@@ -34,6 +34,7 @@ export class ScreenerService extends EventEmitter<{ state: [ScreenerState] }> {
     private readonly deps: {
       getConfig: () => ScreenerConfig
       getSmc: () => SmcConfig
+      getExit?: () => ExitConfig
       getData: () => DataConfig
       /** Return false to skip automatic scans (e.g. a manual backfill is writing). */
       canAutoRun: () => boolean
@@ -106,7 +107,7 @@ export class ScreenerService extends EventEmitter<{ state: [ScreenerState] }> {
       const symbol = list[i]!
       try {
         const now = Date.now()
-        const ctx = this.smc.context(symbol, smcCfg, now)
+        const ctx = this.smc.context(symbol, smcCfg, now, this.deps.getExit?.())
         if (!ctx || now - ctx.priceT > cfg.maxDataAgeMin * 60_000) stale++
         else rows.push(...screenSymbol({ symbol, ...ctx }, cfg, now))
       } catch (err) {

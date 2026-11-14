@@ -11,6 +11,8 @@ import { findClaude } from '../claude/findClaude'
 import { logger } from '../logger'
 import type { AppState } from '../state/appState'
 import type { FromWorker, ServiceConfig, ToWorker, WorkerInit } from '../workers/protocol'
+import type { FromBacktestWorker, ToBacktestWorker } from '../workers/backtestWorker'
+import type { BacktestParams, BacktestProgress, BacktestResult, CoinProfile } from '@shared/backtest'
 
 const log = logger('data-controller')
 const here = fileURLToPath(new URL('.', import.meta.url))
@@ -52,7 +54,8 @@ export class DataController {
     lastSummary: BackfillSummary | null,
     private readonly getBlsKey: () => string | null,
     private readonly getAnthropicKey: () => string | null,
-    private readonly getBinanceKeys: () => { key: string; secret: string } | null
+    private readonly getBinanceKeys: () => { key: string; secret: string } | null,
+    private readonly getProfiles: () => Record<string, CoinProfile> = () => ({})
   ) {
     this.ui.lastSummary = lastSummary
     state.on('config', () => this.pushConfig())
@@ -75,6 +78,8 @@ export class DataController {
       claude: c.claude,
       screener: c.screener,
       bot: c.bot,
+      exit: c.exit,
+      profiles: this.getProfiles(),
       risk: c.risk,
       killSwitch: this.state.isHalted(),
       binance: this.getBinanceKeys(),
@@ -291,6 +296,36 @@ export class DataController {
   setChart(symbol: string | null): void {
     this.chartSymbol = symbol
     this.post({ type: 'set-chart', symbol })
+  }
+
+  private backtest: UtilityProcess | null = null
+
+  /**
+   * Run a backtest in its own short-lived utilityProcess (several seconds of CPU per coin: keeps
+   * the UI and the data worker responsive). A new run replaces a running one.
+   */
+  runBacktest(params: BacktestParams, onProgress: (p: BacktestProgress) => void): Promise<BacktestResult | null> {
+    this.backtest?.kill()
+    return new Promise((resolve, reject) => {
+      const child = utilityProcess.fork(join(here, 'backtestWorker.js'), [JSON.stringify(this.init)], { serviceName: 'smc-backtest', stdio: 'inherit' })
+      this.backtest = child
+      let settled = false
+      child.on('message', (m: FromBacktestWorker) => {
+        if (m.type === 'progress') onProgress(m.progress)
+        else if (m.type === 'result') {
+          settled = true
+          resolve(m.result)
+        } else {
+          settled = true
+          reject(new Error(m.error))
+        }
+      })
+      child.on('exit', (code) => {
+        if (this.backtest === child) this.backtest = null
+        if (!settled) reject(new Error(code === null ? 'backtest dibatalkan' : `backtest berhenti (${code})`))
+      })
+      child.postMessage({ type: 'run', params, config: this.state.getConfig() } satisfies ToBacktestWorker)
+    })
   }
 
   /** Concurrent callers share the in-flight estimate instead of failing. */

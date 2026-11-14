@@ -69,7 +69,7 @@ export class BinanceTradeClient {
     return this.offset
   }
 
-  private async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
+  private async request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
     if (!this.hasKeys()) throw new Error('API key Binance belum diisi (Settings → API keys)')
     // PC clocks drift; Binance rejects timestamps >1 s ahead (-1021). Sync lazily and every 30 min.
     if (Date.now() - this.syncedAt > 30 * 60_000) await this.syncTime()
@@ -184,6 +184,29 @@ export class BinanceTradeClient {
       priceProtect: true,
       clientAlgoId: p.clientId
     })
+  }
+
+  /**
+   * Modify Order (PUT /fapi/v1/order): only for regular LIMIT orders (here the reduce-only TP).
+   * Binance requires both quantity and price; algo/conditional orders cannot be modified.
+   */
+  async modifyOrder(p: { symbol: string; side: 'BUY' | 'SELL'; clientId: string; qty: string; price: string }): Promise<OrderInfo> {
+    return this.request<OrderInfo>('PUT', '/fapi/v1/order', { symbol: p.symbol, origClientOrderId: p.clientId, side: p.side, quantity: p.qty, price: p.price })
+  }
+
+  /** Open algo (conditional) orders of a symbol (GET /fapi/v1/openAlgoOrders). */
+  async openAlgoOrders(symbol: string): Promise<{ algoId: number; clientAlgoId: string; triggerPrice: string }[]> {
+    return this.request('GET', '/fapi/v1/openAlgoOrders', { symbol })
+  }
+
+  /** Cancel one SL algo order by its client id (already gone = fine). */
+  async cancelAlgo(symbol: string, clientAlgoId: string): Promise<void> {
+    try {
+      await this.request('DELETE', '/fapi/v1/algoOrder', { symbol, clientAlgoId })
+    } catch (err) {
+      if (err instanceof BinanceApiError && (err.code === -2011 || err.code === -2013)) return
+      throw err
+    }
   }
 
   /** Emergency close of a position with a reduce-only market order. */

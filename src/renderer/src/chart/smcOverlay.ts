@@ -9,7 +9,7 @@ import type {
   Time,
   UTCTimestamp
 } from 'lightweight-charts'
-import type { Setup, SmcAnalysis } from '@shared/smc'
+import { POI_LABEL, type Setup, type SmcAnalysis } from '@shared/smc'
 import { TF_MS, weekStartUtc } from '@shared/timeframes'
 
 /** fancy-canvas target type, taken from lightweight-charts' own signature (no direct dependency). */
@@ -237,9 +237,9 @@ export class SmcOverlay implements ISeriesPrimitive<Time> {
           const col = s.direction === 'bullish' ? COLORS.bull : COLORS.bear
           const end = s.statusT // entry hit / TP / SL / invalid / expired — whichever came
           // position tool: starts at the OB valid (the POI that produced the entry), not across the chart
-          hline(s.obValid.t, [end], s.entry, col, [], `ENTRY ${fmt(s.entry)} · ${s.rr}R · skor ${s.score}`, 2)
-          hline(s.obValid.t, [end], s.sl, COLORS.bear, [4, 3], `SL ${fmt(s.sl)}`)
-          hline(s.obValid.t, [end], s.tp, COLORS.bull, [4, 3], `TP ${fmt(s.tp)}`)
+          hline(s.child.t, [end], s.entry, col, [], `${s.model} · ${POI_LABEL[s.poi.kind]} ${s.poi.timeframe} → ${s.child.kind} ${s.child.timeframe} · ENTRY ${fmt(s.entry)} · ${s.rr}R · skor ${s.score}`, 2)
+          hline(s.child.t, [end], s.sl, COLORS.bear, [4, 3], `SL ${fmt(s.sl)}`)
+          hline(s.child.t, [end], s.tp, COLORS.bull, [4, 3], `TP ${fmt(s.tp)}`)
         }
       }
     })

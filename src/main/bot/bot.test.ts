@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { BotTrade } from '@shared/bot'
-import { botConfigSchema, riskConfigSchema } from '@shared/config'
-import type { ScreenerRow } from '@shared/screener'
-import { isCryptoPerp, topCrypto, type ExchangeSymbol } from './binanceTrade'
-import { PaperBroker, paperPnl } from './brokers'
+import { botConfigSchema, exitConfigSchema, riskConfigSchema } from '@shared/config'
+import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
+import { BinanceApiError, isCryptoPerp, topCrypto, type ExchangeSymbol } from './binanceTrade'
+import { LiveBroker, PaperBroker, paperPnl } from './brokers'
 import { accountGate, claudeGate, setupGate, type Candidate } from './gate'
 import { planOrder, roundStep } from './sizing'
 
@@ -49,7 +49,7 @@ describe('planOrder (risk-based sizing)', () => {
 
 const NOW = Date.UTC(2026, 10, 12, 10)
 const bot = botConfigSchema.parse({})
-const cand = (p: Partial<ScreenerRow['setup'] & object> = {}, row: Partial<ScreenerRow> = {}): Candidate =>
+const cand = (p: Partial<ScreenerSetup> = {}, row: Partial<ScreenerRow> = {}): Candidate =>
   ({
     symbol: 'SOLUSDT',
     direction: 'bullish',
@@ -60,14 +60,52 @@ const cand = (p: Partial<ScreenerRow['setup'] & object> = {}, row: Partial<Scree
     trend: { '4h': null, '1h': null, '15m': null },
     recentBos: null,
     ...row,
-    setup: { id: 's1', entry: 100, sl: 99, tp: 104, rr: 4, score: 5, status: 'pending', createdT: NOW - 30 * 60_000, poi: { kind: 'OB', timeframe: '4h' }, ...p }
+    setup: {
+      id: 's1',
+      model: 'M1',
+      entry: 100,
+      sl: 99,
+      tp: 104,
+      tpLiquidity: 104,
+      rr: 4,
+      score: 5,
+      confluence: ['fvg', 'trendParent'],
+      status: 'pending',
+      createdT: NOW - 30 * 60_000,
+      poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },
+      child: { kind: 'QM', timeframe: '15m' },
+      ...p
+    }
   }) as Candidate
 
 describe('setupGate', () => {
   const o = { bot, entryTf: '15m' as const, universe: new Set(['SOLUSDT']), now: NOW }
   it('accepts a fresh pending setup from an HTF POI', () => expect(setupGate(cand(), o)).toBeNull())
   it('rejects coins outside the volume universe', () => expect(setupGate(cand({}, { symbol: 'XAUUSDT' }), o)).toMatch(/top 100/))
-  it('rejects an LTF POI (needs HTF POI → LTF confirmation)', () => expect(setupGate(cand({ poi: { kind: 'OB', timeframe: '15m' } }), o)).toMatch(/bukan HTF/))
+  it('rejects an LTF POI (needs HTF POI → LTF confirmation)', () => expect(setupGate(cand({ poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toMatch(/bukan HTF/))
+  it('a coin profile replaces the global models / confluences / POIs for that coin', () => {
+    const profile = {
+      symbol: 'SOLUSDT',
+      savedAt: NOW,
+      models: ['M4' as const],
+      pois: ['OB|1h'],
+      requireConfluence: [],
+      minScore: 0,
+      plan: { key: 'r1', label: 'TP 1R', exit: { ...exitConfigSchema.parse({}), tpMode: 'fixedR' as const, tpR: 1 } },
+      stats: { trades: 40, winrate: 0.6, avgR: 0.2, oosTrades: 12, oosAvgR: 0.1 }
+    }
+    expect(setupGate(cand(), { ...o, profile })).toMatch(/profil SOLUSDT/)
+    expect(setupGate(cand({ model: 'M4', poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' } }), { ...o, profile })).toMatch(/bukan POI profil/)
+    expect(setupGate(cand({ model: 'M4', confluence: [], poi: { kind: 'OB', timeframe: '1h', origin: 'sweep' } }, { price: 100.5 }), { ...o, profile })).toBeNull()
+    // fixed 1R plan: the pending limit is cancelled at 1R (101), not at the liquidity TP (104)
+    expect(setupGate(cand({ model: 'M4', confluence: [], poi: { kind: 'OB', timeframe: '1h', origin: 'sweep' } }, { price: 101.5 }), { ...o, profile })).toMatch(/lewat TP/)
+  })
+
+  it('rejects models the bot does not trade and missing required confluences', () => {
+    expect(setupGate(cand({ model: 'M0' }), o)).toMatch(/tidak dipakai bot/)
+    expect(setupGate(cand({ confluence: ['fvg'] }), o)).toMatch(/konfluensi wajib: trendParent/)
+    expect(setupGate(cand({ model: 'M4', poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
+  })
   it('rejects stale setups and price past TP / entry', () => {
     expect(setupGate(cand({ createdT: NOW - 3 * 3_600_000 }), o)).toMatch(/menit/)
     expect(setupGate(cand({}, { price: 104.5 }), o)).toMatch(/TP/)
@@ -137,5 +175,70 @@ describe('PaperBroker', () => {
     expect(r).toMatchObject({ status: 'closed', reason: 'sl' })
     expect(r!.pnl).toBeCloseTo(paperPnl(trade(), 99, true))
     expect(r!.pnl).toBeLessThan(-1)
+  })
+})
+
+describe('LiveBroker.moveStop (algo orders cannot be modified → cancel + place)', () => {
+  const t = { id: 'x', symbol: 'AAAUSDT', direction: 'bullish', entry: 100, sl: 99, slOrderId: 'smc-x-s0', slSeq: 0 } as unknown as BotTrade
+  const fake = (placeFails: number, cancelFails = false, failWith: Error = new BinanceApiError(-4130, 'closePosition exists', '/fapi/v1/algoOrder')) => {
+    const calls: string[] = []
+    let n = 0
+    const client = {
+      stopLoss: async (p: { clientId: string; triggerPrice: string }) => {
+        calls.push(`place ${p.clientId} @${p.triggerPrice}`)
+        if (n++ < placeFails) throw failWith
+        return { algoId: 1, clientAlgoId: p.clientId }
+      },
+      cancelAlgo: async (_s: string, id: string) => {
+        calls.push(`cancel ${id}`)
+        if (cancelFails) throw new Error('timeout')
+      },
+      cancelAll: async () => void calls.push('cancelAll'),
+      position: async () => ({ positionAmt: '1' }),
+      marketClose: async () => void calls.push('marketClose')
+    }
+    return { broker: new LiveBroker(client as never), calls }
+  }
+
+  it('places the new stop before cancelling the old one', async () => {
+    const { broker, calls } = fake(0)
+    expect(await broker.moveStop(t, 100.1, RULES)).toMatchObject({ sl: 100.1, slOrderId: 'smc-x-s1', slSeq: 1 })
+    expect(calls).toEqual(['place smc-x-s1 @100.100', 'cancel smc-x-s0'])
+  })
+
+  it('keeps the new stop when only the cancel of the old one fails (no market close)', async () => {
+    const { broker, calls } = fake(0, true)
+    expect(await broker.moveStop(t, 100.1, RULES)).toMatchObject({ slOrderId: 'smc-x-s1' })
+    expect(calls).not.toContain('marketClose')
+  })
+
+  it('second closePosition stop refused → cancel old, then place new', async () => {
+    const { broker, calls } = fake(1)
+    expect(await broker.moveStop(t, 100.1, RULES)).toMatchObject({ slOrderId: 'smc-x-s1' })
+    expect(calls).toEqual(['place smc-x-s1 @100.100', 'cancel smc-x-s0', 'place smc-x-s1 @100.100'])
+  })
+
+  it('-4142 (price already beyond the new stop) closes at market right away', async () => {
+    const { broker, calls } = fake(1, false, new BinanceApiError(-4142, 'would trigger immediately', '/fapi/v1/algoOrder'))
+    await expect(broker.moveStop(t, 100.1, RULES)).rejects.toThrow(/-4142/)
+    expect(calls).toEqual(['place smc-x-s1 @100.100', 'cancelAll', 'marketClose'])
+  })
+
+  it('partial: shrink the TP via Modify Order first, then reduce-only market', async () => {
+    const calls: string[] = []
+    const client = {
+      modifyOrder: async (p: { clientId: string; qty: string }) => void calls.push(`modify ${p.clientId} qty ${p.qty}`),
+      marketClose: async (_s: string, q: number) => void calls.push(`market ${q}`)
+    }
+    const tr = { ...t, qty: 10, filledQty: 10, closedQty: 0, partials: 0, tp: 105, tpOrderId: 'smc-x-t0' } as unknown as BotTrade
+    const r = await new LiveBroker(client as never).partialClose(tr, 5, 103, RULES)
+    expect(calls).toEqual(['modify smc-x-t0 qty 5', 'market 5'])
+    expect(r).toMatchObject({ closedQty: 5, partials: 1, tpOrderId: 'smc-x-t0' })
+  })
+
+  it('closes at market when no stop can be placed at all', async () => {
+    const { broker, calls } = fake(2)
+    await expect(broker.moveStop(t, 100.1, RULES)).rejects.toThrow(/ditutup market/)
+    expect(calls).toContain('marketClose')
   })
 })

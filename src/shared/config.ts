@@ -63,7 +63,7 @@ export const smcConfigSchema = z.object({
   /** §7: mountain 2's body must break mountain 1's wick ("biasanya"; user-confirmed). */
   qmRequireBodyBreak: z.boolean().default(true),
   /** §8 Q14 */
-  poiTimeframes: z.array(z.enum(['5m', '15m', '1h', '4h', '1d'])).default(['4h', '1h']),
+  poiTimeframes: z.array(z.enum(['5m', '15m', '1h', '4h', '1d'])).default(['1d', '4h', '1h']),
   entryTimeframe: z.enum(['1m', '5m', '15m', '1h']).default('15m'),
   sameTfPoi: z.boolean().default(true),
   /** §8 Q15: OB valid must form within N entry candles after the POI hit. */
@@ -75,9 +75,75 @@ export const smcConfigSchema = z.object({
   /** §8 Q17 */
   minRR: z.number().min(0.5).max(20).default(2),
   /** §10: swing highs/lows within this % count as equal. */
-  equalPct: z.number().min(0).max(2).default(0.1)
+  equalPct: z.number().min(0).max(2).default(0.1),
+
+  // ---- entry v2 (docs/entry-v2.md) ----
+  /** Entry models detected (screener/chart/backtest). M0 = old rule, kept as a baseline. */
+  models: z.array(z.enum(['M0', 'M1', 'M2a', 'M2b', 'M4'])).default(['M0', 'M1', 'M2a', 'M2b', 'M4']),
+  /** Pivot size for the small (entry-TF) structure used by CHoCH. */
+  ltfPivot: z.number().int().min(1).max(10).default(2),
+  /** M1/M2b: the LTF CHoCH must happen within N entry candles after the POI was hit. */
+  refineWindow: z.number().int().min(2).max(200).default(16),
+  /** Displacement: one candle of the CHoCH leg has body ≥ N × ATR (or the leg leaves an FVG). */
+  dispBodyAtr: z.number().min(0).max(10).default(1.2),
+  requireDisplacement: z.boolean().default(true),
+  atrPeriod: z.number().int().min(2).max(100).default(14),
+  /** Sweep: wick beyond liquidity and a close back inside within N candles (else it is a breakout). */
+  sweepReclaimCandles: z.number().int().min(0).max(10).default(2),
+  /** M2: the OB must sit at most N % beyond the liquidity in front of it. */
+  grabObDistPct: z.number().min(0.05).max(10).default(1),
+  /** Origin: a HTF POI counts as tapped when the reaction candle reaches within N % of it. */
+  originNearPct: z.number().min(0).max(5).default(0.15),
+  /** Origin: how many previous swings of the same side may be the swept liquidity. */
+  originSwings: z.number().int().min(1).max(10).default(3),
+  /** Parent POIs (the reason) must have an origin too (sweep / HTF POI). */
+  parentNeedsOrigin: z.boolean().default(true),
+  /** Plain OCL may be a parent (reason) only from these timeframes ("OC dari high timeframe"). */
+  oclParentTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default(['4h', '1d', '1w']),
+  /** Wyckoff range: N candles whose range ≤ wyRangeAtr × ATR (ATR measured before the range). */
+  wyRangeCandles: z.number().int().min(5).max(200).default(24),
+  wyRangeAtr: z.number().min(1).max(30).default(4),
+  wyckoffTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).default(['4h', '1h'])
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
+
+/**
+ * Exit plan shared by backtest and bot (docs/entry-v2.md §4). Tiered trailing:
+ * each ladder step fires once price reaches `atR`: close `closePct` % of the ORIGINAL size and move
+ * the SL to `slToR` (0 = break-even incl. fees). After the last step the SL trails every
+ * `trailStepR` at (best R − `trailGapR`). Default = user's plan: 1R → BE, 3R → take 50 %, SL to 1R.
+ */
+export const exitConfigSchema = z.object({
+  /** liquidity: TP at the nearest opposite liquidity (fallback tpR) · fixedR: TP at tpR · trail: no TP, ladder/trailing only. */
+  tpMode: z.enum(['liquidity', 'fixedR', 'trail']).default('liquidity'),
+  tpR: z.number().min(0.5).max(50).default(5),
+  ladder: z
+    .array(z.object({ atR: z.number().min(0.25).max(50), slToR: z.number().min(0).max(49), closePct: z.number().min(0).max(100) }))
+    .max(6)
+    .default([
+      { atR: 1, slToR: 0, closePct: 0 },
+      { atR: 3, slToR: 1, closePct: 50 }
+    ]),
+  /** 0 = off. */
+  trailStepR: z.number().min(0).max(10).default(1),
+  trailGapR: z.number().min(0.5).max(20).default(2),
+  /**
+   * Order-flow hold (user): after entry a strong move leaves an FVG in the trade direction on
+   * `orderFlowTf`; once that FVG is retested and holds (a candle trades into it and closes back on
+   * the right side), the ladder/trailing stops and the position is held to TP / manual close with
+   * the SL just beyond the retest extreme. A close through the FVG breaks the order flow → ladder resumes.
+   */
+  orderFlowHold: z.boolean().default(true),
+  orderFlowTf: z.enum(['5m', '15m', '1h']).default('15m'),
+  /**
+   * What confirms the order flow: fvg = FVG in the trade direction retested and held; wick = a
+   * reactive rejection candle back at the entry area (wick ≥ wickRatio of the range and ≥ 1.5 × body,
+   * close on the trade side of the entry) → the POI is effective.
+   */
+  orderFlowSignals: z.array(z.enum(['fvg', 'wick'])).min(1).default(['fvg', 'wick']),
+  orderFlowWickRatio: z.number().min(0.3).max(0.95).default(0.5)
+})
+export type ExitConfig = z.infer<typeof exitConfigSchema>
 
 /** Where to fetch the official actual for an event (Fase 5). */
 export const actualSourceSchema = z.object({
@@ -193,6 +259,15 @@ export type ScreenerConfig = z.infer<typeof screenerConfigSchema>
 export const botConfigSchema = z.object({
   /** Bot running (paper unless `live`). */
   enabled: z.boolean().default(false),
+  /** Require a fresh Claude analysis (bias + confidence) before entering. Off = pure ICT/SMC math (user). */
+  requireClaude: z.boolean().default(false),
+  /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
+  models: z.array(z.enum(['M0', 'M1', 'M2a', 'M2b', 'M4'])).min(1).default(['M1', 'M2b', 'M4']),
+  /** Every one of these confluences must be present (backtest: FVG in the leg + trend of the POI TF). */
+  requireConfluence: z
+    .array(z.enum(['fvg', 'sweep', 'equalLiq', 'displacement', 'htfParent', 'trendParent', 'btc4h', 'btc1h', 'wyckoff', 'manipulation', 'unicorn', 'prevOpposite']))
+    .default(['fvg', 'trendParent']),
+  minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),
   minConfidence: z.number().int().min(0).max(100).default(70),
@@ -203,11 +278,11 @@ export const botConfigSchema = z.object({
   riskPerTradePct: z.number().positive().max(100).default(1),
   /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
   topVolume: z.number().int().min(5).max(300).default(100),
-  /** Setups whose POI comes from these (higher) timeframes; the OB valid confirms on the entry TF. */
-  poiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['1h', '4h']),
+  /** M1/M2b: the parent POI (the reason) must come from these timeframes. M4 breakers are not limited. */
+  poiTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
   /** Only take setups confirmed within the last N minutes (no chasing old ones). */
   maxSetupAgeMin: z.number().int().min(1).max(525600).default(60),
-  /** The Claude analysis must be newer than the setup and at most this old. */
+  /** (requireClaude) The Claude analysis must be newer than the setup and at most this old. */
   maxAnalysisAgeMin: z.number().int().min(1).max(525600).default(90),
   /** Paper account starting balance (USDT). */
   paperEquity: z.number().positive().max(1e9).default(10)
@@ -226,7 +301,8 @@ export const appConfigSchema = z.object({
   news: newsConfigSchema.default(newsConfigSchema.parse({})),
   claude: claudeConfigSchema.default(claudeConfigSchema.parse({})),
   screener: screenerConfigSchema.default(screenerConfigSchema.parse({})),
-  bot: botConfigSchema.default(botConfigSchema.parse({}))
+  bot: botConfigSchema.default(botConfigSchema.parse({})),
+  exit: exitConfigSchema.default(exitConfigSchema.parse({}))
 })
 
 export type RiskConfig = z.infer<typeof riskConfigSchema>
@@ -236,7 +312,7 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema
-  .omit({ risk: true, data: true, smc: true, news: true, claude: true, screener: true, bot: true })
+  .omit({ risk: true, data: true, smc: true, news: true, claude: true, screener: true, bot: true, exit: true })
   .partial()
   .extend({
     risk: riskConfigSchema.omit({ requireStopLoss: true }).partial().strict().optional(),
@@ -245,7 +321,8 @@ export const configPatchSchema = appConfigSchema
     news: newsConfigSchema.partial().strict().optional(),
     claude: claudeConfigSchema.partial().strict().optional(),
     screener: screenerConfigSchema.partial().strict().optional(),
-    bot: botConfigSchema.omit({ live: true }).partial().strict().optional()
+    bot: botConfigSchema.omit({ live: true }).partial().strict().optional(),
+    exit: exitConfigSchema.partial().strict().optional()
   })
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>

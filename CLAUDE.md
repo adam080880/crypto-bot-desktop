@@ -24,7 +24,7 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
   QM, liquidity (wick OB + swing BSL/SSL), dan setups (POI kena → OB valid → entry/SL/TP, skor,
   status sampai TP/SL). Overlay di Chart (`src/renderer/src/chart/smcOverlay.ts`) dengan toggle layer.
 - Fase 5 ✅ kalender ekonomi (FF feed + actual BLS/FRED/manual), bias USD→crypto, news window,
-  reaksi harga, kandidat trade-on-news, statistik aturan. Fase 6 ✅ (lihat bagian Claude analis). **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
+  reaksi harga, kandidat trade-on-news, statistik aturan. Fase 6 ✅ (lihat bagian Claude analis). Fase 8 (entry v2) 🚧: 8B mesin entry, 8C Backtest v2, 8D bot selesai; 8E UX (screener/chart/settings) belum. **Fase 7 = bot trading Binance** (paper → testnet → live), hanya setelah user
   minta mulai. Detail di PLAN.md.
 
 ## Lanjut di sini
@@ -32,6 +32,22 @@ Fase 6 ✅ dibangun (Claude analis via Agent SDK), **belum pernah dijalankan den
 pertama menunggu persetujuan user, karena memakai kredit/akun Claude-nya. Setelah itu verifikasi hasil di
 halaman Claude Analyses. Fase 7 (bot) sudah dibuat atas permintaan user (lihat "Bot Fase 7"). Live belum pernah
 dites ke exchange beneran.
+
+## Entry v2 + exit bertingkat (keputusan user, 2026-11-14) — detail: `docs/entry-v2.md`
+- Entry **hanya di OB / QM / breaker**. **Tidak pernah di FVG** (cuma info/konfluensi) dan **tidak di OCL/OCL Break**.
+  OCL cuma boleh jadi POI induk (alasan), dan harus dari HTF. OB = Order Block, bukan OCL Break.
+- Tiap POI punya `origin` (liquidity sweep / nyentuh POI TF lebih besar). POI induk tanpa origin tidak dipakai.
+- Model (`Setup.model`): M0 (aturan lama, cuma baseline), M1 POI besar → CHoCH 15m + displacement → QM/OB kecil,
+  M2a OB di balik SSL/BSL, M2b grab + CHoCH, M4 breaker. Trend BTC 4h/1h dan Wyckoff (`wyckoff.ts`) **cuma skor**.
+- Exit (`config.exit`, `strategy/exit.ts` `ExitTracker`, dipakai backtest + bot): 1R → BE incl. fee, 3R → tutup 50% +
+  SL 1R, lalu trailing (best − 2R). **Order flow** (FVG searah diretest dan mantul, atau wick reaktif di area entry) →
+  tahan posisi (tanpa partial/trailing, SL ke ujung retest/wick, BE tetap jalan). Close tembus FVG berarti order flow patah.
+- Bot: `bot.requireClaude` default **false** (murni ICT). `bot.models` default M1/M2b/M4, `bot.requireConfluence`
+  default `fvg + trendParent`. SL live digeser dengan pasang algo baru dulu, baru batalkan yang lama. Partial lewat
+  reduce-only market. Tracker dibangun ulang dari 1m DB setelah restart.
+- Backtest lab 2 tahun BTC/ETH/SOL (fee + 1m): M0 −0,25R. M1 + FVG + trend di TP 1R: WR 53% (OOS 59%), ±0R.
+  M4 + FVG + trend: WR 56%, ±0R. **Belum ada edge bersih yang konsisten setelah fee.** Fee ±0,15–0,2R per trade
+  (SL median 0,4–0,6%). Order flow menaikkan WR 2–3 poin tapi avg R tidak naik. Script ada di scratchpad sesi, bukan repo.
 
 ## Screener (keputusan user)
 - Halaman **Screener**: scan **semua simbol yang punya histori 1m** (lolos `isSymbolAllowed`), dari data
@@ -45,6 +61,17 @@ dites ke exchange beneran.
 - Notifikasi desktop untuk setup baru dari scan otomatis (`screener.notify`).
 - Benchmark data asli (155 simbol): ±1,3 detik.
 - Header tabel bisa diklik buat sort (naik → turun → balik ke ranking screener). Sel kosong selalu di bawah.
+
+## Backtest v2 (2026-11-14) — menggantikan sebagian aturan di bawah
+- Jalan di **utilityProcess sendiri** (`workers/backtestWorker.ts`, DB read-only, satu proses per run), bukan di main.
+  Progress lewat event `backtest:progress`.
+- `runBacktest` menghitung **semua model × semua rencana exit** (`simulate.ts defaultPlans`) sekaligus dengan
+  fill/exit di **candle 1m**. Hasil per setup (`BtSetup.res[plan]`) dikirim ke UI. Filter/statistik/equity/Meta
+  dihitung di renderer lewat `@shared/backtestStats` (tanpa run ulang).
+- Tab **Meta**: kombinasi model × POI induk × exit, diurutkan berdasarkan avg R out-of-sample. "Kokoh" = positif di IS
+  (≥ min trade) **dan** OOS. Tombol **Pakai** menyimpan **profil koin** (setting `coin_profiles`). Bot memakai profil
+  itu untuk koin tersebut (model, POI, konfluensi, skor, dan rencana exit), menggantikan default global.
+- Klik trade akan membuka Chart di waktu itu (`localStorage chart.focus`, dibaca sekali), plus garis entry/SL.
 
 ## Backtest (keputusan user, 2026-11-12)
 - **Satu koin saja**, yaitu yang lagi dibuka di Chart (`localStorage chart.symbol`). Jangan scan semua koin.

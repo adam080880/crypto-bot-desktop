@@ -16,6 +16,7 @@ const poi = (p: Partial<Poi>): Poi => ({
   t: NOW - 50 * H,
   activeFrom: NOW - 40 * H,
   invalidT: null,
+  origin: null,
   ...p
 })
 
@@ -23,8 +24,11 @@ const setup = (s: Partial<Setup>): Setup => ({
   id: 'x',
   symbol: 'AAAUSDT',
   direction: 'bullish',
-  poi: { kind: 'OB', timeframe: '1h', level: 99, t: NOW - 10 * H, hitT: NOW - 3 * H },
-  obValid: { timeframe: '15m', t: NOW - 2 * H, line: 99.2, wickEnd: 98.9, hasFvg: true },
+  model: 'M1',
+  poi: { kind: 'OB', timeframe: '1h', level: 99, t: NOW - 10 * H, hitT: NOW - 3 * H, origin: 'sweep' },
+  child: { kind: 'OB', timeframe: '15m', t: NOW - 2 * H, level: 99.2, extreme: 98.9, hasFvg: true, origin: 'sweep' },
+  tpLiquidity: null,
+  confluence: [],
   entry: 99.2,
   sl: 98.8,
   tp: 101,

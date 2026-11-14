@@ -1,5 +1,6 @@
-import type { BotConfig, ClaudeConfig, DataConfig, NewsConfig, RiskConfig, ScreenerConfig, SmcConfig } from '@shared/config'
+import type { BotConfig, ClaudeConfig, DataConfig, ExitConfig, NewsConfig, RiskConfig, ScreenerConfig, SmcConfig } from '@shared/config'
 import type { BotState } from '@shared/bot'
+import type { CoinProfile } from '@shared/backtest'
 import type { ClaudeState } from '@shared/claude'
 import type { NewsState } from '@shared/news'
 import type { ScreenerState } from '@shared/screener'
@@ -24,6 +25,9 @@ export interface ServiceConfig {
   claude: ClaudeConfig
   screener: ScreenerConfig
   bot: BotConfig
+  exit: ExitConfig
+  /** Coin profiles from the backtest Meta table (symbol → allowed models / POIs / exit plan). */
+  profiles: Record<string, CoinProfile>
   risk: RiskConfig
   killSwitch: boolean
   /** Binance trade keys (decrypted in main), only when both are stored. */
