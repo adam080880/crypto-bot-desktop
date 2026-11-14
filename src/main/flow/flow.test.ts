@@ -42,6 +42,16 @@ describe('flow features', () => {
     expect(flowConfluence(drop, T, 'bearish', 0, cfg)).not.toContain('fundingContra')
   })
 
+  it('oiHold: OI did not fall more than 0,3% over the last 15 min (5m snapshots)', () => {
+    const M5 = 5 * 60_000
+    const five = (last: number): FlowData => ({ oi: Array.from({ length: 4 }, (_, i) => ({ t: T - (3 - i) * M5, v: i === 3 ? last : 100 })), funding: [] })
+    expect(flowAt(five(99.5), T).oiChg15m).toBeCloseTo(-0.005, 9)
+    expect(flowConfluence(five(99.5), T, 'bullish', 0, cfg)).not.toContain('oiHold')
+    expect(flowConfluence(five(99.8), T, 'bullish', 0, cfg)).toContain('oiHold')
+    // hourly-only data is too coarse for a 15 min change → no tag
+    expect(flowAt({ oi: oiSeries(() => 100), funding: [] }, T + 30 * 60_000).oiChg15m).toBeNull()
+  })
+
   it('missing or stale data → no tags', () => {
     expect(flowConfluence(undefined, T, 'bullish', 0.1, cfg)).toEqual([])
     const stale: FlowData = { oi: oiSeries(() => 100).map((x) => ({ ...x, t: x.t - 10 * H })), funding: funding([0.0001, 0.0002]) }
@@ -52,16 +62,15 @@ describe('flow features', () => {
 })
 
 describe('data.binance.vision parsers', () => {
-  it('metrics: keeps the on-the-hour rows (OI value column)', () => {
+  it('metrics: every 5-minute row (OI value column), sorted (newer files are out of order)', () => {
     const csv = [
       'create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio',
-      '2025-01-01 00:00:00,BTCUSDT,91253.336,8545728911.06,1.8,2.1,1.8,0.76',
       '2025-01-01 00:05:00,BTCUSDT,91236.202,8538844785.07,1.8,2.1,1.8,0.98',
-      '2025-01-01 01:00:00,BTCUSDT,91000,8500000000,1.8,2.1,1.8,0.9'
+      '2025-01-01 00:00:00,BTCUSDT,91253.336,8545728911.06,1.8,2.1,1.8,0.76'
     ].join('\n')
     expect(parseMetricsCsv(csv)).toEqual([
       { t: Date.UTC(2025, 0, 1, 0), v: 8545728911.06 },
-      { t: Date.UTC(2025, 0, 1, 1), v: 8500000000 }
+      { t: Date.UTC(2025, 0, 1, 0, 5), v: 8538844785.07 }
     ])
   })
 

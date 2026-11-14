@@ -37,7 +37,8 @@ const CONF_CHIPS: { key: Confluence; label: string }[] = [
   { key: 'killzone', label: 'killzone London/NY' },
   { key: 'oiConfirm', label: 'OI naik searah' },
   { key: 'oiFlush', label: 'OI flush 4j' },
-  { key: 'fundingContra', label: 'funding lawan crowd' }
+  { key: 'fundingContra', label: 'funding lawan crowd' },
+  { key: 'oiHold', label: 'OI 15m tidak turun' }
 ]
 const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'model', label: 'Model', of: (s) => s.model },
@@ -50,7 +51,7 @@ const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'dir', label: 'Arah', of: (s) => (s.dir === 'bullish' ? 'long' : 'short') }
 ]
 const STATUS_LABEL: Record<string, string> = { w: 'TP/profit', b: 'BE', l: 'SL', o: 'masih jalan' }
-const DEFAULT_FILTER: BtFilter = { models: ['M1', 'M2b', 'M4'], dirs: [], pois: [], childKinds: [], conf: ['fvg', 'trendParent'], trendConf: ['oiConfirm'], minScore: 0 }
+const DEFAULT_FILTER: BtFilter = { models: ['M1', 'M2b', 'M4'], dirs: [], pois: [], childKinds: [], conf: ['fvg', 'trendParent'], trendConf: ['oiConfirm', 'oiHold'], minScore: 0 }
 
 interface Form {
   oosDays: number

@@ -247,3 +247,20 @@ Studi event: funding tinggi justru diikuti harga lanjut naik (momentum, bukan si
 - **Backtest** tidak memakai DB: worker download `metrics` harian + `fundingRate` bulanan dari data.binance.vision saat
   run (`flow/visionFlow.ts`, ±200 file kecil), ditambah REST untuk hari yang belum terbit. Tidak disimpan.
 - Catatan: file `metrics` yang lebih baru urutan barisnya acak, jadi parser selalu mengurutkan.
+
+### 10b. OI per 5 menit (permintaan user)
+- OI sekarang snapshot **5 menit** (`openInterestHist period=5m`, `metrics` utuh). Tetap disimpan **3 hari**
+  (±864 baris per koin). `FlowSync` jalan tiap 15 menit di :00:40 / :15:40 / :30:40 / :45:40, tepat sebelum scan
+  screener. Satu request OI per koin per run. Funding diambil sekali per jam.
+- Tag baru `oiHold`: OI 15 menit terakhir tidak turun lebih dari `smc.flowOiFadePct` (0,3%). Lab: M5 dengan OI turun
+  saat breakout (short covering) −0,33R di IS dan OOS (113 trade).
+- Lewat kode app, data 5 menit:
+
+| | trade | WR | avg R | PF | IS | OOS |
+|---|---|---|---|---|---|---|
+| M5 + `oiConfirm` + `oiHold` | 319 | 49% | **+0,26** | 1,50 | +0,27 | +0,24 |
+| M5 sisanya | 308 | 42% | −0,10 | 0,83 | −0,10 | −0,09 |
+| M1 + `oiFlush` (5m) | 42 | 57% | +0,10 | | +0,14 | +0,01 |
+
+  `oiFlush` di M1 melemah dengan data 5 menit (tadinya +0,33R di data per jam, sampel 35 trade), jadi tidak dijadikan
+  default. Default `bot.trendRequireConfluence` = `oiConfirm + oiHold`.

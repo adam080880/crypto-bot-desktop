@@ -11,14 +11,13 @@ const ymd = (t: number): string => {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
-/** Daily metrics CSV → hourly OI snapshots (rows on the hour; value in USDT). */
+/** Daily metrics CSV → 5-minute OI snapshots (value in USDT). */
 export function parseMetricsCsv(text: string): { t: number; v: number }[] {
   const out: { t: number; v: number }[] = []
   for (const line of text.split('\n')) {
     const f = line.split(',')
     // create_time,symbol,sum_open_interest,sum_open_interest_value,...
     if (f.length < 4 || !/^\d{4}-/.test(f[0]!)) continue
-    if (!f[0]!.endsWith(':00:00')) continue
     const t = Date.parse(`${f[0]!.replace(' ', 'T')}Z`)
     const v = Number(f[3])
     if (Number.isFinite(t) && Number.isFinite(v) && v > 0) out.push({ t, v })
@@ -74,7 +73,7 @@ export async function downloadFlow(symbol: string, from: number, to: number, onP
   const rest = new BinanceFuturesClient()
   jobs.push(async () => {
     try {
-      oi.push(...(await rest.openInterestHist(symbol, '1h', 500, signal)))
+      oi.push(...(await rest.openInterestHist(symbol, '5m', 500, signal)))
       funding.push(...(await rest.fundingRates(symbol, 1000, signal)))
     } catch (err) {
       log.warn({ symbol, err: (err as Error).message }, 'flow REST fill failed')

@@ -112,7 +112,8 @@ describe('bot: M5', () => {
   it('uses its own required list (default: OI up with the move), not the SMC one', () => {
     const o = { entryTf: '15m' as const, universe: new Set(['XUSDT']), now: 1_000_000 + M15 + 60_000, exit: defaultAppConfig.exit }
     expect(setupGate(cand, { ...o, bot })).toMatch(/oiConfirm/)
-    expect(setupGate({ ...cand, setup: { ...setup, confluence: ['oiConfirm'] } }, { ...o, bot })).toBeNull()
+    expect(setupGate({ ...cand, setup: { ...setup, confluence: ['oiConfirm'] } }, { ...o, bot })).toMatch(/oiHold/)
+    expect(setupGate({ ...cand, setup: { ...setup, confluence: ['oiConfirm', 'oiHold'] } }, { ...o, bot })).toBeNull()
     expect(setupGate(cand, { ...o, bot: { ...bot, trendRequireConfluence: [] } })).toBeNull()
   })
 

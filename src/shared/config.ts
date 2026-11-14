@@ -138,7 +138,9 @@ export const smcConfigSchema = z.object({
   /** oiFlush: open interest down at least this % over the last 4h. */
   flowOiFlushPct: z.number().min(0).max(50).default(1),
   /** fundingContra: funding percentile (last ~90 settlements) ≤ this for a long, ≥ 1 − this for a short. */
-  flowFundingPct: z.number().min(0).max(0.5).default(0.2)
+  flowFundingPct: z.number().min(0).max(0.5).default(0.2),
+  /** oiHold: open interest did not fall more than this % over the last 15 min (5m snapshots). */
+  flowOiFadePct: z.number().min(0).max(10).default(0.3)
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
@@ -301,7 +303,7 @@ export const botConfigSchema = z.object({
   /** Every one of these confluences must be present on SMC setups (M0–M4). Backtest: FVG in the leg + trend of the POI TF. */
   requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent']),
   /** Same for the M5 trend model. Lab: OI rising with the move = +0,19R vs −0,05R without (docs/entry-v2.md §10). */
-  trendRequireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['oiConfirm']),
+  trendRequireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['oiConfirm', 'oiHold']),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),

@@ -663,7 +663,8 @@ const CONF_LABEL: Record<Confluence, string> = {
   killzone: 'muncul di killzone London/NY',
   oiConfirm: 'open interest naik searah harga (24 jam)',
   oiFlush: 'open interest flush (turun 4 jam)',
-  fundingContra: 'funding berlawanan dengan crowd'
+  fundingContra: 'funding berlawanan dengan crowd',
+  oiHold: 'open interest 15 menit tidak turun'
 }
 
 function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft): Setup | null {

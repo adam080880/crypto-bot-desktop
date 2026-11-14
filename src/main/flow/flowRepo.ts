@@ -2,7 +2,7 @@ import type { Db } from '../db/client'
 import type { FlowData } from '../strategy/flow'
 
 const DAY = 86_400_000
-/** Live needs at most 24h + 4h of OI (docs/entry-v2.md §10, user: "simpan 3 hari aja"). */
+/** Live needs at most 24h + 4h of OI, 5-minute snapshots ≈ 864 rows per coin (docs/entry-v2.md §10, user: "simpan 3 hari aja"). */
 export const OI_RETENTION_DAYS = 3
 /** Funding percentile window = 90 settlements ≈ 30 days at 8h. */
 export const FUNDING_RETENTION_DAYS = 35

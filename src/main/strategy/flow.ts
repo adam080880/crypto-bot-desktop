@@ -2,7 +2,7 @@ import type { SmcConfig } from '@shared/config'
 import type { Confluence, Dir } from '@shared/smc'
 
 /**
- * Futures positioning around a setup (docs/entry-v2.md §10). Open interest = hourly snapshots
+ * Futures positioning around a setup (docs/entry-v2.md §10). Open interest = 5-minute snapshots
  * (value in USDT, `t` = snapshot time); funding = settled rates (`t` = funding time).
  * Live keeps only the last 3 days of OI and ~35 days of funding; the backtest downloads history.
  */
@@ -30,14 +30,16 @@ function lastAtOrBefore(a: readonly { t: number }[], x: number): number {
   return ans
 }
 
-/** OI value at `t` (the newest snapshot at or before it, at most 2h old). */
-function oiAt(oi: FlowData['oi'], t: number): number | null {
+/** OI value at `t`: the newest snapshot at or before it, at most `maxAge` old. */
+function oiAt(oi: FlowData['oi'], t: number, maxAge = 2 * HOUR): number | null {
   const i = lastAtOrBefore(oi, t)
-  if (i < 0 || t - oi[i]!.t > 2 * HOUR) return null
+  if (i < 0 || t - oi[i]!.t > maxAge) return null
   return oi[i]!.v
 }
 
 export interface FlowSnapshot {
+  /** Last 15 minutes (needs 5m snapshots ≤ 10 min old at both ends). */
+  oiChg15m: number | null
   oiChg4h: number | null
   oiChg24h: number | null
   funding: number | null
@@ -61,7 +63,10 @@ export function flowAt(flow: FlowData, t: number): FlowSnapshot {
     // a percentile over a handful of settlements means nothing
     fundingPct = fi - from + 1 >= 15 ? le / (fi - from + 1) : null
   }
+  const fresh = oiAt(flow.oi, t, 10 * 60_000)
+  const a15 = oiAt(flow.oi, t - 15 * 60_000, 10 * 60_000)
   return {
+    oiChg15m: fresh !== null && a15 ? fresh / a15 - 1 : null,
     oiChg4h: now !== null && a4 ? now / a4 - 1 : null,
     oiChg24h: now !== null && a24 ? now / a24 - 1 : null,
     funding,
@@ -73,13 +78,21 @@ export function flowAt(flow: FlowData, t: number): FlowSnapshot {
  * Flow confluences for a setup known at `t` in direction `dir`. `pxChg24h` = price change over the
  * same 24h (from the entry candles). Missing data → no tag (never a guess).
  */
-export function flowConfluence(flow: FlowData | undefined, t: number, dir: Dir, pxChg24h: number | null, cfg: Pick<SmcConfig, 'flowOiFlushPct' | 'flowFundingPct'>): Confluence[] {
+export function flowConfluence(
+  flow: FlowData | undefined,
+  t: number,
+  dir: Dir,
+  pxChg24h: number | null,
+  cfg: Pick<SmcConfig, 'flowOiFlushPct' | 'flowFundingPct' | 'flowOiFadePct'>
+): Confluence[] {
   if (!flow) return []
   const f = flowAt(flow, t)
   const bull = dir === 'bullish'
   const out: Confluence[] = []
   if (f.oiChg24h !== null && pxChg24h !== null && f.oiChg24h > 0 && (bull ? pxChg24h > 0 : pxChg24h < 0)) out.push('oiConfirm')
   if (f.oiChg4h !== null && f.oiChg4h <= -cfg.flowOiFlushPct / 100) out.push('oiFlush')
+  // lab M5: OI falling in the last 15 min at the breakout (short covering, no new money) = −0,3 to −0,5R
+  if (f.oiChg15m !== null && f.oiChg15m > -cfg.flowOiFadePct / 100) out.push('oiHold')
   if (f.fundingPct !== null && (bull ? f.fundingPct <= cfg.flowFundingPct : f.fundingPct >= 1 - cfg.flowFundingPct)) out.push('fundingContra')
   return out
 }

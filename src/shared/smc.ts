@@ -217,6 +217,8 @@ export type Confluence =
   | 'oiConfirm'
   | 'oiFlush'
   | 'fundingContra'
+  /** Open interest did not fall more than smc.flowOiFadePct in the last 15 min (no short-covering breakout). */
+  | 'oiHold'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -235,7 +237,8 @@ export const REQUIRABLE_CONFLUENCES = [
   'killzone',
   'oiConfirm',
   'oiFlush',
-  'fundingContra'
+  'fundingContra',
+  'oiHold'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -255,7 +258,8 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'killzone', label: 'killzone London/NY' },
   { key: 'oiConfirm', label: 'OI naik searah harga 24j' },
   { key: 'oiFlush', label: 'OI 4j flush' },
-  { key: 'fundingContra', label: 'funding lawan crowd' }
+  { key: 'fundingContra', label: 'funding lawan crowd' },
+  { key: 'oiHold', label: 'OI 15m tidak turun' }
 ]
 
 /** A candidate entry (never an order by itself). */
