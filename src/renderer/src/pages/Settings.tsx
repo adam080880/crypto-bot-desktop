@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { KeyRound, ShieldCheck, Trash2 } from 'lucide-react'
 import type { AppConfig, DataConfig, RiskConfig } from '@shared/config'
 import type { SecretName, SecretStatus } from '@shared/ipc'
+import { CONFLUENCE_CHOICES, ENTRY_MODELS, MODEL_LABEL } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -106,7 +107,7 @@ export function Settings() {
   }, [])
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="w-full space-y-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
       <Card>
@@ -394,8 +395,8 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
       <CardHeader>
         <CardTitle>Bot entry</CardTitle>
         <CardDescription>
-          Start/stop dan saklar LIVE ada di halaman Bot. Entry cuma dari setup screener: POI HTF kena → OB valid {config.smc.entryTimeframe}, di koin crypto top
-          volume, dan wajib ada analisis Claude yang searah dengan confidence ≥ minimum.
+          Start/stop dan saklar LIVE ada di halaman Bot. Entry cuma dari setup screener (model yang dicentang di bawah) di koin crypto top volume.
+          Analisis Claude cuma wajib kalau "Claude wajib" dinyalakan di halaman Bot.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -407,6 +408,47 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           {num('topVolume', 'Koin crypto top N volume 24 jam', 10)}
           {num('maxSetupAgeMin', 'Umur maks setup saat entry (menit)', 15)}
           {num('paperEquity', 'Modal akun paper (USDT)', 1)}
+          <div className="col-span-2 space-y-1">
+            <Label>Model entry yang boleh dipakai (minimal 1; profil koin dari Backtest punya model sendiri)</Label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {ENTRY_MODELS.map((m) => {
+                const on = b.models.includes(m)
+                return (
+                  <label key={m} className="flex items-center gap-1" title={on && b.models.length === 1 ? 'Minimal satu model' : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={on && b.models.length === 1}
+                      onChange={(e) =>
+                        setB({ ...b, models: e.target.checked ? ENTRY_MODELS.filter((x) => x === m || b.models.includes(x)) : b.models.filter((x) => x !== m) })
+                      }
+                    />
+                    {MODEL_LABEL[m]}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+          <div className="col-span-2 space-y-1">
+            <Label>Konfluensi wajib (semua yang dicentang harus ada; kosong = bebas)</Label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {CONFLUENCE_CHOICES.map(({ key, label }) => {
+                const k = key as (typeof b.requireConfluence)[number]
+                return (
+                  <label key={key} className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={b.requireConfluence.includes(k)}
+                      onChange={(e) =>
+                        setB({ ...b, requireConfluence: e.target.checked ? [...b.requireConfluence, k] : b.requireConfluence.filter((x) => x !== k) })
+                      }
+                    />
+                    {label}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
           <Label>POI HTF yang dipakai</Label>
           <div className="flex justify-end gap-3 text-xs">
             {(['1h', '4h', '1d'] as const).map((tf) => (

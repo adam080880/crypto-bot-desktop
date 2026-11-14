@@ -89,7 +89,7 @@ export function Bot() {
   const events = (st?.events ?? []).filter((e) => showSkips || e.level !== 'skip')
 
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <BotIcon className="size-5" />
         <h1 className="text-xl font-semibold tracking-tight">Bot</h1>

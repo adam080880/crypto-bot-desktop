@@ -203,6 +203,22 @@ export type Confluence =
   | 'unicorn'
   | 'prevOpposite'
 
+/** Confluences that can be required (bot settings), with UI labels. */
+export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
+  { key: 'fvg', label: 'FVG' },
+  { key: 'trendParent', label: 'searah trend POI' },
+  { key: 'sweep', label: 'sweep' },
+  { key: 'htfParent', label: 'POI HTF' },
+  { key: 'displacement', label: 'displacement' },
+  { key: 'btc4h', label: 'BTC 4h searah' },
+  { key: 'btc1h', label: 'BTC 1h searah' },
+  { key: 'wyckoff', label: 'Wyckoff searah' },
+  { key: 'manipulation', label: 'spring/UTAD' },
+  { key: 'unicorn', label: 'unicorn' },
+  { key: 'equalLiq', label: 'equal H/L' },
+  { key: 'prevOpposite', label: 'candle sebelumnya berlawanan' }
+]
+
 /** A candidate entry (never an order by itself). */
 export interface Setup {
   id: string

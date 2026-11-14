@@ -53,7 +53,7 @@ export function DataSync() {
   }
 
   return (
-    <div className="max-w-5xl space-y-4">
+    <div className="w-full space-y-4">
       <h1 className="text-xl font-semibold tracking-tight">Data Sync</h1>
 
       <Card>

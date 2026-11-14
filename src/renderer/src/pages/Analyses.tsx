@@ -89,7 +89,7 @@ export function Analyses() {
   const latest = analyses.filter((a) => a.runId === latestRun?.id)
 
   return (
-    <div className="max-w-6xl space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Claude Analyses</h1>
         <span className="text-xs text-muted-foreground">read-only · tidak pernah mengirim order · dipicu news / manual</span>
