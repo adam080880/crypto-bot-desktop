@@ -20,6 +20,8 @@ import { initLogger, logger } from '../logger'
 import { installCloudflareDns } from '../net/dns'
 import { AutoSync } from '../sync/autoSync'
 import { FlowSync } from '../flow/flowSync'
+import { RotationService } from '../rotation/rotationService'
+import { BinanceTradeClient } from '../bot/binanceTrade'
 import { Backfiller } from '../sync/backfill'
 import { estimateFullBackfill } from '../sync/estimate'
 import type { FromWorker, ServiceConfig, ToWorker, WorkerInit } from './protocol'
@@ -81,6 +83,10 @@ const flowSync = new FlowSync(db, {
   getData: () => config.data,
   canRun: () => manual === null
 })
+
+// momentum rotation: paper forward test only, never orders (docs/entry-v2.md §11)
+const rotation = new RotationService(db, { market: new BinanceTradeClient(), getData: () => config.data, canRun: () => manual === null })
+rotation.on('state', (state) => send({ type: 'rotation-state', state }))
 
 const news = new NewsService(db, {
   getConfig: () => config.news,
@@ -202,6 +208,8 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
       flowSync.start()
+      rotation.start()
+      send({ type: 'rotation-state', state: rotation.getState() })
       news.start()
       scheduleInterval()
       send({ type: 'claude-state', state: analyst.getState() })
@@ -238,6 +246,9 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       break
     case 'screener-run':
       void screener.run('manual')
+      break
+    case 'rotation-cmd':
+      void rotation.command(msg.command)
       break
     case 'news-refresh':
       void news.refreshNow()
@@ -288,6 +299,7 @@ process.on('exit', () => {
   live.dispose()
   autoSync.dispose()
   flowSync.dispose()
+  rotation.dispose()
   news.dispose()
   screener.dispose()
   bot.dispose()

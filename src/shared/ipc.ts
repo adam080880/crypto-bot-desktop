@@ -6,6 +6,7 @@ import type { BacktestParams, BacktestProgress, BacktestResult, CoinProfile } fr
 import type { BotState, ConnTestResult } from './bot'
 import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
 import type { ScreenerState } from './screener'
+import type { RotationCommand, RotationState } from './rotation'
 import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
@@ -98,6 +99,8 @@ export interface IpcInvokeMap {
   'claude:run': { req: void; res: void }
   'screener:get': { req: void; res: ScreenerState | null }
   'screener:run': { req: void; res: void }
+  'rotation:get': { req: void; res: RotationState | null }
+  'rotation:command': { req: RotationCommand; res: void }
   'storage:get': { req: void; res: StorageInfo }
   'storage:chooseDir': { req: void; res: string | null }
   'storage:plan': { req: { dir: string }; res: { ok: boolean; error?: string; targetHasDb: boolean; needBytes: number; freeBytes: number | null } }
@@ -128,6 +131,7 @@ export interface IpcEventMap {
   'claude:changed': { at: number }
   'screener:state': ScreenerState
   'bot:state': BotState
+  'rotation:state': RotationState
   'config:changed': AppConfig
   'backtest:progress': BacktestProgress
   'storage:progress': { fraction: number; phase: 'stopping' | 'copying' | 'restarting' | 'error'; error?: string }
@@ -187,9 +191,11 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'claude:run',
   'screener:get',
   'screener:run',
+  'rotation:get',
+  'rotation:command',
   'storage:get',
   'storage:chooseDir',
   'storage:plan',
   'storage:move'
 ]
-export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'config:changed', 'backtest:progress', 'storage:progress']
+export const EVENT_CHANNELS: readonly EventChannel[] = ['app:status', 'sync:event', 'live:candle', 'live:synced', 'news:changed', 'claude:changed', 'screener:state', 'bot:state', 'rotation:state', 'config:changed', 'backtest:progress', 'storage:progress']

@@ -11,6 +11,7 @@ import { Placeholder } from '@/pages/Placeholder'
 import { Screener } from '@/pages/Screener'
 import { Backtest } from '@/pages/Backtest'
 import { Bot } from '@/pages/Bot'
+import { Rotation } from '@/pages/Rotation'
 import { Settings } from '@/pages/Settings'
 import { useAppStore } from '@/stores/appStore'
 
@@ -32,6 +33,7 @@ export function App() {
           {page === 'screener' && <Screener />}
           {page === 'backtest' && <Backtest />}
           {page === 'bot' && <Bot />}
+          {page === 'rotation' && <Rotation />}
           {page === 'calendar' && <Calendar />}
           {page === 'analyses' && <Analyses />}
           {page === 'sync' && <DataSync />}

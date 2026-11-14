@@ -4,6 +4,7 @@ import { utilityProcess, type UtilityProcess } from 'electron'
 import type { AppConfig } from '@shared/config'
 import type { LiveCandleEvent } from '@shared/live'
 import type { ScreenerRow, ScreenerState } from '@shared/screener'
+import type { RotationCommand, RotationState } from '@shared/rotation'
 import type { BotState } from '@shared/bot'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from '@shared/sync'
 import type { AppStatus, SyncStartRequest, SyncUiState } from '@shared/ipc'
@@ -28,6 +29,7 @@ export interface DataBroadcast {
   /** New OB valid setups from an automatic scan (for a desktop notification). */
   screenerNewSetups: (rows: ScreenerRow[]) => void
   botState: (s: BotState) => void
+  rotationState: (s: RotationState) => void
 }
 
 /**
@@ -43,6 +45,7 @@ export class DataController {
   /** Setup ids already seen in a finished scan; null until the worker's first state. */
   private seenSetups: Set<string> | null = null
   private bot: BotState | null = null
+  private rotation: RotationState | null = null
   private ui: SyncUiState = { running: false, progress: null, lastSummary: null, lastError: null }
   private pendingEstimate: { resolve: (e: BackfillEstimate) => void; reject: (e: Error) => void } | null = null
   private estimatePromise: Promise<BackfillEstimate> | null = null
@@ -209,6 +212,10 @@ export class DataController {
         this.bot = m.state
         this.out.botState(m.state)
         return
+      case 'rotation-state':
+        this.rotation = m.state
+        this.out.rotationState(m.state)
+        return
     }
   }
 
@@ -291,6 +298,14 @@ export class DataController {
 
   screenerRun(): void {
     this.post({ type: 'screener-run' })
+  }
+
+  getRotation(): RotationState | null {
+    return this.rotation
+  }
+
+  rotationCommand(command: RotationCommand): void {
+    this.post({ type: 'rotation-cmd', command })
   }
 
   newsRefresh(): void {

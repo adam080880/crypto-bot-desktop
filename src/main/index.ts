@@ -59,6 +59,7 @@ function bootstrap(): void {
       claudeChanged: () => sendAll('claude:changed', { at: Date.now() }),
       screenerState: (s) => sendAll('screener:state', s),
       botState: (s) => sendAll('bot:state', s),
+      rotationState: (s) => sendAll('rotation:state', s),
       screenerNewSetups: (rows) => {
         if (!state.getConfig().screener.notify || !Notification.isSupported()) return
         const list = rows.slice(0, 5).map((r) => `${r.symbol} ${r.direction === 'bullish' ? 'LONG' : 'SHORT'} RR ${r.setup!.rr}`)

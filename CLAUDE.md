@@ -57,6 +57,9 @@ dites ke exchange beneran.
   `bot.trendRequireConfluence` khusus M5. OI = snapshot **5 menit**, DB cuma simpan OI 3 hari + funding 35 hari
   (`flow_oi`/`flow_funding`, `FlowSync` tiap 15 menit di :x0:40). Backtest download histori dari data.binance.vision
   saat run, tidak disimpan.
+- **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
+  lookback 75 hari, 8 per sisi, rebalance mingguan. Tidak pernah kirim order. Lab realistis: OOS −41% s/d +5% tergantung
+  hari rebalance, DD 44–62%. Jangan dijadikan bot live tanpa forward test yang meyakinkan.
 
 ## Screener (keputusan user)
 - Halaman **Screener**: scan **semua simbol yang punya histori 1m** (lolos `isSymbolAllowed`), dari data

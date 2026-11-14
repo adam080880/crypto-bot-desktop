@@ -4,6 +4,7 @@ import type { CoinProfile } from '@shared/backtest'
 import type { ClaudeState } from '@shared/claude'
 import type { NewsState } from '@shared/news'
 import type { ScreenerState } from '@shared/screener'
+import type { RotationCommand, RotationState } from '@shared/rotation'
 import type { LiveCandleEvent, LiveState } from '@shared/live'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent } from '@shared/sync'
 
@@ -52,6 +53,7 @@ export type ToWorker =
   | { type: 'news-set-actual'; id: string; value: number | null }
   | { type: 'claude-run' }
   | { type: 'screener-run' }
+  | { type: 'rotation-cmd'; command: RotationCommand }
   | { type: 'bot-kill' }
   | { type: 'bot-cancel'; id: string }
   | { type: 'bot-retry'; id: string }
@@ -72,4 +74,5 @@ export type FromWorker =
   | { type: 'claude-state'; state: ClaudeState }
   | { type: 'claude-changed' }
   | { type: 'screener-state'; state: ScreenerState }
+  | { type: 'rotation-state'; state: RotationState }
   | { type: 'bot-state'; state: BotState }

@@ -2,6 +2,7 @@ import { app, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from 
 import { is } from '@electron-toolkit/utils'
 import { moveDatabase, planMove, storageInfo } from '../storage'
 import { z } from 'zod'
+import { rotationCommandSchema } from '@shared/rotation'
 import { parseConfigPatch } from '@shared/config'
 import { backtestParamsSchema, coinProfileSchema, type CoinProfile } from '@shared/backtest'
 import { deleteProfile, readProfiles, saveProfile } from '../backtest/profiles'
@@ -204,6 +205,8 @@ export function registerIpcHandlers(deps: {
   handle('claude:run', () => data.claudeRun())
   handle('screener:get', () => data.getScreener())
   handle('screener:run', () => data.screenerRun())
+  handle('rotation:get', () => data.getRotation())
+  handle('rotation:command', (req) => data.rotationCommand(rotationCommandSchema.parse(req)))
   handle('storage:get', () => storageInfo(deps.dbPath))
   handle('storage:chooseDir', async (_req, event) => {
     const win = (await import('electron')).BrowserWindow.fromWebContents(event.sender)

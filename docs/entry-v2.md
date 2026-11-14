@@ -264,3 +264,23 @@ Studi event: funding tinggi justru diikuti harga lanjut naik (momentum, bukan si
 
   `oiFlush` di M1 melemah dengan data 5 menit (tadinya +0,33R di data per jam, sampel 35 trade), jadi tidak dijadikan
   default. Default `bot.trendRequireConfluence` = `oiConfirm + oiHold`.
+
+## 11. Rotasi momentum antar koin, PAPER SAJA (2026-11-14)
+Lab: candle 1d semua perpetual USDT-M, termasuk yang sudah delisting (778 koin), Sep 2024 – Okt 2026. Universe adil:
+top 60 berdasarkan volume 30 hari *saat itu*, umur ≥ 60 hari. Fee 0,07% per sisi + funding. OOS = 240 hari terakhir.
+- Versi pertama memakai daftar koin berdasarkan volume hari ini → survivorship bias (+1000%). **Hasil itu salah.**
+- Long saja: rugi atau tidak konsisten (drawdown 60–97%).
+- Long/short lookback 60–75 hari: in-sample selalu bagus, tapi OOS bergantung pada hari rebalance (L60 N5: Selasa +79%,
+  Jumat −31%). Stop per posisi memperburuk hasil.
+- Mesin paper app (`rotation/paper.ts`) memegang unit tetap sepanjang minggu (realistis). Lab menyamakan bobot setiap hari.
+  Hasil mesin app, default L75 N8 top 60: Senin +209% / OOS −15%, Selasa +336% / OOS +5%, Jumat +230% / OOS −41%.
+  Max drawdown 44–62%.
+
+**Keputusan user:** halaman **Rotasi (paper)** saja, tanpa order.
+- `RotationService` di data worker berjalan tiap 15 menit. Begitu close 1d baru tersimpan, posisi ditandai ke close itu
+  dan funding dicatat (dari `flow_funding`). Rebalance tiap `rebalanceWeekday` 00:30 UTC dari close kemarin; kalau close
+  kemarin belum tersimpan, rebalance menunggu tick berikutnya.
+- Universe = crypto perpetual (`isCryptoPerp` dari exchangeInfo) yang punya candle 1d di DB. Ranking point-in-time
+  (`rankUniverse`).
+- State di setting `rotation_state`. IPC `rotation:get` / `rotation:command` (start/stop/reset/refresh), event
+  `rotation:state`. Parameter dikunci selama forward test berjalan.
