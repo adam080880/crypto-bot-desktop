@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
-import type { BotEvent, BotState, BotTrade, ConnTestResult } from '@shared/bot'
+import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -85,7 +85,9 @@ export function Bot() {
   const active = (st?.trades ?? []).filter((t) => t.status === 'pending' || t.status === 'open')
   const done = (st?.trades ?? []).filter((t) => t.status === 'closed' || t.status === 'cancelled')
   const closed = done.filter((t) => t.status === 'closed' && t.mode === (live ? 'live' : 'paper'))
-  const wins = closed.filter((t) => (t.pnl ?? 0) > 0).length
+  const wins = closed.filter((t) => tradeOutcome(t) === 'win').length
+  const bes = closed.filter((t) => tradeOutcome(t) === 'be').length
+  const losses = closed.length - wins - bes
   const events = (st?.events ?? []).filter((e) => showSkips || e.level !== 'skip')
 
   return (
@@ -128,7 +130,8 @@ export function Bot() {
           <div>
             <div className="text-xs text-muted-foreground">Trade selesai ({live ? 'live' : 'paper'})</div>
             <div className="text-lg font-semibold">
-              {closed.length} · untung {wins} / rugi {closed.length - wins}
+              {closed.length} · untung {wins} / BE {bes} / rugi {losses}
+              {wins + losses > 0 && <span className="ml-1 text-xs font-normal text-muted-foreground">WR {Math.round((wins / (wins + losses)) * 100)}% (tanpa BE)</span>}
             </div>
           </div>
           <div>
@@ -150,6 +153,9 @@ export function Bot() {
             {cfg.bot.requireConfluence.length ? cfg.bot.requireConfluence.join(' + ') : '—'}
             {cfg.bot.minScore ? ` · skor ≥ ${cfg.bot.minScore}` : ''} · exit {cfg.exit.tpMode === 'trail' ? 'trailing tanpa TP' : cfg.exit.tpMode === 'fixedR' ? `TP ${cfg.exit.tpR}R` : 'TP liquidity'}
             {cfg.exit.ladder.length ? ` + bertingkat (${cfg.exit.ladder.map((l) => `${l.atR}R→${l.closePct ? `tutup ${l.closePct}% + ` : ''}SL ${l.slToR ? `${l.slToR}R` : 'BE'}`).join(', ')})` : ''}
+            {cfg.exit.ladder.some((l) => l.slToR === 0) && cfg.exit.tightSlPct > 0
+              ? ` · SL < ${cfg.exit.tightSlPct}%: BE baru di ${cfg.exit.tightBeAtR}R, kunci +${cfg.exit.tightBeLockR}R bersih fee`
+              : ''}
             {cfg.exit.orderFlowHold ? ` + tahan order flow (${cfg.exit.orderFlowSignals.join('/')} ${cfg.exit.orderFlowTf})` : ''} ·{' '}
             <button type="button" className="underline decoration-dotted" onClick={() => void setRequireClaude(!cfg.bot.requireClaude)} title="Klik untuk ganti">
               {cfg.bot.requireClaude ? `Claude wajib ≥ ${cfg.bot.minConfidence}` : 'tanpa Claude (murni ICT)'}
@@ -337,10 +343,16 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
                   {t.closedQty > 0 && <span className="text-muted-foreground">· {t.closedQty} sudah TP</span>}
                 </span>
               ) : (
-                <span className="text-muted-foreground">{REASON[t.reason ?? ''] ?? t.reason}</span>
+                <span className="flex items-center gap-1">
+                  {tradeOutcome(t) === 'be' && <Badge variant="secondary">BE</Badge>}
+                  <span className="text-muted-foreground">{REASON[t.reason ?? ''] ?? t.reason}</span>
+                </span>
               )}
             </td>
-            <td className={cn('px-3 py-1.5 font-semibold', (t.pnl ?? 0) > 0 ? 'text-bull' : (t.pnl ?? 0) < 0 ? 'text-bear' : '')}>{t.pnl === null ? '—' : usd(t.pnl, 3)}</td>
+            <td className={cn('px-3 py-1.5 font-semibold whitespace-nowrap', tradeOutcome(t) === 'win' ? 'text-bull' : tradeOutcome(t) === 'loss' ? 'text-bear' : tradeOutcome(t) === 'be' ? 'text-muted-foreground' : '')}>
+              {t.pnl === null ? '—' : usd(t.pnl, 3)}
+              {t.status === 'closed' && tradeR(t) !== null && <span className="ml-1 font-normal text-muted-foreground">({tradeR(t)!.toFixed(2)}R)</span>}
+            </td>
             <td className="px-3 py-1.5">
               {actions && t.status === 'pending' && (
                 <Button size="sm" variant="outline" className="h-6 px-2 text-xs" title="Batalkan limit entry" onClick={() => void window.api.invoke('bot:cancel', { id: t.id })}>

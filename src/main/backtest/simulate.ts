@@ -6,7 +6,7 @@ import { ExitTracker, type ExitFees } from '../strategy/exit'
 import { indexAtOrAfter } from '../strategy/setups'
 
 /** One exit plan evaluated side by side in the backtest (docs/entry-v2.md §4). */
-export interface ExitPlanDef extends Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> {
+export interface ExitPlanDef extends Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'>, Partial<Pick<ExitConfig, 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>> {
   key: string
   label: string
 }
@@ -27,7 +27,7 @@ const plain = (key: string, label: string, tpMode: ExitConfig['tpMode'], tpR: nu
 
 /** Fixed-R targets, the old liquidity TP, and the user's tiered plan (with and without a final TP). */
 export function defaultPlans(user: ExitConfig, smc?: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): ExitPlanDef[] {
-  const tiered = { tpR: user.tpR, ladder: user.ladder, trailStepR: user.trailStepR, trailGapR: user.trailGapR, orderFlowTf: user.orderFlowTf, orderFlowSignals: user.orderFlowSignals, orderFlowWickRatio: user.orderFlowWickRatio }
+  const tiered = { tpR: user.tpR, ladder: user.ladder, trailStepR: user.trailStepR, trailGapR: user.trailGapR, orderFlowTf: user.orderFlowTf, orderFlowSignals: user.orderFlowSignals, orderFlowWickRatio: user.orderFlowWickRatio, tightSlPct: user.tightSlPct, tightBeAtR: user.tightBeAtR, tightBeLockR: user.tightBeLockR }
   return [
     plain('r1', 'TP 1R', 'fixedR', 1),
     plain('r1.5', 'TP 1,5R', 'fixedR', 1.5),

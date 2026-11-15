@@ -178,7 +178,15 @@ export const exitConfigSchema = z.object({
    * close on the trade side of the entry) → the POI is effective.
    */
   orderFlowSignals: z.array(z.enum(['fvg', 'wick'])).min(1).default(['fvg', 'wick']),
-  orderFlowWickRatio: z.number().min(0.3).max(0.95).default(0.5)
+  orderFlowWickRatio: z.number().min(0.3).max(0.95).default(0.5),
+  /**
+   * Tight stop (user): when |entry − SL| is below tightSlPct % of the entry, 1R is mostly fees and
+   * noise, so the break-even step (slToR 0) fires at tightBeAtR at the earliest and locks
+   * tightBeLockR net of fees instead of plain BE. Stops ≥ tightSlPct keep the normal BE step. 0 = off.
+   */
+  tightSlPct: z.number().min(0).max(10).default(1),
+  tightBeAtR: z.number().min(0.5).max(10).default(2),
+  tightBeLockR: z.number().min(0).max(5).default(0.5)
 })
 export type ExitConfig = z.infer<typeof exitConfigSchema>
 

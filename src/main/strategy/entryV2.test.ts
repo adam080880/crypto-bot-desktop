@@ -144,6 +144,32 @@ describe('exit ladder (1R → BE incl. fee, 3R → take 50 % + SL 1R, then trail
     x.bar(b(1, 101.5, 96.5, 98))
     expect(x.result().r).toBeCloseTo(-1)
   })
+
+  // tight stop (SL 0,5 % < tightSlPct 1 %): no BE at 1R; at 2R the stop locks +0,5R net of fees
+  it('tight stop: 1R does not move the stop to break-even', () => {
+    const x = new ExitTracker('bullish', 100, 99.5, null, plan, NO)
+    x.bar(b(0, 100.1, 99.9, 100), true)
+    x.bar(b(1, 100.6, 100.2, 100.5)) // +1,2R
+    x.bar(b(2, 100.4, 99.4, 99.6))
+    expect(x.result().r).toBeCloseTo(-1)
+  })
+
+  it('tight stop: 2R locks +0,5R after fees', () => {
+    const fees = { makerFeePct: 0.02, takerFeePct: 0.05, slippagePct: 0.02 }
+    const x = new ExitTracker('bullish', 100, 99.5, null, plan, fees)
+    x.bar(b(0, 100.1, 99.9, 100), true)
+    x.bar(b(1, 101.05, 100.5, 101)) // +2,1R
+    x.bar(b(2, 101, 99.8, 100))
+    expect(x.result().r).toBeCloseTo(0.5, 2)
+  })
+
+  it('stop of 1 % or more keeps break-even at 1R', () => {
+    const x = new ExitTracker('bullish', 100, 98.5, null, plan, NO)
+    x.bar(b(0, 100.1, 99.9, 100), true)
+    x.bar(b(1, 101.6, 100.5, 101.5)) // +1,07R
+    x.bar(b(2, 101, 99.5, 99.8))
+    expect(x.result().r).toBeCloseTo(0)
+  })
 })
 
 describe('Wyckoff (score only)', () => {

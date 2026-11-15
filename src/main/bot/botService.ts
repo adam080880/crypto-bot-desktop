@@ -559,7 +559,10 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         orderFlowHold: exit.orderFlowHold,
         orderFlowTf: exit.orderFlowTf,
         orderFlowSignals: exit.orderFlowSignals,
-        orderFlowWickRatio: exit.orderFlowWickRatio
+        orderFlowWickRatio: exit.orderFlowWickRatio,
+        tightSlPct: exit.tightSlPct,
+        tightBeAtR: exit.tightBeAtR,
+        tightBeLockR: exit.tightBeLockR
       },
       exitState: null,
       equity,

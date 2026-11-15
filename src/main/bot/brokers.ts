@@ -327,7 +327,16 @@ export class LiveBroker implements Broker {
       const exit = r.lastPrice
       const bull = t.direction === 'bullish'
       // stop fills slip past the SL, so classify by which side of the entry the exit was
-      const reason = exit === null ? 'external' : (bull ? exit > t.entry : exit < t.entry) ? 'tp' : 'sl'
+      // a stop already moved to BE / into profit that fills nearer the stop than the TP is 'trail', not 'tp'
+      const stopMoved = bull ? t.sl >= t.entry : t.sl <= t.entry
+      const reason =
+        exit === null
+          ? 'external'
+          : stopMoved && (t.tp === null || Math.abs(exit - t.sl) < Math.abs(exit - t.tp))
+            ? 'trail'
+            : (bull ? exit > t.entry : exit < t.entry)
+              ? 'tp'
+              : 'sl'
       return { status: 'closed', reason, closedAt: r.lastTime ?? Date.now(), exitPrice: exit, pnl: r.pnl }
     }
     return null

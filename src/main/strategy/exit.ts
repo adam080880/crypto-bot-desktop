@@ -50,12 +50,37 @@ interface Bucket {
 }
 
 export type ExitPlan = Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR'> &
-  Partial<Pick<ExitConfig, 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'>>
+  Partial<Pick<ExitConfig, 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio' | 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>
+
+interface LadderStep {
+  atR: number
+  slToR: number
+  closePct: number
+  /** Break-even step: also applies while the order flow holds; the stop pays both fees + slippage. */
+  be: boolean
+}
+
+/**
+ * Ladder actually used for a trade. With a tight stop (< tightSlPct % of entry) the break-even step
+ * moves to tightBeAtR at the earliest and locks tightBeLockR net of fees.
+ */
+export function effectiveLadder(plan: ExitPlan, entry: number, sl0: number): LadderStep[] {
+  const tight = (plan.tightSlPct ?? 0) > 0 && (Math.abs(entry - sl0) / entry) * 100 < plan.tightSlPct!
+  return plan.ladder
+    .map((s) =>
+      s.slToR === 0 && tight
+        ? { atR: Math.max(s.atR, plan.tightBeAtR ?? 2), slToR: plan.tightBeLockR ?? 0.5, closePct: s.closePct, be: true }
+        : { ...s, be: s.slToR === 0 }
+    )
+    .sort((a, b) => a.atR - b.atR)
+}
 
 /**
  * Tiered exit (docs/entry-v2.md §4), shared by backtest, paper and live:
  *  - each ladder step fires once price reaches entry + atR × risk: close closePct % of the original
  *    size there (maker) and move the stop to slToR (0 = break-even incl. round-trip fees);
+ *    a stop tighter than tightSlPct % takes its BE step at tightBeAtR and locks tightBeLockR net
+ *    of fees (effectiveLadder);
  *  - after the last step the stop trails: every trailStepR of new best R → stop = best − trailGapR;
  *  - final TP closes whatever is left (maker); the stop closes the rest (taker + slippage).
  *  - order-flow hold (user): bars are grouped into `orderFlowTf` candles. After entry, a strong move
@@ -73,6 +98,7 @@ export type ExitPlan = Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR'> &
 export class ExitTracker {
   private readonly bull: boolean
   private readonly risk: number
+  private readonly ladder: LadderStep[]
   private sl: number
   private slReason: ExitFill['reason'] = 'sl'
   private remaining = 1
@@ -105,6 +131,7 @@ export class ExitTracker {
     this.sl = sl0
     this.last = entry
     this.ofMs = plan.orderFlowHold ? TF_MS[plan.orderFlowTf ?? '15m'] : 0
+    this.ladder = effectiveLadder(plan, entry, sl0)
   }
 
   /** Group bars into order-flow candles; a finished candle is evaluated when the next one starts. */
@@ -177,6 +204,12 @@ export class ExitTracker {
     return this.bull ? this.entry + r * this.risk : this.entry - r * this.risk
   }
 
+  /** Stop that keeps `r` R after paying both fees and the slippage (r = 0 → break-even). */
+  netLevelAt(r: number): number {
+    const be = this.levelAt(0)
+    return this.bull ? be + r * this.risk : be - r * this.risk
+  }
+
   private close(t: number, price: number, frac: number, reason: ExitFill['reason']): void {
     const f = Math.min(frac, this.remaining)
     if (f <= 0) return
@@ -217,12 +250,13 @@ export class ExitTracker {
     }
     const favR = ((bull ? b.h - this.entry : this.entry - b.l) / this.risk) || 0
     this.best = Math.max(this.best, favR)
-    const ladder = this.plan.ladder
+    const ladder = this.ladder
     while (this.step < ladder.length && this.best >= ladder[this.step]!.atR) {
       const s = ladder[this.step]!
       // while the order flow holds: only the break-even move applies (no partials, no tighter stop)
       if (s.closePct > 0 && !this.holding) this.close(b.t, this.levelAt(s.atR), s.closePct / 100, 'ladder')
-      if (!this.holding || s.slToR === 0) this.moveSl(this.levelAt(s.slToR), s.slToR === 0 ? 'be' : 'trail')
+      if (s.be) this.moveSl(this.netLevelAt(s.slToR), 'be')
+      else if (!this.holding) this.moveSl(this.levelAt(s.slToR), 'trail')
       this.step++
       if (this.done) return
     }

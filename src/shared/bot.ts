@@ -40,7 +40,7 @@ export interface BotTrade {
   /** Stop order generation (live: new algo id per move). */
   slSeq: number
   /** Exit plan frozen at entry (null for trades from before the tiered exit). */
-  exitPlan: Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> | null
+  exitPlan: (Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> & Partial<Pick<ExitConfig, 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>) | null
   /** Live view of the exit: best R so far and whether the order flow is holding the position. */
   exitState: { bestR: number; holding: boolean; holds: number } | null
   /** Equity used for sizing and the planned loss at the SL (USDT). */
@@ -104,4 +104,25 @@ export interface ConnCheck {
 export interface ConnTestResult {
   at: number
   checks: ConnCheck[]
+}
+
+export type BotOutcome = 'win' | 'be' | 'loss'
+
+/** |R| below this counts as break-even (fees / slippage around a BE stop). */
+export const BE_BAND_R = 0.15
+
+/** Net R of a closed trade (PnL ÷ planned loss at the initial SL). */
+export const tradeR = (t: Pick<BotTrade, 'pnl' | 'riskUsd'>): number | null => (t.pnl === null || !(t.riskUsd > 0) ? null : t.pnl / t.riskUsd)
+
+/**
+ * Result of a closed trade. A stop that had been moved to entry or beyond (break-even incl. fees)
+ * and closes within ±BE_BAND_R is BE, not a loss; any other trade within that band is BE too.
+ */
+export function tradeOutcome(t: Pick<BotTrade, 'status' | 'pnl' | 'riskUsd' | 'direction' | 'entry' | 'sl'>): BotOutcome | null {
+  if (t.status !== 'closed') return null
+  const r = tradeR(t)
+  if (r === null) return null
+  const stopAtBe = t.direction === 'bullish' ? t.sl >= t.entry : t.sl <= t.entry
+  if (Math.abs(r) < BE_BAND_R || (stopAtBe && r <= 0 && r > -0.3)) return 'be'
+  return r > 0 ? 'win' : 'loss'
 }
