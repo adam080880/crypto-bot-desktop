@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, ShieldCheck, Trash2 } from 'lucide-react'
-import type { AppConfig, DataConfig, RiskConfig } from '@shared/config'
+import type { AppConfig, DataConfig, NotifyConfig, RadarConfig, RiskConfig } from '@shared/config'
 import type { SecretName, SecretStatus } from '@shared/ipc'
 import { CONFLUENCE_CHOICES, ENTRY_MODELS, MODEL_LABEL } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +30,8 @@ const SECRET_LABELS: Record<SecretName, string> = {
   'binance.apiKey': 'Binance API Key',
   'binance.apiSecret': 'Binance API Secret',
   'anthropic.apiKey': 'Anthropic API Key',
-  'bls.apiKey': 'BLS API Key (opsional)'
+  'bls.apiKey': 'BLS API Key (opsional)',
+  'discord.webhookUrl': 'Discord webhook URL'
 }
 
 function SecretRow({ s, onChange }: { s: SecretStatus; onChange: (list: SecretStatus[]) => void }) {
@@ -184,6 +185,7 @@ export function Settings() {
       {config && <NewsSettings config={config} onSaved={setConfig} />}
       {config && <ClaudeSettings config={config} onSaved={setConfig} />}
       {config && <BotSettings config={config} onSaved={setConfig} />}
+      {config && <NotifySettings config={config} webhookStored={secrets.some((x) => x.name === 'discord.webhookUrl' && x.stored)} onSaved={setConfig} />}
 
       <Card>
         <CardHeader>
@@ -575,6 +577,102 @@ function ClaudeSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: A
           >
             Simpan Claude
           </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const NOTIFY_TOGGLES: { key: keyof NotifyConfig; label: string }[] = [
+  { key: 'discord', label: 'Kirim ke Discord' },
+  { key: 'radar', label: 'Radar pump' },
+  { key: 'botOrders', label: 'Order bot (entry, fill, SL/BE, close)' },
+  { key: 'botWarnings', label: 'Peringatan & error bot' },
+  { key: 'screener', label: 'Setup baru screener (bisa ramai)' }
+]
+
+function NotifySettings({ config, webhookStored, onSaved }: { config: AppConfig; webhookStored: boolean; onSaved: (c: AppConfig) => void }) {
+  const [n, setN] = useState<NotifyConfig>(config.notify)
+  const [r, setR] = useState<RadarConfig>(config.radar)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const num = (key: keyof RadarConfig, label: string, step: number, scale = 1) => (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span>{label}</span>
+      <Input
+        type="number"
+        step={step}
+        className="num h-8 w-28"
+        value={Number(((r[key] as number) * scale).toFixed(6))}
+        onChange={(e) => setR({ ...r, [key]: Number(e.target.value) / scale })}
+      />
+    </label>
+  )
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Notifikasi & radar pump</CardTitle>
+        <CardDescription>
+          Webhook Discord diisi di kartu API key di atas (Server Settings → Integrations → Webhooks → Copy URL). URL webhook itu rahasia, jangan dibagikan.
+          Radar pump cuma kirim notifikasi, bot tidak pernah entry dari radar.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {NOTIFY_TOGGLES.map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={n[key]} onChange={(e) => setN({ ...n, [key]: e.target.checked })} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="space-y-2 border-t pt-3">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} />
+            Radar pump aktif (cek tiap 15 menit, candle 1h yang baru close)
+          </label>
+          {num('volMult', 'Volume 24j ≥ N × median 30 hari', 0.5)}
+          {num('fundingMax', 'atau funding ≤ (%)', 0.01, 100)}
+          {num('fundingVolMult', '… dengan volume ≥ N × median', 0.5)}
+          {num('cooldownHours', 'Jeda notifikasi koin yang sama (jam)', 1)}
+          <p className="text-xs text-muted-foreground">
+            Lab 2 tahun (346 koin): default (volume ≥ 8×, atau funding ≤ −0,05% + volume ≥ 3×) → peluang gerak ≥ 20% dalam 24 jam
+            5,3–6,8× lebih tinggi, lebih sering pump, ±12–18 notifikasi/hari. Ambang 3× / −0,02% → ±40/hari dan lebih lemah.
+            Hanya koin yang punya histori di DB.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                onSaved(await window.api.invoke('config:update', { notify: n, radar: r }))
+                setMsg('Tersimpan')
+              } catch (e) {
+                setMsg(failMsg(e))
+              }
+            }}
+          >
+            Simpan
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!webhookStored || testing}
+            onClick={async () => {
+              setTesting(true)
+              try {
+                const res = await window.api.invoke('notify:test')
+                setMsg(res.ok ? 'Pesan tes terkirim ke Discord' : `Gagal: ${res.error ?? 'tidak diketahui'}`)
+              } finally {
+                setTesting(false)
+              }
+            }}
+          >
+            {testing ? 'Mengirim…' : 'Kirim tes'}
+          </Button>
+          {!webhookStored && <span className="text-xs text-muted-foreground">Simpan webhook dulu</span>}
           {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>
       </CardContent>

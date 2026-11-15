@@ -57,6 +57,11 @@ dites ke exchange beneran.
   `bot.trendRequireConfluence` khusus M5. OI = snapshot **5 menit**, DB cuma simpan OI 3 hari + funding 35 hari
   (`flow_oi`/`flow_funding`, `FlowSync` tiap 15 menit di :x0:40). Backtest download histori dari data.binance.vision
   saat run, tidak disimpan.
+- **Radar pump + Discord** (`docs/entry-v2.md §12`, 2026-11-15): pump tidak bisa dideteksi saat koin sepi; yang kuat =
+  volume 24j ≥ 8× median atau funding ≤ −0,05% + volume ≥ 3× (default, lift 5,3–6,8×, ±12–18 notif/hari). M6 otomatis rugi di OOS (slippage), jadi
+  radar = **notifikasi saja** (`radar`, `notify` config; webhook = secret `discord.webhookUrl`, tes di Settings). Bot tidak
+  entry dari radar. Breaker cuma 1h/4h (`smc.breakerTimeframes`), SL ≥ 1× ATR14 (`smc.minSlAtr`), M4 TP 1R (`breakerTpR`).
+  SL < 1% → BE baru di 2R kunci +0,5R bersih (`exit.tightSlPct`). BE punya kategori sendiri di halaman Bot.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
   lookback 75 hari, 8 per sisi, rebalance mingguan. Tidak pernah kirim order. Lab realistis: OOS −41% s/d +5% tergantung
   hari rebalance, DD 44–62%. Jangan dijadikan bot live tanpa forward test yang meyakinkan.

@@ -14,6 +14,8 @@ import { createTray } from './tray'
 import { z } from 'zod'
 import type { BackfillSummary } from '@shared/sync'
 import { createMainWindow, type WindowController } from './window'
+import { DiscordNotifier } from './notify/discord'
+import { botMessages, pickBotEvents, radarMessage, screenerMessage } from './notify/format'
 
 pinUserData()
 
@@ -40,6 +42,12 @@ function bootstrap(): void {
 
   const state = new AppState(db, { dbPath, version: app.getVersion() })
   const secrets = new SecretStore(db)
+  const discord = new DiscordNotifier(
+    () => secrets.get('discord.webhookUrl'),
+    () => state.getConfig().notify
+  )
+  // bot events → Discord: only events newer than the first state seen (no flood of old history)
+  let lastBotEventId: number | null = null
 
   mainWindow = createMainWindow(() => quitting)
   const main = mainWindow
@@ -58,9 +66,33 @@ function bootstrap(): void {
       newsChanged: () => sendAll('news:changed', { at: Date.now() }),
       claudeChanged: () => sendAll('claude:changed', { at: Date.now() }),
       screenerState: (s) => sendAll('screener:state', s),
-      botState: (s) => sendAll('bot:state', s),
+      botState: (s) => {
+        sendAll('bot:state', s)
+        const maxId = s.events.reduce((m, e) => Math.max(m, e.id), 0)
+        if (lastBotEventId === null) {
+          lastBotEventId = maxId
+          return
+        }
+        const fresh = pickBotEvents(s.events, lastBotEventId, state.getConfig().notify)
+        lastBotEventId = Math.max(lastBotEventId, maxId)
+        for (const m of botMessages(fresh)) discord.notify(m)
+      },
+      radarHits: (hits) => {
+        if (state.getConfig().notify.radar) discord.notify(radarMessage(hits))
+        if (!Notification.isSupported()) return
+        const n = new Notification({
+          title: `Radar pump: ${hits.length} koin`,
+          body: hits
+            .slice(0, 5)
+            .map((h) => `${h.symbol} vol ${h.volRatio}× · 24j ${(h.ret24 * 100).toFixed(1)}%`)
+            .join('\n')
+        })
+        n.on('click', () => main.show())
+        n.show()
+      },
       rotationState: (s) => sendAll('rotation:state', s),
       screenerNewSetups: (rows) => {
+        if (state.getConfig().notify.screener) discord.notify(screenerMessage(rows))
         if (!state.getConfig().screener.notify || !Notification.isSupported()) return
         const list = rows.slice(0, 5).map((r) => `${r.symbol} ${r.direction === 'bullish' ? 'LONG' : 'SHORT'} RR ${r.setup!.rr}`)
         const n = new Notification({
@@ -87,6 +119,7 @@ function bootstrap(): void {
     state,
     secrets,
     data,
+    discord,
     dbPath,
     beforeRelaunch: () => {
       quitting = true

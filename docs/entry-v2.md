@@ -284,3 +284,38 @@ top 60 berdasarkan volume 30 hari *saat itu*, umur ≥ 60 hari. Fee 0,07% per si
   (`rankUniverse`).
 - State di setting `rotation_state`. IPC `rotation:get` / `rotation:command` (start/stop/reset/refresh), event
   `rotation:state`. Parameter dikunci selama forward test berjalan.
+
+## 12. Radar pump + notifikasi Discord (2026-11-15)
+
+**Event study** (346 koin futures yang pernah masuk top volume, candle 1h 2 tahun, OOS 8 bulan terakhir).
+Target: gerak ≥ 20% dalam 24 jam. Peluang dasar 4,3% per jam per koin.
+
+| Kondisi saat jam close | Lift IS / OOS | Catatan |
+|---|---|---|
+| Volume 24j ≥ 3× median 30 hari | 3,6× / 4,3× | pump 2–2,5× lebih sering dari dump |
+| Funding ≤ −0,02% + volume ≥ 2× | 3,6× / 4,6× | ±3× lebih sering pump (short squeeze) |
+| Funding ≤ −0,05% | 2,8× / 3,6× | |
+| Kompresi range (range 24j ≤ 0,55× median) | 0,5× / 0,5× | koin sepi justru jarang meledak |
+| Koin paling likuid (top 10%) | 0,8× / 0,3× | |
+
+Pump tidak bisa dideteksi saat koin masih sepi. Yang terbaca adalah jam-jam awal setelah gerakan mulai.
+
+**M6 otomatis (ditolak):** radar → tembus box 24 jam → SL 3× ATR → trailing, fee + slippage micin (entry 0,1%, SL 0,3%).
+Long-only trailing lebar: IS +0,15R, OOS −0,11R. Funding + volume: IS +0,12R, OOS −0,03R. Tanpa 5 trade terbaik semua
+negatif (ada trade +275R yang menopang). Flip setelah tembus palsu tidak menambah hasil. Tanpa slippage hasilnya cuma ±0.
+
+**Ambang default** (frekuensi dihitung dengan jeda 24 jam per koin):
+
+| Ambang | Lift IS / OOS | Notifikasi/hari (IS / OOS) |
+|---|---|---|
+| vol ≥ 3× atau funding ≤ −0,02% + vol ≥ 2× | 3,5× / 4,2× | 27 / 42 |
+| vol ≥ 5× | 4,8× / 5,8× | 14 / 24 |
+| **vol ≥ 8× atau funding ≤ −0,05% + vol ≥ 3× (default)** | **5,3× / 6,8×** | **12 / 18** |
+| funding ≤ −0,05% + vol ≥ 3× saja | 4,6× / 5,5× | 6 / 7 |
+
+**Keputusan user:** radar jadi **notifikasi saja** (Discord + desktop), TP manual. Bot tidak pernah entry dari radar.
+- `src/main/radar/radar.ts` (`radarCheck`, murni) + `radarService.ts` (data worker, cron :02:30/:17:30/…, cuma candle 1h
+  terakhir yang baru close, jeda `radar.cooldownHours` per koin, state di setting `radar_state`).
+- Notifier `src/main/notify/` di main (secret `discord.webhookUrl`, antrian ±1 dtk, 429 → retry sekali). Event bot level
+  `order`/`warn`/`error` diteruskan (`notify.botOrders` / `notify.botWarnings`), setup screener opsional (`notify.screener`).
+- Rencana berikutnya: tag `anomaly` buat SMC (dicek di Backtest dulu), lalu bot jaga SL posisi manual M6 (butuh izin).

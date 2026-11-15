@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   botConfigSchema,
   exitConfigSchema,
+  radarConfigSchema,
   claudeConfigSchema, dataConfigSchema, newsConfigSchema, riskConfigSchema, screenerConfigSchema, smcConfigSchema } from '@shared/config'
 import { BotService } from '../bot/botService'
 import { ClaudeAnalyst } from '../claude/analyst'
@@ -21,6 +22,7 @@ import { installCloudflareDns } from '../net/dns'
 import { AutoSync } from '../sync/autoSync'
 import { FlowSync } from '../flow/flowSync'
 import { RotationService } from '../rotation/rotationService'
+import { RadarService } from '../radar/radarService'
 import { BinanceTradeClient } from '../bot/binanceTrade'
 import { Backfiller } from '../sync/backfill'
 import { estimateFullBackfill } from '../sync/estimate'
@@ -55,6 +57,7 @@ let config: ServiceConfig = {
   screener: screenerConfigSchema.parse({}),
   bot: botConfigSchema.parse({}),
   exit: exitConfigSchema.parse({}),
+  radar: radarConfigSchema.parse({}),
   profiles: {},
   risk: riskConfigSchema.parse({}),
   killSwitch: false,
@@ -87,6 +90,15 @@ const flowSync = new FlowSync(db, {
 // momentum rotation: paper forward test only, never orders (docs/entry-v2.md §11)
 const rotation = new RotationService(db, { market: new BinanceTradeClient(), getData: () => config.data, canRun: () => manual === null })
 rotation.on('state', (state) => send({ type: 'rotation-state', state }))
+
+// pump radar: alerts only, never orders (docs/entry-v2.md §12)
+const radar = new RadarService(db, {
+  getConfig: () => config.radar,
+  symbols: () => backfiller.trackedSymbols([...config.watchlist, ...positions]),
+  canRun: () => manual === null
+})
+radar.on('state', (state) => send({ type: 'radar-state', state }))
+radar.on('hits', (hits) => send({ type: 'radar-hits', hits }))
 
 const news = new NewsService(db, {
   getConfig: () => config.news,
@@ -210,6 +222,8 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       flowSync.start()
       rotation.start()
       send({ type: 'rotation-state', state: rotation.getState() })
+      radar.start()
+      send({ type: 'radar-state', state: radar.getState() })
       news.start()
       scheduleInterval()
       send({ type: 'claude-state', state: analyst.getState() })
@@ -300,6 +314,7 @@ process.on('exit', () => {
   autoSync.dispose()
   flowSync.dispose()
   rotation.dispose()
+  radar.dispose()
   news.dispose()
   screener.dispose()
   bot.dispose()

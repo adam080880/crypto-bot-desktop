@@ -7,12 +7,13 @@ import type { BotState, ConnTestResult } from './bot'
 import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
 import type { ScreenerState } from './screener'
 import type { RotationCommand, RotationState } from './rotation'
+import type { RadarState } from './radar'
 import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
 
 /** Names of secrets that may be stored via safeStorage. */
-export const SECRET_NAMES = ['binance.apiKey', 'binance.apiSecret', 'anthropic.apiKey', 'bls.apiKey'] as const
+export const SECRET_NAMES = ['binance.apiKey', 'binance.apiSecret', 'anthropic.apiKey', 'bls.apiKey', 'discord.webhookUrl'] as const
 export type SecretName = (typeof SECRET_NAMES)[number]
 
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected'
@@ -74,6 +75,10 @@ export interface IpcInvokeMap {
   'secrets:set': { req: { name: SecretName; value: string }; res: SecretStatus[] }
   'secrets:delete': { req: { name: SecretName }; res: SecretStatus[] }
   'secrets:encryptionAvailable': { req: void; res: boolean }
+  /** Send a test message to the stored Discord webhook. */
+  'notify:test': { req: void; res: { ok: boolean; error?: string } }
+  /** Pump radar alerts of the last days (newest first). */
+  'radar:get': { req: void; res: RadarState }
   'sync:getState': { req: void; res: SyncUiState }
   'sync:start': { req: SyncStartRequest; res: SyncUiState }
   'sync:cancel': { req: void; res: void }
@@ -166,6 +171,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'secrets:set',
   'secrets:delete',
   'secrets:encryptionAvailable',
+  'notify:test',
+  'radar:get',
   'sync:getState',
   'sync:start',
   'sync:cancel',

@@ -19,6 +19,8 @@ import { SmcService } from '../strategy/service'
 import { NewsRepo } from '../news/repo'
 import { ClaudeRepo } from '../claude/repo'
 import { testBinanceConnection } from '../net/binanceCheck'
+import type { DiscordNotifier } from '../notify/discord'
+import { isDiscordWebhook } from '../notify/format'
 
 const log = logger('ipc')
 
@@ -35,6 +37,7 @@ export function registerIpcHandlers(deps: {
   state: AppState
   secrets: SecretStore
   data: DataController
+  discord: DiscordNotifier
   isTrustedSender: (wc: WebContents) => boolean
   dbPath: string
   beforeRelaunch: () => void
@@ -108,6 +111,7 @@ export function registerIpcHandlers(deps: {
       .object({ name: secretNameSchema, value: z.string().trim().min(1).max(512) })
       .strict()
       .parse(req)
+    if (name === 'discord.webhookUrl' && !isDiscordWebhook(value)) throw new Error('Bukan URL webhook Discord (https://discord.com/api/webhooks/…)')
     secrets.set(name, value)
     data.pushConfig()
     return secrets.list()
@@ -206,6 +210,8 @@ export function registerIpcHandlers(deps: {
   handle('screener:get', () => data.getScreener())
   handle('screener:run', () => data.screenerRun())
   handle('rotation:get', () => data.getRotation())
+  handle('radar:get', () => data.getRadar())
+  handle('notify:test', () => deps.discord.send({ content: '✅ Tes notifikasi dari SMC Trading Assistant. Webhook tersambung.' }))
   handle('rotation:command', (req) => data.rotationCommand(rotationCommandSchema.parse(req)))
   handle('storage:get', () => storageInfo(deps.dbPath))
   handle('storage:chooseDir', async (_req, event) => {

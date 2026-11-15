@@ -5,6 +5,7 @@ import type { AppConfig } from '@shared/config'
 import type { LiveCandleEvent } from '@shared/live'
 import type { ScreenerRow, ScreenerState } from '@shared/screener'
 import type { RotationCommand, RotationState } from '@shared/rotation'
+import type { RadarHit, RadarState } from '@shared/radar'
 import type { BotState } from '@shared/bot'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from '@shared/sync'
 import type { AppStatus, SyncStartRequest, SyncUiState } from '@shared/ipc'
@@ -30,6 +31,7 @@ export interface DataBroadcast {
   screenerNewSetups: (rows: ScreenerRow[]) => void
   botState: (s: BotState) => void
   rotationState: (s: RotationState) => void
+  radarHits: (hits: RadarHit[]) => void
 }
 
 /**
@@ -46,6 +48,7 @@ export class DataController {
   private seenSetups: Set<string> | null = null
   private bot: BotState | null = null
   private rotation: RotationState | null = null
+  private radar: RadarState | null = null
   private ui: SyncUiState = { running: false, progress: null, lastSummary: null, lastError: null }
   private pendingEstimate: { resolve: (e: BackfillEstimate) => void; reject: (e: Error) => void } | null = null
   private estimatePromise: Promise<BackfillEstimate> | null = null
@@ -82,6 +85,7 @@ export class DataController {
       screener: c.screener,
       bot: c.bot,
       exit: c.exit,
+      radar: c.radar,
       profiles: this.getProfiles(),
       risk: c.risk,
       killSwitch: this.state.isHalted(),
@@ -216,6 +220,12 @@ export class DataController {
         this.rotation = m.state
         this.out.rotationState(m.state)
         return
+      case 'radar-state':
+        this.radar = m.state
+        return
+      case 'radar-hits':
+        this.out.radarHits(m.hits)
+        return
     }
   }
 
@@ -302,6 +312,10 @@ export class DataController {
 
   getRotation(): RotationState | null {
     return this.rotation
+  }
+
+  getRadar(): RadarState {
+    return this.radar ?? { lastRunAt: null, scanned: 0, hits: [] }
   }
 
   rotationCommand(command: RotationCommand): void {

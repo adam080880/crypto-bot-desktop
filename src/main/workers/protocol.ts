@@ -1,4 +1,5 @@
-import type { BotConfig, ClaudeConfig, DataConfig, ExitConfig, NewsConfig, RiskConfig, ScreenerConfig, SmcConfig } from '@shared/config'
+import type { BotConfig, ClaudeConfig, DataConfig, ExitConfig, NewsConfig, RadarConfig, RiskConfig, ScreenerConfig, SmcConfig } from '@shared/config'
+import type { RadarHit, RadarState } from '@shared/radar'
 import type { BotState } from '@shared/bot'
 import type { CoinProfile } from '@shared/backtest'
 import type { ClaudeState } from '@shared/claude'
@@ -27,6 +28,7 @@ export interface ServiceConfig {
   screener: ScreenerConfig
   bot: BotConfig
   exit: ExitConfig
+  radar: RadarConfig
   /** Coin profiles from the backtest Meta table (symbol → allowed models / POIs / exit plan). */
   profiles: Record<string, CoinProfile>
   risk: RiskConfig
@@ -76,3 +78,5 @@ export type FromWorker =
   | { type: 'screener-state'; state: ScreenerState }
   | { type: 'rotation-state'; state: RotationState }
   | { type: 'bot-state'; state: BotState }
+  | { type: 'radar-state'; state: RadarState }
+  | { type: 'radar-hits'; hits: RadarHit[] }

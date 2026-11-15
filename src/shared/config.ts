@@ -343,6 +343,38 @@ export const botConfigSchema = z.object({
 })
 export type BotConfig = z.infer<typeof botConfigSchema>
 
+/**
+ * Pump radar (docs/entry-v2.md §12): notify only, never orders. Lab 2y, 346 coins: a 24h quote
+ * volume ≥ 8× its 30-day median, or funding ≤ −0,05 % with volume ≥ 3×, gives a ≥ 20 % move within
+ * 24h 5,3–6,8× more often than average (±12–18 alerts/day over 346 coins, mostly pumps). Looser
+ * thresholds (3× / −0,02 %) are weaker and ~40 alerts/day. Calm/compressed coins move less, not more.
+ * As an automatic model it lost money out of sample (slippage), so it only alerts.
+ */
+export const radarConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  volMult: z.number().min(1).max(50).default(8),
+  /** Funding (fraction per settlement, −0.0002 = −0,02 %) at or below this … */
+  fundingMax: z.number().min(-0.05).max(0).default(-0.0005),
+  /** … together with volume ≥ this multiple. */
+  fundingVolMult: z.number().min(1).max(50).default(3),
+  /** No new alert for the same coin within N hours. */
+  cooldownHours: z.number().int().min(1).max(168).default(24)
+})
+export type RadarConfig = z.infer<typeof radarConfigSchema>
+
+/** Discord webhook notifications (URL is a secret: discord.webhookUrl). */
+export const notifyConfigSchema = z.object({
+  discord: z.boolean().default(true),
+  radar: z.boolean().default(true),
+  /** Bot order events: entry placed, filled, SL moved, closed. */
+  botOrders: z.boolean().default(true),
+  /** Bot warnings and errors. */
+  botWarnings: z.boolean().default(true),
+  /** New screener setups from the automatic scan. */
+  screener: z.boolean().default(false)
+})
+export type NotifyConfig = z.infer<typeof notifyConfigSchema>
+
 export const appConfigSchema = z.object({
   mode: tradingModeSchema.default('paper'),
   /** ccxt exchange id; Binance USDT-M perpetual by default. */
@@ -356,7 +388,9 @@ export const appConfigSchema = z.object({
   claude: claudeConfigSchema.default(claudeConfigSchema.parse({})),
   screener: screenerConfigSchema.default(screenerConfigSchema.parse({})),
   bot: botConfigSchema.default(botConfigSchema.parse({})),
-  exit: exitConfigSchema.default(exitConfigSchema.parse({}))
+  exit: exitConfigSchema.default(exitConfigSchema.parse({})),
+  radar: radarConfigSchema.default(radarConfigSchema.parse({})),
+  notify: notifyConfigSchema.default(notifyConfigSchema.parse({}))
 })
 
 export type RiskConfig = z.infer<typeof riskConfigSchema>
@@ -376,7 +410,7 @@ export function trendExit(smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailSte
 
 /** Partial update accepted from the UI; risk fields may be patched individually. */
 export const configPatchSchema = appConfigSchema
-  .omit({ risk: true, data: true, smc: true, news: true, claude: true, screener: true, bot: true, exit: true })
+  .omit({ risk: true, data: true, smc: true, news: true, claude: true, screener: true, bot: true, exit: true, radar: true, notify: true })
   .partial()
   .extend({
     risk: riskConfigSchema.omit({ requireStopLoss: true }).partial().strict().optional(),
@@ -386,7 +420,9 @@ export const configPatchSchema = appConfigSchema
     claude: claudeConfigSchema.partial().strict().optional(),
     screener: screenerConfigSchema.partial().strict().optional(),
     bot: botConfigSchema.omit({ live: true }).partial().strict().optional(),
-    exit: exitConfigSchema.partial().strict().optional()
+    exit: exitConfigSchema.partial().strict().optional(),
+    radar: radarConfigSchema.partial().strict().optional(),
+    notify: notifyConfigSchema.partial().strict().optional()
   })
   .strict()
 export type ConfigPatch = z.infer<typeof configPatchSchema>
