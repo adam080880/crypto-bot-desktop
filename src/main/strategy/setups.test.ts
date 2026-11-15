@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeSmc } from './analyze'
+import { atrSeries } from './atr'
 import { detectSetups, trendKnownAt } from './setups'
 import { at, bars, cfg } from './testkit'
 
@@ -46,6 +47,16 @@ describe('setups: POI hit → OB valid (§8)', () => {
     expect(s.status).toBe('win')
     expect(s.statusT).toBe(at(19))
     expect(s.confluence).toContain('prevOpposite')
+  })
+
+  it('widens a stop tighter than minSlAtr × ATR14 (entry unchanged)', () => {
+    const c = cfg({ minRR: 0.5, models: ['M0'], minSlAtr: 3 })
+    const entry = analyzeSmc(bars(ROWS), '15m', c)
+    const s = detectSetups({ symbol: 'TESTUSDT', entry, poiAnalyses: [], cfg: c }).find((x) => x.child.t === at(14))!
+    expect(s.entry).toBe(8.4)
+    expect(s.sl).toBeLessThan(7.95 * 0.999)
+    const atr = atrSeries(entry.candles, 14)[entry.candles.findIndex((k) => k.t === at(16))]!
+    expect(s.entry - s.sl).toBeCloseTo(3 * atr, 6)
   })
 
   it('skips the setup when RR is below the minimum', () => {

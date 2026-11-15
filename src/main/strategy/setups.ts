@@ -1,5 +1,5 @@
 import type { Candle } from '@shared/candles'
-import type { ExitConfig, SmcConfig } from '@shared/config'
+import { breakerExit, type ExitConfig, type SmcConfig } from '@shared/config'
 import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Setup, SetupStatus } from '@shared/smc'
 import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -204,14 +204,22 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M4')) drafts.push(...modelM4(input, all))
   if (models.has('M5')) drafts.push(...modelM5(input, all))
 
+  const atr = cfg.minSlAtr > 0 ? atrSeries(c, 14) : null
   const best = new Map<string, Setup>()
-  for (const d of drafts) {
+  for (const d0 of drafts) {
+    const d = atr && d0.model !== 'M5' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
     const s = finalize(input, all, d)
     if (!s) continue
     const prev = best.get(s.id)
     if (!prev || s.score > prev.score) best.set(s.id, s)
   }
   return [...best.values()].sort((a, b) => a.createdT - b.createdT || a.id.localeCompare(b.id))
+}
+
+/** SL at least `min` away from the entry (ATR floor); the invalidation level stays where it was. */
+function widenSl(d: Draft, min: number): Draft {
+  if (!(Math.abs(d.entry - d.sl) < min)) return d
+  return { ...d, sl: d.dir === 'bullish' ? d.entry - min : d.entry + min }
 }
 
 /** Parent POIs allowed as the reason of a trade. */
@@ -513,7 +521,7 @@ function modelM2(input: SetupInput, all: readonly SmcAnalysisFull[], pois: reado
 
 function modelM4({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): Draft[] {
   const c = entry.candles
-  const tfs = new Set<Timeframe>([entry.timeframe, ...cfg.poiTimeframes])
+  const tfs = new Set<Timeframe>(cfg.breakerTimeframes ?? [entry.timeframe, ...cfg.poiTimeframes])
   const buf = cfg.slBufferPct / 100
   const out: Draft[] = []
   for (const a of all) {
@@ -708,7 +716,7 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
   const tpLiquidity = d.model === 'M5' ? null : nearestTarget(all, bull, d.entry, known)
-  const exit = d.model === 'M5' ? { tpMode: 'trail' as const, tpR: 20 } : (input.exit ?? { tpMode: 'liquidity', tpR: 5 })
+  const exit = d.model === 'M5' ? { tpMode: 'trail' as const, tpR: 20 } : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk

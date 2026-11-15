@@ -448,7 +448,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       const live = this.bars.get(c.symbol)
       const row = live ? { ...c, price: live.last } : c
       const profile = this.deps.getProfiles?.()[c.symbol] ?? null
-      const sg = setupGate(row, { bot, entryTf: smc.entryTimeframe, universe: this.universe, now, exit, profile })
+      const sg = setupGate(row, { bot, entryTf: smc.entryTimeframe, universe: this.universe, now, exit, profile, smc })
       if (sg) {
         // only log setups that were plausible for the bot (in universe, a model it trades)
         if (this.universe.has(c.symbol) && ((profile?.models ?? bot.models) as string[]).includes(c.setup.model)) this.skip(key, c.symbol, sg)

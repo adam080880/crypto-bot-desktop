@@ -1,5 +1,5 @@
 import type { CoinProfile } from '@shared/backtest'
-import { trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
+import { breakerExit, trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { MODEL_LABEL, poiConcept, setupPoiLabel } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -29,9 +29,11 @@ export const cancelLevel = (s: Pick<ScreenerSetup, 'entry' | 'sl' | 'tp' | 'tpLi
  * Exit plan for a setup: the coin profile's plan (chosen in the backtest Meta table) wins; without one,
  * M5 (trend) uses its own trailing-only plan and the SMC models use the global `exit` config.
  */
-export function exitFor<E extends ExitConfig>(model: string, base: E, profile: CoinProfile | null | undefined, smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): E {
+export function exitFor<E extends ExitConfig>(model: string, base: E, profile: CoinProfile | null | undefined, smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'breakerTpR'>): E {
   if (profile) return { ...base, ...profile.plan.exit }
   if (model === 'M5') return { ...base, ...trendExit(smc) }
+  const bx = model === 'M4' ? breakerExit(smc) : null
+  if (bx) return { ...base, ...bx }
   return base
 }
 
@@ -44,7 +46,7 @@ export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.cre
  */
 export function setupGate(
   c: Candidate,
-  o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number; exit?: Pick<ExitConfig, 'tpMode'>; profile?: CoinProfile | null }
+  o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number; exit?: Pick<ExitConfig, 'tpMode'> & Partial<Pick<ExitConfig, 'tpR'>>; profile?: CoinProfile | null; smc?: Pick<SmcConfig, 'breakerTpR'> }
 ): string | null {
   const s = c.setup
   const bull = c.direction === 'bullish'
@@ -67,7 +69,8 @@ export function setupGate(
   if (s.status !== 'pending') return 'entry sudah kena sebelum bot sempat pasang limit'
   const age = o.now - knownAt(c, o.entryTf)
   if (age > o.bot.maxSetupAgeMin * 60_000) return `setup sudah ${Math.round(age / 60_000)} menit (maks ${o.bot.maxSetupAgeMin})`
-  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' ? { tpMode: 'trail' } : (o.exit ?? { tpMode: 'liquidity' }))
+  const bx = s.model === 'M4' && o.smc ? breakerExit(o.smc) : null
+  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' ? { tpMode: 'trail' } : (bx ?? o.exit ?? { tpMode: 'liquidity' }))
   if (bull ? c.price >= tp : c.price <= tp) return 'harga sudah sampai TP (lewat TP)'
   if (bull ? c.price <= s.entry : c.price >= s.entry) return 'harga sudah di/lewat entry'
   return null

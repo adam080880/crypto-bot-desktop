@@ -20,5 +20,5 @@ export function path(closes: number[], wick = 0.1, start = T0): Candle[] {
   return out
 }
 
-export const cfg = (p: Partial<SmcConfig> = {}): SmcConfig => smcConfigSchema.parse({ pivot: 2, ...p })
+export const cfg = (p: Partial<SmcConfig> = {}): SmcConfig => smcConfigSchema.parse({ pivot: 2, minSlAtr: 0, ...p })
 export const at = (i: number): number => T0 + i * STEP

@@ -61,6 +61,15 @@ export const smcConfigSchema = z.object({
   oclPlainTimeframes: z.array(z.enum(['1m', '5m', '15m', '1h', '4h', '1d', '1w'])).default(['1d', '1w']),
   /** §3 Q7: SL buffer beyond the wick, % of price. */
   slBufferPct: z.number().min(0).max(5).default(0.1),
+  /**
+   * SL at least N × ATR(14) of the entry TF (lab 2y: tight stops sit inside the noise; 1× ATR adds
+   * ±0,05–0,1R per trade). Applies to every SMC model, not M5 (own ATR stop). 0 = off.
+   */
+  minSlAtr: z.number().min(0).max(5).default(1),
+  /** M4: breakers only from these timeframes (lab 2y: 15m −0,25R/trade, 1h/4h positive). */
+  breakerTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).default(['1h', '4h']),
+  /** M4 exit: fixed TP at N R without ladder (lab: 1h TP 1R +0,07R IS / +0,08R OOS). 0 = global exit. */
+  breakerTpR: z.number().min(0).max(20).default(1),
   /** §7: mountain 2's body must break mountain 1's wick ("biasanya"; user-confirmed). */
   qmRequireBodyBreak: z.boolean().default(true),
   /** §8 Q14 */
@@ -356,6 +365,11 @@ export type AppConfig = z.infer<typeof appConfigSchema>
 export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Exit plan of M5 (trend): no break-even step, no partials, no TP — trailing only (best − gapR every stepR). */
+/** Exit of M4 (breaker) when smc.breakerTpR > 0: fixed TP, no ladder, no trailing. */
+export function breakerExit(smc: Pick<SmcConfig, 'breakerTpR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold'> | null {
+  return smc.breakerTpR > 0 ? { tpMode: 'fixedR', tpR: smc.breakerTpR, ladder: [], trailStepR: 0, orderFlowHold: false } : null
+}
+
 export function trendExit(smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> {
   return { tpMode: 'trail', tpR: 20, ladder: [], trailStepR: smc.trendTrailStepR, trailGapR: smc.trendTrailGapR, orderFlowHold: false, orderFlowTf: '15m', orderFlowSignals: ['fvg', 'wick'], orderFlowWickRatio: 0.5 }
 }
