@@ -38,7 +38,8 @@ const CONF_CHIPS: { key: Confluence; label: string }[] = [
   { key: 'oiConfirm', label: 'OI naik searah' },
   { key: 'oiFlush', label: 'OI flush 4j' },
   { key: 'fundingContra', label: 'funding lawan crowd' },
-  { key: 'oiHold', label: 'OI 15m tidak turun' }
+  { key: 'oiHold', label: 'OI 15m tidak turun' },
+  { key: 'anomaly', label: 'anomali (vol ≥ 3×)' }
 ]
 const GROUPS: { key: string; label: string; of: (s: BtSetup) => string }[] = [
   { key: 'model', label: 'Model', of: (s) => s.model },
@@ -573,7 +574,7 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
       savedAt: Date.now(),
       models: [row.model],
       pois: [row.poi],
-      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : filter.conf,
+      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' ? [] : filter.conf,
       minScore: filter.minScore,
       plan: r.plans[row.plan]!,
       stats: { trades: row.all.trades, winrate: row.all.winrate, avgR: row.all.avgR, oosTrades: row.oos.trades, oosAvgR: row.oos.avgR }

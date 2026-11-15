@@ -143,6 +143,30 @@ export const smcConfigSchema = z.object({
   trendTrailGapR: z.number().min(0.5).max(10).default(1),
   trendTrailStepR: z.number().min(0.05).max(5).default(0.25),
 
+  // ---- M6 radar pump (docs/entry-v2.md §12–13): radar hit → 1h close beyond the 24h box ----
+  /** Radar: 24h quote volume ≥ N × median of the previous 30 days … */
+  m6VolMult: z.number().min(1).max(50).default(8),
+  /**
+   * Tag `anomaly` (any model): 24h volume ≥ N × 30-day median at the time the setup is known. Lab
+   * 20 alts 2y: setups on awake coins did better, not worse (M5 +0,21–0,37R vs +0,01R; M4, M1 too).
+   */
+  anomalyVolMult: z.number().min(1).max(50).default(3),
+  /** … or funding ≤ this (fraction per settlement) with volume ≥ m6FundingVolMult. */
+  m6FundingMax: z.number().min(-0.05).max(0).default(-0.0005),
+  m6FundingVolMult: z.number().min(1).max(50).default(3),
+  /** Wait at most N hours after the radar hit for the breakout close. */
+  m6WatchHours: z.number().int().min(1).max(240).default(72),
+  /** No new radar hit for the same coin within N hours after a hit. */
+  m6CooldownHours: z.number().int().min(0).max(720).default(72),
+  /** SL = entry ∓ N × ATR(24) of 1h (= 1R). */
+  m6AtrMult: z.number().min(0.5).max(10).default(3),
+  m6LongOnly: z.boolean().default(true),
+  /** Pending limit at the breakout close expires after N entry-TF candles. */
+  m6ExpiryCandles: z.number().int().min(1).max(500).default(16),
+  /** Exit: no TP (manual), no break-even; every m6TrailStepR of new best R the SL goes to best − m6TrailGapR. */
+  m6TrailGapR: z.number().min(0.5).max(20).default(2),
+  m6TrailStepR: z.number().min(0.05).max(5).default(0.25),
+
   // ---- order flow from futures positioning (open interest / funding), docs/entry-v2.md §10 ----
   /** oiFlush: open interest down at least this % over the last 4h. */
   flowOiFlushPct: z.number().min(0).max(50).default(1),
@@ -316,7 +340,7 @@ export const botConfigSchema = z.object({
   /** Require a fresh Claude analysis (bias + confidence) before entering. Off = pure ICT/SMC math (user). */
   requireClaude: z.boolean().default(false),
   /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
-  models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5']),
+  models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5', 'M6']),
   /** Every one of these confluences must be present on SMC setups (M0–M4). Backtest: FVG in the leg + trend of the POI TF. */
   requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent']),
   /** Same for the M5 trend model. Lab: OI rising with the move = +0,19R vs −0,05R without (docs/entry-v2.md §10). */
@@ -399,6 +423,11 @@ export type AppConfig = z.infer<typeof appConfigSchema>
 export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 
 /** Exit plan of M5 (trend): no break-even step, no partials, no TP — trailing only (best − gapR every stepR). */
+/** Exit of M6 (radar pump): no TP (the user takes profit by hand), no break-even, trailing stop only. */
+export function m6Exit(smc: Pick<SmcConfig, 'm6TrailGapR' | 'm6TrailStepR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold'> {
+  return { tpMode: 'trail', tpR: 50, ladder: [], trailStepR: smc.m6TrailStepR, trailGapR: smc.m6TrailGapR, orderFlowHold: false }
+}
+
 /** Exit of M4 (breaker) when smc.breakerTpR > 0: fixed TP, no ladder, no trailing. */
 export function breakerExit(smc: Pick<SmcConfig, 'breakerTpR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold'> | null {
   return smc.breakerTpR > 0 ? { tpMode: 'fixedR', tpR: smc.breakerTpR, ladder: [], trailStepR: 0, orderFlowHold: false } : null

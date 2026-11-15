@@ -52,3 +52,23 @@ export function radarCheck(symbol: string, c: readonly Candle[], funding: readon
     price: c[last]!.c
   }
 }
+
+/**
+ * 24h quote volume (volume × close) ÷ median of the 30 previous 24h windows, per closed 1h candle
+ * (NaN before 31 days of data). Index based, like the lab; used by M6 over the whole history.
+ */
+export function volRatioSeries(c: readonly Candle[]): number[] {
+  const n = c.length
+  const pre = new Float64Array(n + 1)
+  for (let i = 0; i < n; i++) pre[i + 1] = pre[i]! + c[i]!.v * c[i]!.c
+  const sum24 = (end: number): number => pre[end + 1]! - pre[end - 23]!
+  const out = new Array<number>(n).fill(NaN)
+  const past = new Array<number>(30)
+  for (let i = RADAR_BARS - 1; i < n; i++) {
+    for (let k = 1; k <= 30; k++) past[k - 1] = sum24(i - 24 * k)
+    past.sort((a, b) => a - b)
+    const med = (past[14]! + past[15]!) / 2
+    out[i] = med > 0 ? sum24(i) / med : NaN
+  }
+  return out
+}

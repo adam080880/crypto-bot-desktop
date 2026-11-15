@@ -20,7 +20,7 @@ const BTC_CACHE_MS = 30_000
 
 /** Timeframes analysed for setups: entry + POI timeframes (+1d for origin checks, + the M5 trend TF). */
 export function setupTimeframes(cfg: SmcConfig): Timeframe[] {
-  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe])]
+  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe, ...(cfg.models.includes('M6') ? (['1h'] as const) : [])])]
 }
 
 export class SmcService {

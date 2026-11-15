@@ -1,5 +1,5 @@
 import type { Candle } from '@shared/candles'
-import { trendExit, type ExitConfig, type SmcConfig } from '@shared/config'
+import { m6Exit, trendExit, type ExitConfig, type SmcConfig } from '@shared/config'
 import type { Setup } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 import { ExitTracker, type ExitFees } from '../strategy/exit'
@@ -26,7 +26,7 @@ const plain = (key: string, label: string, tpMode: ExitConfig['tpMode'], tpR: nu
 })
 
 /** Fixed-R targets, the old liquidity TP, and the user's tiered plan (with and without a final TP). */
-export function defaultPlans(user: ExitConfig, smc?: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR'>): ExitPlanDef[] {
+export function defaultPlans(user: ExitConfig, smc?: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'm6TrailGapR' | 'm6TrailStepR'>): ExitPlanDef[] {
   const tiered = { tpR: user.tpR, ladder: user.ladder, trailStepR: user.trailStepR, trailGapR: user.trailGapR, orderFlowTf: user.orderFlowTf, orderFlowSignals: user.orderFlowSignals, orderFlowWickRatio: user.orderFlowWickRatio, tightSlPct: user.tightSlPct, tightBeAtR: user.tightBeAtR, tightBeLockR: user.tightBeLockR }
   return [
     plain('r1', 'TP 1R', 'fixedR', 1),
@@ -41,7 +41,9 @@ export function defaultPlans(user: ExitConfig, smc?: Pick<SmcConfig, 'trendTrail
     { ...tiered, key: 'trail', label: 'Bertingkat, trailing tanpa TP', tpMode: 'trail', orderFlowHold: false },
     { ...tiered, key: 'trailOF', label: 'Bertingkat + order flow, tanpa TP', tpMode: 'trail', orderFlowHold: true },
     // M5's own exit (also run on the SMC models for comparison)
-    ...(smc ? [{ ...trendExit(smc), key: 'trend', label: `Trailing trend (gap ${smc.trendTrailGapR}R, tanpa BE/TP)` }] : [])
+    ...(smc ? [{ ...trendExit(smc), key: 'trend', label: `Trailing trend (gap ${smc.trendTrailGapR}R, tanpa BE/TP)` }] : []),
+    // M6's own exit (no TP: in the backtest the trailing stop is the only exit; by hand it may differ)
+    ...(smc ? [{ ...plain('m6', '', 'trail', 50), ...m6Exit(smc), key: 'm6', label: `M6: trailing ${smc.m6TrailGapR}R, tanpa TP (TP manual)` }] : [])
   ]
 }
 

@@ -157,6 +157,7 @@ export const CONCEPT_LABEL: Record<PoiConcept, string> = { ...POI_LABEL, BREAKER
 export function setupPath(model: string, poiKind: PoiKind, poiTf: string, childKind: string, childTf: string): string {
   if (model === 'M4') return `Breaker ${childTf}`
   if (model === 'M5') return `Breakout ${poiTf}`
+  if (model === 'M6') return `Radar pump → breakout ${childTf}`
   return `${POI_LABEL[poiKind]} ${poiTf} → ${childKind === 'BREAKER' ? 'Breaker' : childKind} ${childTf}`
 }
 
@@ -178,8 +179,10 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *  M4  breaker: OB broken after a liquidity sweep → limit on the retest (+FVG overlap = unicorn)
  *  M5  trend following (not SMC): 4h close beyond the N-candle Donchian channel, on the EMA side →
  *      limit at that close, SL k × ATR, exit by trailing only (no break-even, no TP). Lab 2y BTC/ETH/SOL: +0,15R.
+ *  M6  radar pump (not SMC): 24h volume ≥ N × median or negative funding + volume → 1h close beyond the
+ *      24h box → limit at that close, SL k × ATR, no TP (user takes profit by hand), trailing stop.
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
@@ -187,7 +190,8 @@ export const MODEL_LABEL: Record<EntryModel, string> = {
   M2a: 'M2a liquidity grab (limit di OB)',
   M2b: 'M2b liquidity grab + CHoCH',
   M4: 'M4 breaker',
-  M5: 'M5 trend breakout 4h'
+  M5: 'M5 trend breakout 4h',
+  M6: 'M6 radar pump (TP manual)'
 }
 
 export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT'
@@ -219,6 +223,8 @@ export type Confluence =
   | 'fundingContra'
   /** Open interest did not fall more than smc.flowOiFadePct in the last 15 min (no short-covering breakout). */
   | 'oiHold'
+  /** Coin "awake": 24h volume ≥ smc.anomalyVolMult × its 30-day median (1h). Filter tag, no score. */
+  | 'anomaly'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -238,7 +244,8 @@ export const REQUIRABLE_CONFLUENCES = [
   'oiConfirm',
   'oiFlush',
   'fundingContra',
-  'oiHold'
+  'oiHold',
+  'anomaly'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -259,7 +266,8 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'oiConfirm', label: 'OI naik searah harga 24j' },
   { key: 'oiFlush', label: 'OI 4j flush' },
   { key: 'fundingContra', label: 'funding lawan crowd' },
-  { key: 'oiHold', label: 'OI 15m tidak turun' }
+  { key: 'oiHold', label: 'OI 15m tidak turun' },
+  { key: 'anomaly', label: 'anomali: volume 24j ≥ 3× median' }
 ]
 
 /** A candidate entry (never an order by itself). */

@@ -319,3 +319,25 @@ negatif (ada trade +275R yang menopang). Flip setelah tembus palsu tidak menamba
 - Notifier `src/main/notify/` di main (secret `discord.webhookUrl`, antrian ±1 dtk, 429 → retry sekali). Event bot level
   `order`/`warn`/`error` diteruskan (`notify.botOrders` / `notify.botWarnings`), setup screener opsional (`notify.screener`).
 - Rencana berikutnya: tag `anomaly` buat SMC (dicek di Backtest dulu), lalu bot jaga SL posisi manual M6 (butuh izin).
+
+## 13. M6 bot (TP manual) + tag `anomaly` (2026-11-15)
+
+**Keputusan user:** M6 tetap di-entry bot (risk ikut `bot.riskPerTradePct`, mode ikut bot), **long saja**, entry setelah
+close 1h tembus box 24 jam (maks `m6WatchHours` = 72 jam setelah radar). SL 3× ATR(24) 1h, **tanpa TP**: user ambil
+profit sendiri (tombol close di halaman Bot atau langsung di Binance), bot cuma trailing SL (best − `m6TrailGapR` 2R).
+Tidak ada konfluensi wajib untuk M6. `bot.models` dapat M6 sekali lewat migrasi (`migr_bot_m6`).
+
+**Lab kode app** (20 altcoin yang paling sering anomali, 2 tahun, fill di candle 15m, slippage 0,05%):
+
+| Model / grup | IS avgR | OOS avgR | n |
+|---|---|---|---|
+| M6, plan m6 (tanpa TP) | +0,03 | **−0,21** | 138 / 37 |
+| M5 koin normal | +0,01 | −0,13 | 3.688 |
+| M5 koin anomali (vol ≥ 3×) | +0,21 s/d +0,37 | **+0,24 s/d +0,30** | 391 |
+| M4 normal / anomali | +0,13 / +0,23–0,33 | +0,02 / +0,23 | |
+| M1 bertingkat normal / vol 3–8× | −0,07 / +0,24 | −0,07 / +0,19 | |
+
+M6 otomatis tetap negatif di OOS (sampel kecil). Hasilnya bergantung pada TP manual user.
+Temuan utama: **setup di koin yang lagi "bangun" (volume ≥ 3×) lebih bagus, bukan lebih jelek**. Tag `anomaly`
+(`smc.anomalyVolMult`, default 3) bisa diwajibkan per model di Settings/Backtest/profil koin. Default bot belum diubah.
+Catatan: koin dipilih karena sering anomali (bias seleksi), dan M5 di lab ini tanpa filter OI.

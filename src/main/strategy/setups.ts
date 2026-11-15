@@ -9,6 +9,7 @@ import type { OrderBlockIdx } from './orderBlocks'
 import type { Pivot } from './swings'
 import { atrSeries, emaSeries } from './atr'
 import { flowConfluence, type FlowData } from './flow'
+import { RADAR_BARS, volRatioSeries } from '../radar/radar'
 import { wyckoffAt } from './wyckoff'
 
 /** A point of interest from any timeframe, normalised. */
@@ -203,12 +204,15 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M2a') || models.has('M2b')) drafts.push(...modelM2(input, all, pois, models))
   if (models.has('M4')) drafts.push(...modelM4(input, all))
   if (models.has('M5')) drafts.push(...modelM5(input, all))
+  if (models.has('M6')) drafts.push(...modelM6(input, all))
 
   const atr = cfg.minSlAtr > 0 ? atrSeries(c, 14) : null
+  const h1 = all.find((a) => a.timeframe === '1h')
+  const vol1h = h1 && h1.candles.length >= RADAR_BARS ? { c: h1.candles, vr: volRatioSeries(h1.candles) } : null
   const best = new Map<string, Setup>()
   for (const d0 of drafts) {
-    const d = atr && d0.model !== 'M5' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
-    const s = finalize(input, all, d)
+    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
+    const s = finalize(input, all, d, vol1h)
     if (!s) continue
     const prev = best.get(s.id)
     if (!prev || s.score > prev.score) best.set(s.id, s)
@@ -628,6 +632,95 @@ function modelM5({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): D
   return out
 }
 
+// ---------- M6: radar pump → 1h breakout (not SMC, docs/entry-v2.md §12–13) ----------
+
+/**
+ * Radar hit on a closed 1h candle (24h volume ≥ m6VolMult × 30-day median, or funding ≤ m6FundingMax
+ * with volume ≥ m6FundingVolMult) → within m6WatchHours, the first 1h close beyond the 24h box of the
+ * hit → limit at that close, SL m6AtrMult × ATR(24). No TP: the user takes profit by hand, the bot
+ * trails the stop. One trade per hit; the next hit is looked for m6CooldownHours later.
+ */
+function modelM6({ entry, cfg, flow }: SetupInput, all: readonly SmcAnalysisFull[]): Draft[] {
+  const a = all.find((x) => x.timeframe === '1h')
+  if (!a || a.candles.length <= RADAR_BARS) return []
+  const c = a.candles
+  const n = c.length
+  const vr = volRatioSeries(c)
+  const atr = atrSeries(c, 24)
+  const funding = flow?.funding ?? []
+  const fundingAt = (closeT: number): number | null => {
+    let lo = 0
+    let hi = funding.length - 1
+    let k = -1
+    while (lo <= hi) {
+      const m = (lo + hi) >> 1
+      if (funding[m]!.t <= closeT) {
+        k = m
+        lo = m + 1
+      } else hi = m - 1
+    }
+    return k >= 0 && closeT - funding[k]!.t <= 9 * 3_600_000 ? funding[k]!.r : null
+  }
+  const out: Draft[] = []
+  let i = RADAR_BARS - 1
+  while (i < n) {
+    const v = vr[i]!
+    const f = fundingAt(closeTime(c[i]!.t, '1h'))
+    const hitVol = v >= cfg.m6VolMult
+    const hitFund = f !== null && f <= cfg.m6FundingMax && v >= cfg.m6FundingVolMult
+    if (!(hitVol || hitFund)) {
+      i++
+      continue
+    }
+    let boxHi = -Infinity
+    let boxLo = Infinity
+    for (let k = i - 23; k <= i; k++) {
+      boxHi = Math.max(boxHi, c[k]!.h)
+      boxLo = Math.min(boxLo, c[k]!.l)
+    }
+    let found = -1
+    let bull = true
+    for (let k = i + 1; k < n && k <= i + cfg.m6WatchHours; k++) {
+      if (c[k]!.c > boxHi) {
+        found = k
+        break
+      }
+      if (!cfg.m6LongOnly && c[k]!.c < boxLo) {
+        found = k
+        bull = false
+        break
+      }
+    }
+    const next = (found < 0 ? i + cfg.m6WatchHours + 1 : found) + Math.max(1, cfg.m6CooldownHours)
+    if (found >= 0) {
+      const x = c[found]!
+      const knownIdx = lastClosedBy(entry.candles, entry.timeframe, closeTime(x.t, '1h'))
+      const level = x.c
+      const sl = bull ? level - cfg.m6AtrMult * atr[found]! : level + cfg.m6AtrMult * atr[found]!
+      if (knownIdx >= 0)
+        out.push({
+          model: 'M6',
+          dir: bull ? 'bullish' : 'bearish',
+          poi: { kind: 'BO', timeframe: '1h', level: bull ? boxHi : boxLo, t: c[i]!.t, hitT: null, origin: null },
+          child: { kind: 'BREAKOUT', timeframe: '1h', t: x.t, level, extreme: sl, hasFvg: false, origin: null },
+          entry: level,
+          sl,
+          knownIdx,
+          invalidLevel: sl,
+          confluence: [],
+          reasons: [
+            `radar 1h: volume 24j ${v.toFixed(1)}× median${f !== null ? ` · funding ${(f * 100).toFixed(3)}%` : ''}`,
+            `close 1h ${level} tembus ${bull ? 'high' : 'low'} box 24j (${bull ? boxHi : boxLo})`,
+            `SL ${cfg.m6AtrMult}×ATR, tanpa TP (manual), SL trailing`
+          ],
+          expiry: cfg.m6ExpiryCandles
+        })
+    }
+    i = next
+  }
+  return out
+}
+
 /** Hour (UTC) of `t` inside one of the [from, to) killzones. */
 export function inKillzone(t: number, zones: readonly (readonly [number, number])[]): boolean {
   const h = new Date(t).getUTCHours()
@@ -672,10 +765,11 @@ const CONF_LABEL: Record<Confluence, string> = {
   oiConfirm: 'open interest naik searah harga (24 jam)',
   oiFlush: 'open interest flush (turun 4 jam)',
   fundingContra: 'funding berlawanan dengan crowd',
-  oiHold: 'open interest 15 menit tidak turun'
+  oiHold: 'open interest 15 menit tidak turun',
+  anomaly: 'koin lagi ramai (volume 24 jam jauh di atas biasa)'
 }
 
-function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft): Setup | null {
+function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, vol1h: { c: readonly Candle[]; vr: number[] } | null): Setup | null {
   const { entry, cfg, symbol } = input
   const c = entry.candles
   const bull = d.dir === 'bullish'
@@ -713,10 +807,15 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft):
   const ago = lastClosedBy(c, entry.timeframe, known - 24 * 3_600_000)
   const pxChg24h = ago >= 0 ? c[d.knownIdx]!.c / c[ago]!.c - 1 : null
   for (const k of flowConfluence(input.flow, known, d.dir, pxChg24h, cfg)) conf.add(k)
+  if (vol1h) {
+    const k = lastClosedBy(vol1h.c, '1h', known)
+    if (k >= 0 && vol1h.vr[k]! >= cfg.anomalyVolMult) conf.add('anomaly')
+  }
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
-  const tpLiquidity = d.model === 'M5' ? null : nearestTarget(all, bull, d.entry, known)
-  const exit = d.model === 'M5' ? { tpMode: 'trail' as const, tpR: 20 } : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
+  const trailOnly = d.model === 'M5' || d.model === 'M6'
+  const tpLiquidity = trailOnly ? null : nearestTarget(all, bull, d.entry, known)
+  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk

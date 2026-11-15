@@ -62,6 +62,9 @@ dites ke exchange beneran.
   radar = **notifikasi saja** (`radar`, `notify` config; webhook = secret `discord.webhookUrl`, tes di Settings). Bot tidak
   entry dari radar. Breaker cuma 1h/4h (`smc.breakerTimeframes`), SL ≥ 1× ATR14 (`smc.minSlAtr`), M4 TP 1R (`breakerTpR`).
   SL < 1% → BE baru di 2R kunci +0,5R bersih (`exit.tightSlPct`). BE punya kategori sendiri di halaman Bot.
+- **M6 radar pump = model bot** (keputusan user, `docs/entry-v2.md §13`): long saja, entry limit di close 1h yang tembus box
+  24j setelah radar, SL 3× ATR, **tanpa TP (user TP manual)**, trailing SL. Lab OOS −0,21R (n kecil), user tetap mau.
+  Tag `anomaly` (volume 24j ≥ 3× median): setup di koin "bangun" justru lebih bagus (M5 OOS +0,24–0,30R vs −0,13R).
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
   lookback 75 hari, 8 per sisi, rebalance mingguan. Tidak pernah kirim order. Lab realistis: OOS −41% s/d +5% tergantung
   hari rebalance, DD 44–62%. Jangan dijadikan bot live tanpa forward test yang meyakinkan.

@@ -1,5 +1,5 @@
 import type { CoinProfile } from '@shared/backtest'
-import { breakerExit, trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
+import { breakerExit, m6Exit, trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { MODEL_LABEL, poiConcept, setupPoiLabel } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -29,9 +29,15 @@ export const cancelLevel = (s: Pick<ScreenerSetup, 'entry' | 'sl' | 'tp' | 'tpLi
  * Exit plan for a setup: the coin profile's plan (chosen in the backtest Meta table) wins; without one,
  * M5 (trend) uses its own trailing-only plan and the SMC models use the global `exit` config.
  */
-export function exitFor<E extends ExitConfig>(model: string, base: E, profile: CoinProfile | null | undefined, smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'breakerTpR'>): E {
+export function exitFor<E extends ExitConfig>(
+  model: string,
+  base: E,
+  profile: CoinProfile | null | undefined,
+  smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'breakerTpR' | 'm6TrailGapR' | 'm6TrailStepR'>
+): E {
   if (profile) return { ...base, ...profile.plan.exit }
   if (model === 'M5') return { ...base, ...trendExit(smc) }
+  if (model === 'M6') return { ...base, ...m6Exit(smc) }
   const bx = model === 'M4' ? breakerExit(smc) : null
   if (bx) return { ...base, ...bx }
   return base
@@ -61,7 +67,8 @@ export function setupGate(
   if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
   // SMC models and the M5 trend model have their own required list (a profile, saved from one model, has one)
-  const required = p ? p.requireConfluence : s.model === 'M5' ? o.bot.trendRequireConfluence : o.bot.requireConfluence
+  // M6 (radar) has no confluence list: the radar hit + breakout is the whole signal
+  const required = p ? p.requireConfluence : s.model === 'M5' ? o.bot.trendRequireConfluence : s.model === 'M6' ? [] : o.bot.requireConfluence
   const missing = required.filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
   const minScore = p ? p.minScore : o.bot.minScore
@@ -70,7 +77,7 @@ export function setupGate(
   const age = o.now - knownAt(c, o.entryTf)
   if (age > o.bot.maxSetupAgeMin * 60_000) return `setup sudah ${Math.round(age / 60_000)} menit (maks ${o.bot.maxSetupAgeMin})`
   const bx = s.model === 'M4' && o.smc ? breakerExit(o.smc) : null
-  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' ? { tpMode: 'trail' } : (bx ?? o.exit ?? { tpMode: 'liquidity' }))
+  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' || s.model === 'M6' ? { tpMode: 'trail' } : (bx ?? o.exit ?? { tpMode: 'liquidity' }))
   if (bull ? c.price >= tp : c.price <= tp) return 'harga sudah sampai TP (lewat TP)'
   if (bull ? c.price <= s.entry : c.price >= s.entry) return 'harga sudah di/lewat entry'
   return null
