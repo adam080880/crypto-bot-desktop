@@ -1,5 +1,7 @@
 # SMC Trading Assistant
 
+**Kontributor ide:** [Rizalphlv](https://github.com/Rizalphlv)
+
 Aplikasi desktop (Electron) untuk membantu trading crypto di **Binance USDT-M Futures**: deteksi konsep
 SMC/ICT, screener, backtest, bot (paper/live), radar pump, kalender news USD, dan Claude sebagai analis.
 
