@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { FlaskConical } from 'lucide-react'
 import {
   CandlestickSeries,
   HistogramSeries,
@@ -18,8 +19,11 @@ import { SetupList } from '@/components/SetupList'
 import type { Candle } from '@shared/candles'
 import type { SymbolListItem } from '@shared/ipc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
+import type { BotState, BotTrade } from '@shared/bot'
 import { LiveBadge } from '@/components/layout/LiveBadge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { openBacktest, type ChartFocus } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/appStore'
 
@@ -51,15 +55,8 @@ const toVol = (c: Candle) => ({
   color: c.c >= c.o ? `${BULL}66` : `${BEAR}66`
 })
 
-/** A backtest trade to show (set by the Backtest page, read once). */
-interface Focus {
-  symbol: string
-  t: number
-  until: number
-  entry: number
-  sl: number
-  dir: 'bullish' | 'bearish'
-}
+/** A past trade to show (set by the Backtest / Bot page, read once). */
+type Focus = ChartFocus
 
 function takeFocus(): Focus | null {
   try {
@@ -116,6 +113,20 @@ export function Chart() {
     return f && f.symbol === recall('chart.symbol', 'BTCUSDT') ? f : null
   })
   const focusLines = useRef<IPriceLine[]>([])
+  const posLines = useRef<IPriceLine[]>([])
+  const [bot, setBot] = useState<BotState | null>(null)
+  const [lastPx, setLastPx] = useState<number | null>(null)
+
+  useEffect(() => {
+    void window.api.invoke('bot:get').then(setBot)
+    return window.api.on('bot:state', setBot)
+  }, [])
+
+  // the bot's pending / open trades on this coin (current mode)
+  const positions = useMemo(
+    () => (bot?.trades ?? []).filter((t) => t.symbol === symbol && t.mode === (bot?.live ? 'live' : 'paper') && (t.status === 'open' || t.status === 'pending')),
+    [bot, symbol]
+  )
 
   const synced = useMemo(() => symbols.find((s) => s.symbol === symbol)?.synced ?? false, [symbols, symbol])
 
@@ -192,6 +203,7 @@ export function Chart() {
       price.current.setData(rows.map(toBar))
       volume.current.setData(rows.map(toVol))
       last.current = rows[rows.length - 1] ?? null
+      setLastPx(last.current?.c ?? null)
       setInfo(rows.length ? null : 'Belum ada data untuk simbol ini — sedang disiapkan (backfill 6 bulan)…')
       price.current.priceScale().applyOptions({ autoScale: true })
       for (const l of focusLines.current) price.current.removePriceLine(l)
@@ -200,9 +212,13 @@ export function Chart() {
         const from = (Math.floor(f.t / tfMs) * tfMs - 80 * tfMs) / 1000
         const to = (Math.floor(f.until / tfMs) * tfMs + 40 * tfMs) / 1000
         chart.current?.timeScale().setVisibleRange({ from: from as UTCTimestamp, to: to as UTCTimestamp })
+        const p = price.current
         focusLines.current = [
-          price.current.createPriceLine({ price: f.entry, color: f.dir === 'bullish' ? BULL : BEAR, lineWidth: 2, title: 'ENTRY (backtest)' }),
-          price.current.createPriceLine({ price: f.sl, color: BEAR, lineWidth: 1, lineStyle: 2, title: 'SL' })
+          p.createPriceLine({ price: f.entry, color: f.dir === 'bullish' ? BULL : BEAR, lineWidth: 2, title: 'ENTRY' }),
+          p.createPriceLine({ price: f.sl, color: BEAR, lineWidth: 1, lineStyle: 2, title: f.slFinal != null ? 'SL awal' : 'SL' }),
+          ...(f.slFinal != null ? [p.createPriceLine({ price: f.slFinal, color: '#f5a524', lineWidth: 1, lineStyle: 2, title: 'SL akhir' })] : []),
+          ...(f.tp != null ? [p.createPriceLine({ price: f.tp, color: BULL, lineWidth: 1, lineStyle: 2, title: 'TP' })] : []),
+          ...(f.exit != null ? [p.createPriceLine({ price: f.exit, color: '#8b9cf7', lineWidth: 1, lineStyle: 0, title: 'EXIT' })] : [])
         ]
       } else chart.current?.timeScale().scrollToRealTime()
     })
@@ -233,6 +249,7 @@ export function Chart() {
       price.current.update(toBar(bar))
       volume.current.update(toVol(bar))
       last.current = bar
+      setLastPx(bar.c)
     })
     const offSynced = window.api.on('live:synced', ({ symbol: s }) => {
       if (s === symbol) setReload((n) => n + 1)
@@ -290,6 +307,24 @@ export function Chart() {
     markers.current?.setMarkers(m)
 
   }, [analysis, setups, layers])
+
+  // live position lines (hidden while looking at a past trade)
+  useEffect(() => {
+    const p = price.current
+    if (!p) return
+    for (const l of posLines.current) p.removePriceLine(l)
+    posLines.current = []
+    if (focus) return
+    for (const t of positions) {
+      const long = t.direction === 'bullish'
+      const moved = t.sl !== t.slInitial
+      posLines.current.push(
+        p.createPriceLine({ price: t.entry, color: long ? BULL : BEAR, lineWidth: 2, title: `${t.status === 'pending' ? 'LIMIT' : 'POSISI'} ${long ? 'LONG' : 'SHORT'} ${t.model}` }),
+        p.createPriceLine({ price: t.sl, color: moved ? '#f5a524' : BEAR, lineWidth: 1, lineStyle: 2, title: moved ? 'SL (geser)' : 'SL' }),
+        ...(t.tp !== null ? [p.createPriceLine({ price: t.tp, color: BULL, lineWidth: 1, lineStyle: 2, title: 'TP' })] : [])
+      )
+    }
+  }, [positions, focus, symbol, tf])
 
   const toggle = (k: keyof Layers): void => {
     const next = { ...layers, [k]: !layers[k] }
@@ -351,14 +386,24 @@ export function Chart() {
         )}
         {focus && (
           <span className="flex items-center gap-2 rounded-md border border-warn/50 px-2 py-0.5 text-xs text-warn">
-            Lihat trade backtest {new Date(focus.t).toLocaleString('id-ID')} (overlay SMC tetap data terbaru)
+            Lihat {focus.label ?? 'trade'} {new Date(focus.t).toLocaleString('id-ID')} (overlay SMC tetap data terbaru)
             <button type="button" className="underline" onClick={() => setFocus(null)}>
               kembali ke live
             </button>
           </span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">Waktu lokal · bucket candle UTC</span>
+        <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" onClick={() => openBacktest(symbol)} title="Buka halaman Backtest dan langsung jalankan untuk koin ini">
+          <FlaskConical className="size-3.5" /> Backtest {symbol}
+        </Button>
+        <span className="text-xs text-muted-foreground">Waktu lokal · bucket candle UTC</span>
       </div>
+      {positions.length > 0 && !focus && (
+        <div className="flex flex-wrap gap-2">
+          {positions.map((t) => (
+            <PositionChip key={t.id} t={t} px={lastPx} />
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap gap-1">
         {LAYERS.map((k) => (
           <button
@@ -380,6 +425,48 @@ export function Chart() {
         )}
       </div>
       <SetupList setups={setups} />
+    </div>
+  )
+}
+
+/** A pending / open bot trade on the chart: direction, model, running R, and the same cancel / close as the Bot page. */
+function PositionChip({ t, px }: { t: BotTrade; px: number | null }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const h = setTimeout(() => setArmed(false), 4000)
+    return () => clearTimeout(h)
+  }, [armed])
+  const long = t.direction === 'bullish'
+  const risk = Math.abs(t.entry - t.slInitial)
+  const r = t.status === 'open' && px !== null && risk > 0 ? ((long ? px - t.entry : t.entry - px) / risk) : null
+  return (
+    <div className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+      <span className={cn('font-semibold', long ? 'text-bull' : 'text-bear')}>{long ? 'LONG' : 'SHORT'}</span>
+      <span className="text-muted-foreground">
+        {t.model} · {t.mode} · {t.status === 'pending' ? 'limit nunggu' : 'posisi buka'}
+        {t.tp === null && t.status === 'open' ? ' · TP manual' : ''}
+      </span>
+      {r !== null && <span className={cn('num font-semibold', r > 0 ? 'text-bull' : r < 0 ? 'text-bear' : '')}>{r >= 0 ? '+' : ''}{r.toFixed(2)}R</span>}
+      {t.status === 'pending' ? (
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => void window.api.invoke('bot:cancel', { id: t.id })}>
+          Batalkan limit
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant={armed ? 'destructive' : 'outline'}
+          className="h-6 px-2 text-xs"
+          title="Tutup posisi pakai market order (reduce-only), lalu SL/TP dibatalkan"
+          onClick={() => {
+            if (!armed) return setArmed(true)
+            setArmed(false)
+            void window.api.invoke('bot:close', { id: t.id })
+          }}
+        >
+          {armed ? 'Yakin? klik lagi' : 'Close market'}
+        </Button>
+      )}
     </div>
   )
 }

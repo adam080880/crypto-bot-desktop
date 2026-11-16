@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn, formatTime } from '@/lib/utils'
-import { useAppStore } from '@/stores/appStore'
+import { openChart, tfForModel } from '@/lib/nav'
 
 const px = (n: number): string => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(5))
 const pct = (x: number | null, d = 0): string => (x === null ? '—' : `${(x * 100).toFixed(d)}%`)
@@ -92,14 +92,7 @@ const cache = new Map<string, BacktestResult>()
 
 /** Open the chart at a backtest trade (Chart reads `chart.focus` once). */
 function openOnChart(symbol: string, s: BtSetup, exitT: number | null): void {
-  try {
-    localStorage.setItem('chart.symbol', symbol)
-    localStorage.setItem('chart.tf', '15m')
-    localStorage.setItem('chart.focus', JSON.stringify({ symbol, t: s.t, until: exitT ?? s.t, entry: s.entry, sl: s.sl, dir: s.dir }))
-  } catch {
-    /* storage unavailable */
-  }
-  useAppStore.getState().setPage('chart')
+  openChart(symbol, { tf: tfForModel(s.model), focus: { symbol, t: s.t, until: exitT ?? s.t, entry: s.entry, sl: s.sl, dir: s.dir, label: `trade backtest ${s.model}` } })
 }
 
 export function Backtest() {
@@ -134,6 +127,19 @@ export function Backtest() {
     )
     return window.api.on('backtest:progress', setProgress)
   }, [])
+
+  // "Backtest koin ini" from the Chart: run once as soon as the form is ready (no re-run when cached)
+  useEffect(() => {
+    if (!form) return
+    const want = recall<string | null>('backtest.autorun', null)
+    if (want === null) return
+    try {
+      localStorage.removeItem('backtest.autorun')
+    } catch {
+      /* ignore */
+    }
+    if (want === symbol && !cache.has(symbol)) void run()
+  }, [form])
 
   useEffect(() => remember('backtest.filter', filter), [filter])
   useEffect(() => remember('backtest.plan', planKey), [planKey])
@@ -208,14 +214,7 @@ export function Backtest() {
         <Button size="sm" variant="ghost" onClick={() => setShowForm(!showForm)}>
           {showForm ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />} Fee & periode
         </Button>
-        <Button size="sm" variant="outline" className="ml-auto" onClick={() => {
-          try {
-            localStorage.setItem('chart.symbol', symbol)
-          } catch {
-            /* ignore */
-          }
-          useAppStore.getState().setPage('chart')
-        }}>
+        <Button size="sm" variant="outline" className="ml-auto" onClick={() => openChart(symbol)}>
           <CandlestickChart className="size-4" /> Buka {symbol} di Chart
         </Button>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot as BotIcon, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
+import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
 import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { setupPoiLabel } from '@shared/smc'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { botTradeFocus, openChart, tfForModel } from '@/lib/nav'
 import { cn, formatTime } from '@/lib/utils'
 import { useAppStore } from '@/stores/appStore'
 
@@ -360,6 +361,17 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
                 </Button>
               )}
               {actions && t.status === 'open' && <CloseMarket t={t} />}
+              {(t.status !== 'cancelled' || t.filledAt !== null) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  title={t.status === 'closed' ? 'Lihat trade ini di Chart (entry, SL, TP, exit)' : 'Buka Chart koin ini (garis posisi live)'}
+                  onClick={() => openChart(t.symbol, { tf: tfForModel(t.model), ...(t.status === 'closed' ? { focus: botTradeFocus(t) } : {}) })}
+                >
+                  <CandlestickChart className="size-3" /> Chart
+                </Button>
+              )}
               {t.status === 'cancelled' && t.reason === 'error' && (
                 <Button
                   size="sm"
