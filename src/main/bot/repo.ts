@@ -60,6 +60,13 @@ export class BotRepo {
     return p ? normalizeTrade(JSON.parse(p)) : null
   }
 
+  /** Trades of a mode closed at or after t (blacklist). */
+  closedSince(mode: string, t: number): BotTrade[] {
+    return (this.c.prepare(`SELECT payload FROM bot_trades WHERE mode = ? AND status = 'closed' AND closed_at >= ?`).pluck().all(mode, t) as string[]).map((p) =>
+      normalizeTrade(JSON.parse(p))
+    )
+  }
+
   pnlSince(mode: string, t: number): number {
     return (this.c.prepare(`SELECT coalesce(sum(pnl), 0) FROM bot_trades WHERE mode = ? AND status = 'closed' AND closed_at >= ?`).pluck().get(mode, t) as number) ?? 0
   }

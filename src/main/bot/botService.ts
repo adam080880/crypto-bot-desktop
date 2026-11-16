@@ -12,6 +12,7 @@ import { readSetting, writeSetting } from '../db/settingsRepo'
 import { logger } from '../logger'
 import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTrade'
 import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
+import { slBlacklist } from './blacklist'
 import { accountGate, candidatesOf, claudeGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
 import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
@@ -377,10 +378,17 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       universe: { count: this.universe.size, updatedAt: this.universeAt },
       awaitingClaude: [...this.awaiting],
       trades: this.repo.recent(100),
+      blacklist: [...this.blacklist(this.mode(), Date.now()).values()],
       events: this.repo.events(200),
       lastError: this.lastError
     }
     this.emit('state', state)
+  }
+
+  /** Coins blocked by repeated SL (bot.slBlacklistCount within bot.slBlacklistHours). */
+  private blacklist(mode: string, now: number) {
+    const bot = this.deps.getBot()
+    return slBlacklist(this.repo.closedSince(mode, now - bot.slBlacklistHours * 3_600_000), bot, now)
   }
 
   // ---------- universe ----------
@@ -441,6 +449,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     const exit = this.deps.getExit()
     const candidates = candidatesOf(this.lastRows)
     const wantClaude: string[] = []
+    const black = this.blacklist(mode, now)
 
     for (const c of candidates) {
       const key = `${c.setup.id}|${mode}`
@@ -452,6 +461,11 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       if (sg) {
         // only log setups that were plausible for the bot (in universe, a model it trades)
         if (this.universe.has(c.symbol) && ((profile?.models ?? bot.models) as string[]).includes(c.setup.model)) this.skip(key, c.symbol, sg)
+        continue
+      }
+      const bl = black.get(c.symbol)
+      if (bl) {
+        this.skip(key, c.symbol, `koin di-blacklist: ${bl.losses}× SL dalam ${bot.slBlacklistHours} jam (buka lagi ${new Date(bl.until).toISOString().slice(0, 16).replace('T', ' ')} UTC)`)
         continue
       }
       const equity = await this.equity()

@@ -11,6 +11,7 @@ import { atrSeries, emaSeries } from './atr'
 import { flowConfluence, type FlowData } from './flow'
 import { RADAR_BARS, volRatioSeries } from '../radar/radar'
 import { wyckoffAt } from './wyckoff'
+import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
 
 /** A point of interest from any timeframe, normalised. */
 export interface Poi {
@@ -766,7 +767,20 @@ const CONF_LABEL: Record<Confluence, string> = {
   oiFlush: 'open interest flush (turun 4 jam)',
   fundingContra: 'funding berlawanan dengan crowd',
   oiHold: 'open interest 15 menit tidak turun',
-  anomaly: 'koin lagi ramai (volume 24 jam jauh di atas biasa)'
+  anomaly: 'koin lagi ramai (volume 24 jam jauh di atas biasa)',
+  pdZone: 'long di discount / short di premium (range HTF)',
+  bbMomentum: 'momentum Bollinger searah (di sisi band tengah, band melebar)'
+}
+
+/** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
+const bbCache = new WeakMap<readonly Candle[], { key: string; bb: Bollinger }>()
+function bbOf(c: readonly Candle[], cfg: Pick<SmcConfig, 'bbPeriod' | 'bbStdDev'>): Bollinger {
+  const key = `${cfg.bbPeriod}|${cfg.bbStdDev}`
+  const hit = bbCache.get(c)
+  if (hit && hit.key === key && hit.bb.mid.length === c.length) return hit.bb
+  const bb = bollinger(c, cfg.bbPeriod, cfg.bbStdDev)
+  bbCache.set(c, { key, bb })
+  return bb
 }
 
 function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, vol1h: { c: readonly Candle[]; vr: number[] } | null): Setup | null {
@@ -810,6 +824,18 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, 
   if (vol1h) {
     const k = lastClosedBy(vol1h.c, '1h', known)
     if (k >= 0 && vol1h.vr[k]! >= cfg.anomalyVolMult) conf.add('anomaly')
+  }
+  // premium / discount of the HTF dealing range at the entry price (no long at the top, no short at the bottom)
+  const pdA = all.find((a) => a.timeframe === cfg.pdTimeframe)
+  if (pdA) {
+    const k = lastClosedBy(pdA.candles, pdA.timeframe, known)
+    const pos = rangePosition(pdA.candles, k, cfg.pdLookback, d.entry)
+    if (pos !== null && inTradeZone(pos, d.dir, cfg.pdLevel)) conf.add('pdZone')
+  }
+  const bbA = all.find((a) => a.timeframe === cfg.bbTimeframe)
+  if (bbA) {
+    const k = lastClosedBy(bbA.candles, bbA.timeframe, known)
+    if (k >= 0 && bbMomentumAt(bbA.candles, bbOf(bbA.candles, cfg), k, d.dir, cfg.bbSlopeCandles)) conf.add('bbMomentum')
   }
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)

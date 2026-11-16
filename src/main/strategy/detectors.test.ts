@@ -83,6 +83,25 @@ describe('RBS / SBR (§5)', () => {
   })
 })
 
+describe('SBR needs a body close, not a wick (user, 2026-11-16)', () => {
+  it('a wick below the level is not a break; the later body close is', () => {
+    const c = bars([
+      [12, 12.2, 11.8, 12],
+      [12, 12.1, 11.5, 11.6],
+      [11.6, 11.7, 9.8, 10], // 2 swing low: body low 10 = SBR level, wick 9.8
+      [10, 11, 9.95, 10.8],
+      [10.8, 11.2, 10.5, 11],
+      [11, 11.1, 10.4, 10.6],
+      [10.6, 10.7, 9.9, 10.3], // 6 wick through 10, closes back above → NOT a break
+      [10.3, 10.4, 9.85, 9.9], // 7 body closes below 10 → SBR
+      [9.9, 10, 9.6, 9.7]
+    ])
+    const sbr = analyzeSmc(c, '15m', cfg()).srFlips.find((f) => f.kind === 'SBR' && f.sourceT === at(2))!
+    expect(sbr.level).toBe(10)
+    expect(sbr.breakT).toBe(at(7))
+  })
+})
+
 describe('OCL (§6)', () => {
   it("OCL Break Buy (user's example): red OCL, green body closes above the red body", () => {
     const c = bars([

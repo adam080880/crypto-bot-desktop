@@ -386,7 +386,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
   const [msg, setMsg] = useState<string | null>(null)
   // Keep the form in sync when config changes elsewhere (Bot page Start/Stop, other windows)
   useEffect(() => setB(config.bot), [config.bot])
-  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity', label: string, step: number) => (
+  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours', label: string, step: number) => (
     <>
       <Label htmlFor={`bot-${k}`}>{label}</Label>
       <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
@@ -410,6 +410,8 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           {num('topVolume', 'Koin crypto top N volume 24 jam', 10)}
           {num('maxSetupAgeMin', 'Umur maks setup saat entry (menit)', 15)}
           {num('paperEquity', 'Modal akun paper (USDT)', 1)}
+          {num('slBlacklistCount', 'Blacklist koin setelah N× SL (BE tidak dihitung; 0 = mati)', 1)}
+          {num('slBlacklistHours', 'Jendela blacklist SL (jam)', 24)}
           <div className="col-span-2 space-y-1">
             <Label>Model entry yang boleh dipakai (minimal 1; profil koin dari Backtest punya model sendiri)</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">

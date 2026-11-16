@@ -134,7 +134,7 @@ export const coinProfileSchema = z
     savedAt: z.number().int(),
     models: z.array(z.enum(ENTRY_MODELS)).min(1),
     pois: z.array(z.string().regex(/^[A-Z_]{2,10}\|(1m|5m|15m|1h|4h|1d|1w)$/)).max(50),
-    requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).max(17),
+    requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).max(REQUIRABLE_CONFLUENCES.length),
     minScore: z.number().int().min(0).max(30),
     plan: z.object({
       key: z.string().max(30),

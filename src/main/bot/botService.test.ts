@@ -15,7 +15,7 @@ const SETUP = (now: number): ScreenerSetup => ({
   tpLiquidity: 1.05,
   rr: 5,
   score: 5,
-  confluence: ['fvg', 'trendParent'],
+  confluence: ['fvg', 'trendParent', 'pdZone'],
   status: 'pending',
   createdT: now - 20 * 60_000,
   poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },

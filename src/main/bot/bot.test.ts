@@ -69,7 +69,7 @@ const cand = (p: Partial<ScreenerSetup> = {}, row: Partial<ScreenerRow> = {}): C
       tpLiquidity: 104,
       rr: 4,
       score: 5,
-      confluence: ['fvg', 'trendParent'],
+      confluence: ['fvg', 'trendParent', 'pdZone'],
       status: 'pending',
       createdT: NOW - 30 * 60_000,
       poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },
@@ -103,7 +103,7 @@ describe('setupGate', () => {
 
   it('rejects models the bot does not trade and missing required confluences', () => {
     expect(setupGate(cand({ model: 'M0' }), o)).toMatch(/tidak dipakai bot/)
-    expect(setupGate(cand({ confluence: ['fvg'] }), o)).toMatch(/konfluensi wajib: trendParent/)
+    expect(setupGate(cand({ confluence: ['fvg', 'pdZone'] }), o)).toMatch(/konfluensi wajib: trendParent/)
     expect(setupGate(cand({ model: 'M4', poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
   })
   it('rejects stale setups and price past TP / entry', () => {

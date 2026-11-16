@@ -30,6 +30,13 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_bot_m6', true)
     }
+    // premium/discount (user, 2026-11-16) becomes a required confluence for SMC setups once; removing it later sticks
+    if (!readSetting(db, 'migr_bot_pdzone', z.boolean())) {
+      if (!this.config.bot.requireConfluence.includes('pdZone'))
+        this.config = { ...this.config, bot: { ...this.config.bot, requireConfluence: [...this.config.bot.requireConfluence, 'pdZone'] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_bot_pdzone', true)
+    }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {

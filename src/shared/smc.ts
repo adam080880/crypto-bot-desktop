@@ -225,6 +225,12 @@ export type Confluence =
   | 'oiHold'
   /** Coin "awake": 24h volume ≥ smc.anomalyVolMult × its 30-day median (1h). Filter tag, no score. */
   | 'anomaly'
+  /** Entry on the right side of the HTF dealing range (smc.pdTimeframe): long in discount (below 50 %),
+   *  short in premium (above 50 %). No long at the top, no short at the bottom. Filter tag, no score. */
+  | 'pdZone'
+  /** Bollinger momentum (smc.bbTimeframe): close on the trade side of the middle band, middle band sloping
+   *  that way and the bands widening (expansion, not a squeeze). Filter tag, no score. */
+  | 'bbMomentum'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -245,7 +251,9 @@ export const REQUIRABLE_CONFLUENCES = [
   'oiFlush',
   'fundingContra',
   'oiHold',
-  'anomaly'
+  'anomaly',
+  'pdZone',
+  'bbMomentum'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -267,7 +275,9 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'oiFlush', label: 'OI 4j flush' },
   { key: 'fundingContra', label: 'funding lawan crowd' },
   { key: 'oiHold', label: 'OI 15m tidak turun' },
-  { key: 'anomaly', label: 'anomali: volume 24j ≥ 3× median' }
+  { key: 'anomaly', label: 'anomali: volume 24j ≥ 3× median' },
+  { key: 'pdZone', label: 'long di discount / short di premium (HTF)' },
+  { key: 'bbMomentum', label: 'momentum Bollinger searah' }
 ]
 
 /** A candidate entry (never an order by itself). */

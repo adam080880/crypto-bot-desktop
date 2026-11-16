@@ -173,7 +173,20 @@ export const smcConfigSchema = z.object({
   /** fundingContra: funding percentile (last ~90 settlements) ≤ this for a long, ≥ 1 − this for a short. */
   flowFundingPct: z.number().min(0).max(0.5).default(0.2),
   /** oiHold: open interest did not fall more than this % over the last 15 min (5m snapshots). */
-  flowOiFadePct: z.number().min(0).max(10).default(0.3)
+  flowOiFadePct: z.number().min(0).max(10).default(0.3),
+
+  // ---- premium / discount + Bollinger momentum (user, 2026-11-16): tags pdZone / bbMomentum ----
+  /** Dealing range = high/low of the last pdLookback closed candles of this timeframe; 50 % = equilibrium. */
+  pdTimeframe: z.enum(['1h', '4h', '1d']).default('4h'),
+  /** 60 × 4h ≈ 10 days. */
+  pdLookback: z.number().int().min(10).max(500).default(60),
+  /** Long only below (and short only above) this fraction of the range; 0.5 = equilibrium. */
+  pdLevel: z.number().min(0.2).max(0.8).default(0.5),
+  bbTimeframe: z.enum(['15m', '1h', '4h']).default('1h'),
+  bbPeriod: z.number().int().min(5).max(100).default(20),
+  bbStdDev: z.number().min(0.5).max(4).default(2),
+  /** Middle-band slope and band-width change are measured over N candles. */
+  bbSlopeCandles: z.number().int().min(1).max(20).default(3)
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
@@ -342,7 +355,7 @@ export const botConfigSchema = z.object({
   /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
   models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5', 'M6']),
   /** Every one of these confluences must be present on SMC setups (M0–M4). Backtest: FVG in the leg + trend of the POI TF. */
-  requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent']),
+  requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent', 'pdZone']),
   /** Same for the M5 trend model. Lab: OI rising with the move = +0,19R vs −0,05R without (docs/entry-v2.md §10). */
   trendRequireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['oiConfirm', 'oiHold']),
   minScore: z.number().int().min(0).max(20).default(0),
@@ -362,6 +375,12 @@ export const botConfigSchema = z.object({
   maxSetupAgeMin: z.number().int().min(1).max(525600).default(60),
   /** (requireClaude) The Claude analysis must be newer than the setup and at most this old. */
   maxAnalysisAgeMin: z.number().int().min(1).max(525600).default(90),
+  /**
+   * Auto blacklist (user, 2026-11-16): a coin with ≥ N losing trades (SL, not BE) in the last
+   * slBlacklistHours gets no new entries until the oldest of those N leaves the window. 0 = off.
+   */
+  slBlacklistCount: z.number().int().min(0).max(20).default(3),
+  slBlacklistHours: z.number().int().min(1).max(2160).default(168),
   /** Paper account starting balance (USDT). */
   paperEquity: z.number().positive().max(1e9).default(10)
 })

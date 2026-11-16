@@ -161,6 +161,14 @@ export function Bot() {
             <button type="button" className="underline decoration-dotted" onClick={() => void setRequireClaude(!cfg.bot.requireClaude)} title="Klik untuk ganti">
               {cfg.bot.requireClaude ? `Claude wajib ≥ ${cfg.bot.minConfidence}` : 'tanpa Claude (murni ICT)'}
             </button>
+            {st?.blacklist?.length ? (
+              <span className="text-warn" title={`${cfg.bot.slBlacklistCount}× SL dalam ${cfg.bot.slBlacklistHours} jam`}>
+                {' '}
+                · blacklist SL: {st.blacklist.map((b) => `${b.symbol} (${b.losses}×, s/d ${formatTime(b.until)})`).join(', ')}
+              </span>
+            ) : (
+              ''
+            )}
             {st?.awaitingClaude.length ? <span className="text-warn"> · nunggu Claude: {st.awaitingClaude.join(', ')}</span> : ''}
             {st?.lastError && <span className="text-bear"> · error terakhir: {st.lastError}</span>}
           </div>

@@ -88,6 +88,8 @@ export interface BotState {
   /** Symbols waiting for a Claude analysis requested by the bot. */
   awaitingClaude: string[]
   trades: BotTrade[]
+  /** Coins with no new entries after repeated SL (bot.slBlacklistCount). */
+  blacklist: { symbol: string; losses: number; until: number }[]
   events: BotEvent[]
   lastError: string | null
 }

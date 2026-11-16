@@ -65,6 +65,9 @@ dites ke exchange beneran.
 - **M6 radar pump = model bot** (keputusan user, `docs/entry-v2.md §13`): long saja, entry limit di close 1h yang tembus box
   24j setelah radar, SL 3× ATR, **tanpa TP (user TP manual)**, trailing SL. Lab OOS −0,21R (n kecil), user tetap mau.
   Tag `anomaly` (volume 24j ≥ 3× median): setup di koin "bangun" justru lebih bagus (M5 OOS +0,24–0,30R vs −0,13R).
+- **Premium/discount + Bollinger + blacklist SL** (2026-11-16, `docs/entry-v2.md §14`): tag `pdZone` (long di discount /
+  short di premium range 4h 60 candle) **wajib default** untuk SMC, `bbMomentum` (BB 1h) cuma filter, blacklist koin
+  setelah 3× SL dalam 7 hari (`bot.slBlacklist*`, `src/main/bot/blacklist.ts`). SBR/RBS memang break pakai close (body).
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
   lookback 75 hari, 8 per sisi, rebalance mingguan. Tidak pernah kirim order. Lab realistis: OOS −41% s/d +5% tergantung
   hari rebalance, DD 44–62%. Jangan dijadikan bot live tanpa forward test yang meyakinkan.

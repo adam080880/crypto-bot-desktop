@@ -341,3 +341,14 @@ M6 otomatis tetap negatif di OOS (sampel kecil). Hasilnya bergantung pada TP man
 Temuan utama: **setup di koin yang lagi "bangun" (volume ≥ 3×) lebih bagus, bukan lebih jelek**. Tag `anomaly`
 (`smc.anomalyVolMult`, default 3) bisa diwajibkan per model di Settings/Backtest/profil koin. Default bot belum diubah.
 Catatan: koin dipilih karena sering anomali (bias seleksi), dan M5 di lab ini tanpa filter OI.
+
+## 14. Premium/discount, Bollinger, blacklist SL (permintaan user, 2026-11-16)
+- Tag `pdZone`: entry di sisi yang benar dari dealing range HTF (`smc.pdTimeframe` 4h, high/low `pdLookback` 60 candle
+  yang sudah close ≈ 10 hari). Long cuma kalau harga entry ≤ `pdLevel` (0,5 = equilibrium) = discount, short ≥ 0,5 = premium.
+  Default **wajib** untuk model SMC (`bot.requireConfluence`, config lama ditambah sekali lewat `migr_bot_pdzone`).
+  Tidak berlaku untuk M5/M6 (breakout memang selalu di premium). Profil koin dari Backtest punya daftar wajib sendiri.
+- Tag `bbMomentum`: Bollinger (`bbTimeframe` 1h, 20, 2σ). Close di sisi band tengah searah trade, band tengah miring
+  searah dalam `bbSlopeCandles` (3) candle, dan band melebar (lebar > 3 candle lalu). Filter saja, belum wajib, belum diuji di lab.
+- Blacklist SL: koin dengan ≥ `bot.slBlacklistCount` (3) trade rugi (BE tidak dihitung) dalam `bot.slBlacklistHours` (168 jam)
+  tidak dientry lagi sampai SL ke-N terbaru keluar dari jendela. Per mode (paper/live). Daftar tampil di halaman Bot.
+- SBR/RBS dicek ulang: break = **close** (body) lewat level body swing; wick saja tidak dihitung (test di `detectors.test.ts`).
