@@ -1,10 +1,11 @@
-# Aturan SMC — hasil ekstraksi dari `materi/`
+# Aturan SMC — hasil ekstraksi dari materi kursus
 
 Status: **DIKONFIRMASI user (2026-11-11)**: Q5 = warna candle ngaruh; semua ❓ lain pakai usulan default.
 **Sudah diimplementasikan** di `src/main/strategy/` (fungsi murni + unit test). Semua angka ada di
 config `smc` (`src/shared/config.ts`).
 
-Sumber: 12 gambar di `materi/` (Materi 1–3). `16.05.28` dan `16.05.33` isinya sama (duplikat).
+Sumber: 12 gambar materi kursus SMC (Materi 1–3) milik pihak lain, **tidak disertakan di repo** (hak cipta).
+Aturan di bawah ditulis ulang dengan kata-kata sendiri.
 Aturan di bawah **hanya** dari materi + penjelasan tambahan user di chat. Konsep yang tidak ada di
 materi (CHoCH, premium/discount, killzone, sesi, BSL/SSL klasik ICT) **tidak** dipakai kecuali user
 minta (lihat bagian "Tidak ada di materi").
@@ -23,7 +24,7 @@ Untuk candle ke-`i`: `o, h, l, c`.
 ---
 
 ## 1. Market Structure (HH, HL, LH, LL)
-**Sumber:** [Materi 1](<../materi/Screenshot 2026-11-11 at 16.05.18.png>)
+**Sumber:** Materi 1
 
 **Definisi dari materi:** market structure adalah kelanjutan trend bullish atau bearish, untuk
 melihat arah trend jangka panjang/pendek tergantung timeframe. Trend dianggap lanjut **selama tidak
@@ -48,7 +49,7 @@ break low-nya (bullish) atau high-nya (bearish)**.
 ---
 
 ## 2. Break of Structure (BOS) = pembalikan trend
-**Sumber:** [Materi 1 – BOS](<../materi/Screenshot 2026-11-11 at 16.05.28.png>)
+**Sumber:** Materi 1 – BOS
 
 **Definisi dari materi:** kalau market sudah membentuk structure bullish/bearish lalu terjadi break,
 trend **berbalik arah**. Contoh di gambar: "Terjadi break antara HH karena tidak bisa mempertahankan
@@ -71,7 +72,7 @@ area HH-nya, maka berubah menjadi LH" (bullish → bearish), dan sebaliknya untu
 ---
 
 ## 3. Order Block (OB) — POI utama
-**Sumber:** [Materi 2 – OB](<../materi/Screenshot 2026-11-11 at 16.05.43.png>), penjelasan user di chat
+**Sumber:** Materi 2 – OB, penjelasan user di chat
 
 **Definisi dari materi:**
 - **Short:** "carilah satu candle **paling tinggi** sebelum candle itu turun, dengan lidi/wick
@@ -123,7 +124,7 @@ Candle `i` adalah **bullish OB** jika:
 ---
 
 ## 4. Fair Value Gap (FVG) — data pendukung OB
-**Sumber:** [Materi 2 – FVG](<../materi/Screenshot 2026-11-11 at 16.05.47.png>)
+**Sumber:** Materi 2 – FVG
 
 **Definisi dari materi:** gap/ruang di antara **tiga candle** yang wick-nya tidak tertutup.
 - FVG **hanya data pendukung**: limit entry **di OB, bukan di FVG**, karena FVG pasti tertembus
@@ -146,7 +147,7 @@ Candle `i` adalah **bullish OB** jika:
 ---
 
 ## 5. RBS & SBR (Resistance become Support / Support become Resistance)
-**Sumber:** [RBS](<../materi/Screenshot 2026-11-11 at 16.05.51.png>), [SBR](<../materi/Screenshot 2026-11-11 at 16.05.54.png>)
+**Sumber:** RBS, SBR
 
 **Definisi dari materi:**
 - **RBS:** area yang sebelumnya **resistance** lalu **tertembus**, berubah menjadi **support**.
@@ -168,7 +169,7 @@ Candle `i` adalah **bullish OB** jika:
 ---
 
 ## 6. OCL (Open Close Candle) & OCL Break
-**Sumber:** [Materi 2 – OCL](<../materi/Screenshot 2026-11-11 at 16.05.58.png>) + contoh "OCLBREAK BUY" dari user
+**Sumber:** Materi 2 – OCL + contoh "OCLBREAK BUY" dari user
 (2026-11-11)
 
 **Definisi:**
@@ -190,7 +191,7 @@ Candle `i` adalah **bullish OB** jika:
 ---
 
 ## 7. QM (Quasimodo)
-**Sumber:** [Materi 2 – QM](<../materi/Screenshot 2026-11-11 at 16.06.01.png>)
+**Sumber:** Materi 2 – QM
 
 **Definisi dari materi:** QM yang bagus berbentuk **tiga gunung**. Gunung ketiga "pasti akan nurut"
 dan menjadi area entry. Garis QM ditarik di level **gunung satu**. Contoh real: harga kembali ke garis
@@ -213,9 +214,9 @@ biasanya **menembus wick** gunung pertama. Di gunung ketiga, QM kena di **titik 
 ---
 
 ## 8. Konfirmasi Entry: POI hit POI → OB valid
-**Sumber:** [Materi 3 bullish](<../materi/Screenshot 2026-11-11 at 16.06.09.png>),
-[bearish](<../materi/Screenshot 2026-11-11 at 16.06.23.png>),
-[RBS H4 → OB valid M15](<../materi/Screenshot 2026-11-11 at 16.06.27.png>), penjelasan user
+**Sumber:** Materi 3 bullish,
+bearish,
+RBS H4 → OB valid M15, penjelasan user
 
 **Definisi dari materi:**
 - "OB hit OB dan menciptakan OB baru", atau "POI hit POI menciptakan POI baru".

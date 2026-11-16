@@ -19,7 +19,6 @@ Status: Fase 1 ✅ · Fase 2 ✅ (full backfill dijalankan user sendiri di PC) �
 ```
 drizzle/                    migration SQL hasil drizzle-kit (ikut dipaketkan sebagai resource)
 docs/                       PLAN.md, smc-rules.md (Fase 4)
-materi/                     gambar materi SMC/ICT (input Fase 4)
 src/
   shared/                   types + zod schema dipakai main & renderer (tanpa import Node)
     ipc.ts                  kontrak IPC (nama channel + tipe)
@@ -92,7 +91,7 @@ src/
      `sync_state.last`; kalau ada lubang → isi via REST dulu. Endpoint `/market/stream`.
      Auto-sync melacak simbol yang sudah punya histori + watchlist; setelah full backfill pertama,
      semua simbol aktif (listing baru otomatis ter-backfill).
-4. **Materi SMC** — baca semua gambar `materi/` → `docs/smc-rules.md` (yang ambigu ditandai &
+4. **Materi SMC** — baca gambar materi kursus (tidak disertakan di repo) → `docs/smc-rules.md` (yang ambigu ditandai &
    ditanyakan) → setelah konfirmasi: detektor fungsi murni + unit test, dipakai live & backtest.
 5. **Kalender ekonomi & news** — adapter sumber (cek investing.com secara wajar, tidak bypass
    proteksi; alternatif disiapkan), `economic_events`, aturan interpretasi di config, news window,

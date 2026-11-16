@@ -11,3 +11,6 @@ release-1
 .env*
 data-cache
 *.tsbuildinfo
+
+# materi kursus pihak lain (hak cipta), cuma disimpan lokal
+materi/

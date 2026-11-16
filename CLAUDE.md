@@ -7,7 +7,7 @@ SMC/ICT, news ekonomi USD, dan Claude sebagai analis berkala. Rencana lengkap & 
 ## Cara kerja dengan user
 - Bahasa Indonesia santai (user pakai "gua/lo"). Ringkas, langsung ke poin.
 - Kerjakan **per fase**. Selesai satu fase → **berhenti, kasih ringkasan**, tunggu go sebelum lanjut.
-- Hal yang ambigu (terutama aturan SMC dari `materi/`) → tandai dan tanyakan, jangan ditebak.
+- Hal yang ambigu (terutama aturan SMC di `docs/smc-rules.md`) → tandai dan tanyakan, jangan ditebak.
 - **Jangan bikin fitur kirim order live** sampai user minta. Default paper/testnet.
 - **Full backfill (~10 GB) dijalankan user sendiri di PC pribadinya**, bukan oleh Claude dan bukan
   di laptop kerja. Untuk tes pakai `--test` (5 simbol) atau `--symbols`.
@@ -199,7 +199,7 @@ dites ke exchange beneran.
 4. ~~Q1–Q19 SMC~~ → selesai (lihat `docs/smc-rules.md`).
 
 ## SMC
-- Sumber kebenaran aturan: `docs/smc-rules.md` (dari `materi/` + penjelasan user). Jangan menambah
+- Sumber kebenaran aturan: `docs/smc-rules.md` (dari materi kursus user, gambarnya tidak disimpan di repo, + penjelasan user). Jangan menambah
   konsep di luar materi tanpa izin.
 - User: OB/OB valid dikenali dari **bentuk candle**. Wick candle terakhir lebih panjang = sisa
   **liquidity**. Liquidity harus tampil di chart.
