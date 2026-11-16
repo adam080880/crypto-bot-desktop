@@ -88,6 +88,8 @@ export interface BotState {
   /** Symbols waiting for a Claude analysis requested by the bot. */
   awaitingClaude: string[]
   trades: BotTrade[]
+  /** Per entry model, every closed (filled) trade of the current mode. */
+  modelStats: ModelStat[]
   /** Coins with no new entries after repeated SL (bot.slBlacklistCount). */
   blacklist: { symbol: string; losses: number; until: number }[]
   events: BotEvent[]
@@ -127,4 +129,38 @@ export function tradeOutcome(t: Pick<BotTrade, 'status' | 'pnl' | 'riskUsd' | 'd
   const stopAtBe = t.direction === 'bullish' ? t.sl >= t.entry : t.sl <= t.entry
   if (Math.abs(r) < BE_BAND_R || (stopAtBe && r <= 0 && r > -0.3)) return 'be'
   return r > 0 ? 'win' : 'loss'
+}
+
+export interface ModelStat {
+  model: EntryModel
+  trades: number
+  wins: number
+  bes: number
+  losses: number
+  /** Win rate without BE: wins ÷ (wins + losses); null when there are none. */
+  wr: number | null
+  /** Sum and mean of net R (PnL ÷ planned loss). */
+  totalR: number
+  avgR: number | null
+  pnl: number
+}
+
+/** Win / BE / loss and R per entry model of closed trades. */
+export function modelStats(trades: readonly BotTrade[]): ModelStat[] {
+  const by = new Map<EntryModel, ModelStat>()
+  for (const t of trades) {
+    const o = tradeOutcome(t)
+    if (!o) continue
+    const m = by.get(t.model) ?? { model: t.model, trades: 0, wins: 0, bes: 0, losses: 0, wr: null, totalR: 0, avgR: null, pnl: 0 }
+    m.trades++
+    if (o === 'win') m.wins++
+    else if (o === 'be') m.bes++
+    else m.losses++
+    m.totalR += tradeR(t) ?? 0
+    m.pnl += t.pnl ?? 0
+    by.set(t.model, m)
+  }
+  return [...by.values()]
+    .map((m) => ({ ...m, wr: m.wins + m.losses ? m.wins / (m.wins + m.losses) : null, avgR: m.trades ? m.totalR / m.trades : null }))
+    .sort((a, b) => a.model.localeCompare(b.model))
 }

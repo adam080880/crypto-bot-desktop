@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import type { BotEventLevel, BotState, BotTrade } from '@shared/bot'
+import { modelStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
 import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import { MODEL_LABEL, setupPath } from '@shared/smc'
@@ -379,6 +379,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       awaitingClaude: [...this.awaiting],
       trades: this.repo.recent(100),
       blacklist: [...this.blacklist(this.mode(), Date.now()).values()],
+      modelStats: modelStats(this.repo.closedSince(this.mode(), 0)),
       events: this.repo.events(200),
       lastError: this.lastError
     }

@@ -27,3 +27,20 @@ describe('SL blacklist', () => {
     expect(slBlacklist([t('X', -1, 1), t('X', -1, 2), t('X', -1, 3)], { ...bot, slBlacklistCount: 0 }, now).size).toBe(0)
   })
 })
+
+describe('modelStats', () => {
+  it('counts win / BE / loss and R per model', async () => {
+    const { modelStats } = await import('@shared/bot')
+    const base = { status: 'closed', riskUsd: 1, direction: 'bullish', entry: 100, sl: 99 } as const
+    const s = modelStats([
+      { ...base, model: 'M1', pnl: 2 },
+      { ...base, model: 'M1', pnl: -1 },
+      { ...base, model: 'M1', pnl: 0.05 },
+      { ...base, model: 'M2a', pnl: -1 },
+      { ...base, model: 'M2a', status: 'cancelled', pnl: null }
+    ] as never)
+    expect(s.find((m) => m.model === 'M1')).toMatchObject({ trades: 3, wins: 1, bes: 1, losses: 1, wr: 0.5 })
+    expect(s.find((m) => m.model === 'M1')!.totalR).toBeCloseTo(1.05)
+    expect(s.find((m) => m.model === 'M2a')).toMatchObject({ trades: 1, losses: 1, wr: 0 })
+  })
+})

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
 import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
-import { setupPoiLabel } from '@shared/smc'
+import { MODEL_LABEL, setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -217,6 +217,44 @@ export function Bot() {
           <TradeTable trades={active} actions />
         </CardContent>
       </Card>
+
+      {!!st?.modelStats?.length && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Per model ({live ? 'live' : 'paper'})</CardTitle>
+            <CardDescription>Semua trade yang sudah terisi dan selesai. WR tanpa BE = untung ÷ (untung + rugi). R = PnL bersih fee ÷ risk awal.</CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground">
+                <tr>
+                  {['model', 'trade', 'untung', 'BE', 'rugi', 'WR (tanpa BE)', 'BE %', 'total R', 'rata-rata R', 'PnL'].map((h) => (
+                    <th key={h} className="px-3 py-1.5 font-normal whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="num">
+                {st.modelStats.map((m) => (
+                  <tr key={m.model} className="border-t">
+                    <td className="px-3 py-1.5 whitespace-nowrap">{MODEL_LABEL[m.model]}</td>
+                    <td className="px-3 py-1.5">{m.trades}</td>
+                    <td className="px-3 py-1.5 text-bull">{m.wins}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{m.bes}</td>
+                    <td className="px-3 py-1.5 text-bear">{m.losses}</td>
+                    <td className="px-3 py-1.5">{m.wr === null ? '—' : `${Math.round(m.wr * 100)}%`}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{Math.round((m.bes / m.trades) * 100)}%</td>
+                    <td className={cn('px-3 py-1.5', m.totalR > 0 ? 'text-bull' : m.totalR < 0 ? 'text-bear' : '')}>{m.totalR.toFixed(2)}R</td>
+                    <td className={cn('px-3 py-1.5', (m.avgR ?? 0) > 0 ? 'text-bull' : (m.avgR ?? 0) < 0 ? 'text-bear' : '')}>{m.avgR === null ? '—' : `${m.avgR.toFixed(2)}R`}</td>
+                    <td className={cn('px-3 py-1.5', m.pnl > 0 ? 'text-bull' : m.pnl < 0 ? 'text-bear' : '')}>{m.pnl.toFixed(2)} USDT</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
