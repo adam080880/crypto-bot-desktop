@@ -27,19 +27,60 @@ SMC/ICT, screener, backtest, bot (paper/live), radar pump, kalender news USD, da
 | **Claude Analyses** | Analisis berkala koin watchlist lewat Claude Agent SDK (opsional, read-only tools) |
 | **Radar pump** | Koin dengan volume 24 jam ≥ 8× median atau funding negatif + volume tinggi → notifikasi Discord/desktop |
 
-### Model entry (`src/main/strategy/setups.ts`)
+## Apa itu SMC (versi app ini)
 
-| Model | Ringkas |
+**SMC (Smart Money Concepts)** / **ICT** adalah cara membaca chart dengan asumsi harga bergerak ke tempat
+banyak order menunggu (liquidity), lalu bereaksi di zona tempat pemain besar dulu masuk (POI, *point of
+interest*). App ini **tidak** memakai definisi ICT umum mentah-mentah. Aturannya diambil dari materi kursus
+yang dipelajari penulis, ditulis ulang di [`docs/smc-rules.md`](docs/smc-rules.md), lalu dijadikan kode yang
+bisa dites. Semua detektor ada di `src/main/strategy/`.
+
+| Konsep | Arti di app ini |
 |---|---|
-| M0 | Aturan lama (baseline): POI kena → OB valid |
-| M1 | POI besar → CHoCH 15m + displacement → QM/OB kecil |
-| M2a / M2b | Liquidity grab: OB di balik SSL/BSL, atau grab + CHoCH |
-| M4 | Breaker 1h/4h (OB yang dijebol setelah sweep), TP 1R |
-| M5 | Trend breakout 4h (Donchian + EMA200), SL 3× ATR, trailing (bukan SMC) |
-| M6 | Radar pump → close 1h tembus box 24 jam, long saja, SL 3× ATR, **TP manual** |
+| **Market structure** (HH, HL, LH, LL) | Trend naik = rangkaian Higher High + Higher Low; trend turun = Lower High + Lower Low. Trend dianggap lanjut selama low (naik) / high (turun) terakhir tidak ditembus |
+| **BOS** (Break of Structure) | Close menembus swing yang menjaga trend → **trend berbalik**. (Di ICT umum ini disebut CHoCH; app memakai istilah materi) |
+| **CHoCH LTF** | Flip struktur kecil di TF entry (15m) setelah harga menyentuh POI besar. Dipakai sebagai konfirmasi |
+| **Order Block (OB)** | Candle di swing low/high yang wick-nya lebih panjang dari candle sebelumnya **dan** warnanya searah (OB bullish = candle hijau dengan wick bawah panjang). Wick panjang = sisa liquidity. Garis entry = ujung body |
+| **OB valid** | "POI kena POI": setelah OB/POI pertama kena, terbentuk OB baru di dekatnya. Itulah yang dipakai untuk limit |
+| **FVG** (Fair Value Gap) | Celah tiga candle yang wick-nya tidak saling menutup. **Hanya konfluensi**, app tidak pernah entry di FVG |
+| **RBS / SBR** | Resistance yang ditembus close jadi support (RBS), atau sebaliknya (SBR) |
+| **OCL / OCL Break** | Dua candle searah berurutan (level = close candle pertama); OCL Break = candle lawan arah yang close melewati body itu. Hanya dipakai sebagai POI induk dari TF besar |
+| **QM** (Quasimodo) | Pola "tiga gunung": gunung kedua menembus gunung pertama, entry saat harga kembali ke body gunung pertama |
+| **Liquidity** | Wick OB yang belum tersapu + swing high/low (BSL/SSL) dan equal high/low yang belum disapu |
+| **Sweep** | Harga menembus liquidity lalu balik. Banyak model mensyaratkan POI terbentuk karena sweep (*origin*) |
 
-Semua detektor adalah fungsi murni dan **tidak repaint** (hanya candle yang sudah close), dipakai sama persis
-oleh chart, screener, backtest, dan bot.
+Detektor hanya memakai candle yang sudah close (tidak repaint), dan **fungsi yang sama** dipakai chart,
+screener, backtest, dan bot. Jadi hasil backtest = perilaku live.
+
+## Model entry
+
+Setiap model menghasilkan *setup*: arah, harga entry (limit), SL, dan rencana exit. Model bisa dinyalakan
+satu per satu di **Settings → Bot entry**, dan dibandingkan di halaman **Backtest**.
+
+| Model | Kapan entry | SL | Exit default |
+|---|---|---|---|
+| **M0** baseline | POI kena → OB valid terbentuk → limit di OB valid | Di luar wick OB | Bertingkat |
+| **M1** POI besar → POI kecil | POI induk 1h/4h kena → CHoCH 15m dengan displacement → limit di POI kecil yang tercipta (prioritas QM > OB dengan FVG > OB) | Di luar ekstrem leg sejak POI kena | Bertingkat |
+| **M2a** liquidity grab | Ada OB tepat di balik SSL/BSL yang belum disapu → limit langsung di OB itu | Di luar wick OB | Bertingkat |
+| **M2b** grab + konfirmasi | Seperti M2a, tapi tunggu sweep + CHoCH 15m dulu, lalu entry di POI kecil seperti M1 | Di luar ekstrem leg | Bertingkat |
+| **M4** breaker | OB 1h/4h yang dijebol setelah sweep berubah fungsi → limit saat harga retest | Ujung lain OB | **TP 1R** |
+| **M5** trend 4h (bukan SMC) | Close 4h tembus high/low 20 candle dan di sisi benar EMA200 → limit di close itu | 3× ATR | Trailing saja, tanpa BE/TP |
+| **M6** radar pump (bukan SMC) | Radar bunyi (volume 24j ≥ 8× median, atau funding ≤ −0,05% + volume ≥ 3×) → close 1h tembus box 24 jam → limit di close itu. Long saja | 3× ATR 1h | **Tanpa TP: ambil profit manual**, SL trailing |
+
+SL semua model SMC (M0–M4) minimal 1× ATR(14) TF entry; kalau lebih sempit, SL dilebarkan dan ukuran posisi
+otomatis mengecil (risk per trade tetap).
+
+**Exit bertingkat** (`src/main/strategy/exit.ts`, dipakai backtest dan bot): di 1R SL ke break-even bersih
+fee; kalau SL < 1% dari harga, BE baru di 2R dan mengunci +0,5R. Di 3R tutup 50% dan SL ke 1R, lalu trailing.
+Kalau ada *order flow* (FVG searah yang diretest dan mantul, atau wick penolakan di area entry), posisi ditahan.
+
+**Konfluensi** (tag, bisa diwajibkan per model): FVG, searah trend TF POI, sweep, POI HTF, trend BTC 4h/1h,
+Wyckoff, killzone, open interest naik searah (`oiConfirm`), OI tidak turun (`oiHold`), funding lawan crowd, dan
+`anomaly` (volume 24 jam ≥ 3× median). Skor setup cuma info, di backtest tidak berkorelasi dengan hasil.
+
+**Pengaman sebelum order** (`src/main/bot/gate.ts`): koin crypto top 100 volume, satu posisi per koin, batas
+posisi terbuka, berhenti sisa hari kalau rugi harian ≥ batas, tidak entry di news window USD, setup harus baru,
+harga belum lewat TP/entry, dan (opsional) analisis Claude searah dengan confidence ≥ batas.
 
 ## Instalasi
 
@@ -136,4 +177,5 @@ disertai unit test dan hasil backtest (in-sample + out-of-sample, termasuk fee).
 
 ## Lisensi
 
-Belum ada lisensi. Sampai file `LICENSE` ditambahkan, semua hak cipta tetap pada penulis.
+[MIT](LICENSE). Bebas dipakai, diubah, dan disebarkan, termasuk untuk komersial, asal menyertakan
+pemberitahuan lisensi. Perangkat lunak ini diberikan **apa adanya, tanpa jaminan apa pun**.
