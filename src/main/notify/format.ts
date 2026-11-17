@@ -76,8 +76,16 @@ export function botMessages(events: readonly BotEvent[]): DiscordMessage[] {
   return out
 }
 
-/** New screener setups (automatic scan). */
+/** New screener setups (automatic scan): entry / SL / TP with the TP in R and the 1R price. */
 export function screenerMessage(rows: readonly ScreenerRow[]): DiscordMessage {
-  const lines = rows.slice(0, 15).map((r) => `• **${r.symbol}** ${r.direction === 'bullish' ? 'LONG' : 'SHORT'} · ${r.setup!.model} · RR ${r.setup!.rr}`)
+  const lines = rows.slice(0, 15).map((r) => {
+    const s = r.setup!
+    const bull = r.direction === 'bullish'
+    const risk = Math.abs(s.entry - s.sl)
+    const trail = s.model === 'M5' || s.model === 'M6'
+    const oneR = bull ? s.entry + risk : s.entry - risk
+    const tp = trail ? 'TP trailing' : `TP ${price(s.tp)} (+${s.rr}R)`
+    return `• **${r.symbol}** ${bull ? 'LONG' : 'SHORT'} · ${s.model} · limit ${price(s.entry)} · SL ${price(s.sl)} (−1R, ${((risk / s.entry) * 100).toFixed(2)}%) · ${tp} · 1R @${price(oneR)} · skor ${s.score}`
+  })
   return { content: `🔎 **Screener**: ${rows.length} setup baru\n${lines.join('\n')}${rows.length > 15 ? `\n+${rows.length - 15} lagi` : ''}` }
 }
