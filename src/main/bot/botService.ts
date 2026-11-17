@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { modelStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
+import { modelStats, tradeR, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
 import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import { MODEL_LABEL, setupPath } from '@shared/smc'
@@ -13,6 +13,7 @@ import { logger } from '../logger'
 import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTrade'
 import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
 import { slBlacklist } from './blacklist'
+import { fmtR, rAt, targetsText, tpText } from './rText'
 import { accountGate, candidatesOf, claudeGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
 import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
@@ -186,7 +187,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
           continue
         }
         cur = { ...cur, ...(await b.partialClose(cur, qty, f.price, rules)) }
-        this.event('order', t.symbol, `TP sebagian ${qty} @${f.price} (${Math.round(f.frac * 100)}%)`)
+        this.event('order', t.symbol, `TP sebagian ${qty} @${f.price} (${Math.round(f.frac * 100)}%, ${fmtR(rAt(t, f.price))})`)
       }
       const bull = t.direction === 'bullish'
       // nearest tick: a break-even stop rounded away from price would no longer cover the fees
@@ -194,7 +195,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       if (!r.done && (bull ? sl > cur.sl : sl < cur.sl)) {
         cur = { ...cur, ...(await b.moveStop(cur, sl, rules)) }
         const why = r.holding ? 'order flow' : (bull ? sl >= t.entry : sl <= t.entry) ? 'BE/trailing' : 'trailing'
-        this.event('order', t.symbol, `SL dipindah ke ${sl} (${why})`)
+        this.event('order', t.symbol, `SL dipindah ke ${sl} (${why}, kunci ${fmtR(rAt(t, sl))})`)
       }
       const state = { bestR: Math.round(r.mfeR * 100) / 100, holding: r.holding, holds: r.orderFlowHolds }
       if (r.holding && !t.exitState?.holding) this.event('info', t.symbol, 'order flow terkonfirmasi → posisi ditahan sampai TP / close manual')
@@ -614,7 +615,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.event(
       'order',
       c.symbol,
-      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} · TP ${plan.tp ?? 'trailing'} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}× · margin ${lev.marginUsd.toFixed(2)} · likuidasi ±${lev.liqDistPct.toFixed(1)}%) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${setupPath(c.setup.model, c.setup.poi.kind, c.setup.poi.timeframe, c.setup.child.kind, c.setup.child.timeframe)} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
+      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} (−1R) · ${tpText(trade)}${targetsText(trade) ? ` · ${targetsText(trade)}` : ''} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}× · margin ${lev.marginUsd.toFixed(2)} · likuidasi ±${lev.liqDistPct.toFixed(1)}%) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${setupPath(c.setup.model, c.setup.poi.kind, c.setup.poi.timeframe, c.setup.child.kind, c.setup.child.timeframe)} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
     )
     this.updateStreams()
   }
@@ -675,11 +676,11 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         const next = { ...t, ...patch }
         this.repo.save(next)
         changed = true
-        if (next.status === 'open' && t.status === 'pending') this.event('order', t.symbol, `entry terisi @${t.entry} (qty ${next.filledQty}), SL ${t.sl} / TP ${t.tp ?? 'trailing'} aktif`)
+        if (next.status === 'open' && t.status === 'pending') this.event('order', t.symbol, `entry terisi @${t.entry} (qty ${next.filledQty}), SL ${t.sl} (${fmtR(rAt(t, t.sl))}) / ${tpText(t)} aktif${targetsText(t) ? ` · ${targetsText(t)}` : ''}`)
         if (next.status === 'closed' || next.status === 'cancelled') this.trackers.delete(t.id)
         if (next.status === 'closed') {
           this.equityCache = null
-          this.event(next.pnl! >= 0 ? 'order' : 'warn', t.symbol, `posisi ditutup (${next.reason}) @${next.exitPrice ?? '?'} · PnL ${next.pnl!.toFixed(3)} USDT`)
+          this.event(next.pnl! >= 0 ? 'order' : 'warn', t.symbol, `posisi ditutup (${next.reason}) @${next.exitPrice ?? '?'} · PnL ${next.pnl!.toFixed(3)} USDT${tradeR(next) !== null ? ` (${fmtR(tradeR(next)!)} bersih fee)` : ''}`)
         }
         if (next.status === 'cancelled') this.event('order', t.symbol, `order hilang/dibatalkan di exchange (${next.reason})`)
       } catch (err) {
