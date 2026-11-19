@@ -372,7 +372,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M1: ['fvg', 'trendParent', 'pdZone'],
   M2a: ['trendParent'], // n 39 only; pdZone hurts M2a
   M2b: ['fvg', 'trendParent', 'pdZone'],
-  M4: ['fvg', 'btc1h', 'slLiqClear'], // +0,27R (IS +0,24 / OOS +0,32) vs +0,01R
+  M4: ['fvg', 'oiConfirm', 'slLiqClear'], // 300 koin: +0,27R (IS +0,27 / OOS +0,28) vs −0,04R; fvg+btc1h+slLiqClear +0,17R
   M5: ['btc1h', 'anomaly'], // +0,23R (IS +0,24 / OOS +0,22); old oiConfirm+oiHold: OOS −0,23R
   M6: []
 }

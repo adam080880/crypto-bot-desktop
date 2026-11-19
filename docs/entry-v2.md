@@ -442,3 +442,17 @@ list SMC untuk semua model tidak bisa dipakai. Hasilnya `bot.modelConfluence` (l
 M0–M4 dan list M5 ke M5, jadi perilaku bot tidak berubah. Tombol **Isi rekomendasi lab** di Settings → Bot mengisi
 `RECOMMENDED_MODEL_CONFLUENCE`. Catatan: M0/M5 bergantung pada beberapa trade trailing besar. Tanpa 5% trade terbaik, M0
 rekomendasi ≈ +0,03R dan M5 ≈ +0,02R. WR ±40%.
+
+**Lab 300 koin (2026-11-19, sama periode).** Rekomendasi M0 tetap bagus di top 100 (+0,26R vs +0,19R tanpa syarat) tapi di
+peringkat 100–300 sama saja dengan tanpa syarat (+0,14R). M4 `fvg+btc1h+slLiqClear` +0,17R di kedua kelompok, tapi
+`fvg+oiConfirm+slLiqClear` lebih kuat: +0,27R (IS +0,27 / OOS +0,28), n 653, 260 koin, jadi rekomendasi M4 diganti ke situ.
+M2a `trendParent` +0,09R. M1 ±0. M5 `btc1h+anomaly` lemah di koin kecil (+0,05R); `btc1h+btcDom+wyckoff` +0,19R stabil
+(n 3300). M6 tidak ada kombinasi positif. User: M1/M5/M6 mati, `bot.topVolume` 300.
+
+**Filter momentum sebelum fill ditolak.** Dari 45 trade live (16–19 Nov), SL banyak terjadi saat short setelah koin naik > 2R
+dalam 4 jam atau BTC naik > 0,6% dalam 2 jam. Di lab 300 koin pola itu tidak berlaku: setup M0 yang akan di-skip justru +0,13R
+vs +0,11R untuk yang diambil, model lain juga datar. Jadi itu efek periode, bukan aturan. Sejalan dengan lab 18 Nov.
+
+**Campur tangan manual (simulasi trade live, ExitTracker sama dengan bot).** TP manual terlalu cepat: +12,4R aktual vs +20,2R
+kalau dibiarkan. Cancel di Binance: +6,7R hilang. "Lewat TP = batal" impas kalau limit tetap ditunggu sampai expired 24 jam
+(+0,4R di 75 order), jadi aturan itu tetap. BE menyelamatkan ±3,5R dibanding SL awal vs TP saja.

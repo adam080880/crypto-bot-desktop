@@ -109,7 +109,7 @@ describe('setupGate', () => {
   it('rejects models the bot does not trade and missing required confluences', () => {
     expect(setupGate(cand({ model: 'M0' }), o)).toMatch(/tidak dipakai bot/)
     expect(setupGate(cand({ confluence: ['fvg', 'pdZone'] }), o)).toMatch(/konfluensi wajib: trendParent/)
-    expect(setupGate(cand({ model: 'M4', confluence: ['fvg', 'btc1h', 'slLiqClear'], poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
+    expect(setupGate(cand({ model: 'M4', confluence: ['fvg', 'oiConfirm', 'slLiqClear'], poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
   })
   it('each model has its own required confluence list', () => {
     const b = { ...bot, models: ['M0' as const, 'M4' as const], modelConfluence: { ...bot.modelConfluence, M0: ['prevOpposite' as const], M4: ['fvg' as const] } }

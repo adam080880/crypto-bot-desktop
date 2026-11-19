@@ -82,7 +82,8 @@ dites ke exchange beneran.
 - **Konfluensi per model** (2026-11-19, `docs/entry-v2.md §18`): `bot.modelConfluence` (list wajib per model) menggantikan
   `requireConfluence` + `trendRequireConfluence` (dimigrasi sekali di `AppState`). Alasannya, M0 tidak pernah punya `fvg` dan M4 tidak pernah
   punya `prevOpposite`. Rekomendasi lab (`RECOMMENDED_MODEL_CONFLUENCE`, tombol di Settings): M0 `prevOpposite+slLiqClear`, M4
-  `fvg+btc1h+slLiqClear`, M5 `btc1h+anomaly` (default lama M5 `oiConfirm+oiHold` OOS −0,23R). M1 negatif di semua kombinasi.
+  `fvg+oiConfirm+slLiqClear` (lab 300 koin), M5 `btc1h+anomaly` (default lama M5 `oiConfirm+oiHold` OOS −0,23R). M1 negatif di semua kombinasi.
+  Filter momentum sebelum fill (koin > 2R / BTC > 0,6% melawan) tidak ada edge di lab 300 koin, jadi tidak dibuat.
 - **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
