@@ -15,6 +15,7 @@ import { logger } from '../logger'
 import type { SecretStore } from '../security/secrets'
 import type { AppState } from '../state/appState'
 import type { DataController } from '../sync/dataController'
+import { btcDomFeed } from '../flow/btcDom'
 import { SmcService } from '../strategy/service'
 import { NewsRepo } from '../news/repo'
 import { ClaudeRepo } from '../claude/repo'
@@ -45,6 +46,7 @@ export function registerIpcHandlers(deps: {
   const { db, state, secrets, data, isTrustedSender } = deps
   const candles = new CandleRepo(db) // main-process reads; the data worker is the only writer
   const smc = new SmcService(db)
+  btcDomFeed.enable() // chart / setup views tag btcDom too (fetched lazily)
   const news = new NewsRepo(db)
   const claude = new ClaudeRepo(db)
 

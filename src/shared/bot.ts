@@ -88,8 +88,10 @@ export interface BotState {
   /** Symbols waiting for a Claude analysis requested by the bot. */
   awaitingClaude: string[]
   trades: BotTrade[]
-  /** Per entry model, every closed (filled) trade of the current mode. */
+  /** Per entry model, closed (filled) trades of the current mode opened since bot.statsSince. */
   modelStats: ModelStat[]
+  /** Same trades, all models together (null when there are none). */
+  statsTotal: TradeStat | null
   /** Coins with no new entries after repeated SL (bot.slBlacklistCount). */
   blacklist: { symbol: string; losses: number; until: number }[]
   events: BotEvent[]
@@ -131,8 +133,11 @@ export function tradeOutcome(t: Pick<BotTrade, 'status' | 'pnl' | 'riskUsd' | 'd
   return r > 0 ? 'win' : 'loss'
 }
 
-export interface ModelStat {
+export interface ModelStat extends TradeStat {
   model: EntryModel
+}
+
+export interface TradeStat {
   trades: number
   wins: number
   bes: number
@@ -143,24 +148,38 @@ export interface ModelStat {
   totalR: number
   avgR: number | null
   pnl: number
+  /** Largest peak-to-trough fall of the cumulative R, trades in close order (≥ 0). */
+  maxDdR: number
 }
 
-/** Win / BE / loss and R per entry model of closed trades. */
-export function modelStats(trades: readonly BotTrade[]): ModelStat[] {
-  const by = new Map<EntryModel, ModelStat>()
-  for (const t of trades) {
+/** Win / BE / loss, R and drawdown of closed trades (null when none counts). */
+export function tradeStats(trades: readonly BotTrade[]): TradeStat | null {
+  const done = trades.filter((t) => tradeOutcome(t) !== null).sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0))
+  if (!done.length) return null
+  const m: TradeStat = { trades: 0, wins: 0, bes: 0, losses: 0, wr: null, totalR: 0, avgR: null, pnl: 0, maxDdR: 0 }
+  let peak = 0
+  for (const t of done) {
     const o = tradeOutcome(t)
-    if (!o) continue
-    const m = by.get(t.model) ?? { model: t.model, trades: 0, wins: 0, bes: 0, losses: 0, wr: null, totalR: 0, avgR: null, pnl: 0 }
     m.trades++
     if (o === 'win') m.wins++
     else if (o === 'be') m.bes++
     else m.losses++
     m.totalR += tradeR(t) ?? 0
     m.pnl += t.pnl ?? 0
-    by.set(t.model, m)
+    peak = Math.max(peak, m.totalR)
+    m.maxDdR = Math.max(m.maxDdR, peak - m.totalR)
   }
-  return [...by.values()]
-    .map((m) => ({ ...m, wr: m.wins + m.losses ? m.wins / (m.wins + m.losses) : null, avgR: m.trades ? m.totalR / m.trades : null }))
+  return { ...m, wr: m.wins + m.losses ? m.wins / (m.wins + m.losses) : null, avgR: m.totalR / m.trades }
+}
+
+/** tradeStats per entry model. */
+export function modelStats(trades: readonly BotTrade[]): ModelStat[] {
+  const by = new Map<EntryModel, BotTrade[]>()
+  for (const t of trades) by.set(t.model, [...(by.get(t.model) ?? []), t])
+  return [...by.entries()]
+    .flatMap(([model, ts]) => {
+      const s = tradeStats(ts)
+      return s ? [{ model, ...s }] : []
+    })
     .sort((a, b) => a.model.localeCompare(b.model))
 }

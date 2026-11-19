@@ -352,3 +352,93 @@ Catatan: koin dipilih karena sering anomali (bias seleksi), dan M5 di lab ini ta
 - Blacklist SL: koin dengan ≥ `bot.slBlacklistCount` (3) trade rugi (BE tidak dihitung) dalam `bot.slBlacklistHours` (168 jam)
   tidak dientry lagi sampai SL ke-N terbaru keluar dari jendela. Per mode (paper/live). Daftar tampil di halaman Bot.
 - SBR/RBS dicek ulang: break = **close** (body) lewat level body swing; wick saja tidak dihitung (test di `detectors.test.ts`).
+
+## 15. BTC dominance `btcDom` (permintaan user, 2026-11-17)
+- Sumber: kontrak index Binance `BTCDOMUSDT`, diambil langsung dari REST klines publik (`src/main/flow/btcDom.ts`).
+  **Tidak disimpan** di DB, tetap ada di `data.excludeSymbols`, jadi tidak di-backfill, di-screen, atau ditrade.
+- Live: `btcDomFeed` per proses (data worker + main), 1000 candle `smc.btcDomTimeframe` (default 4h). Fetch ulang baru
+  dilakukan setelah ada candle baru yang close (dicek tiap 20 detik di worker). Kalau fetch gagal, data lama tetap dipakai.
+  Backtest: worker download rentang data koin + 300 candle warm-up.
+- Tag `btcDom` (filter, tanpa skor): trend struktur BTCDOM (BOS/CHoCH, `trendKnownAt`, tanpa look-ahead) **turun** →
+  long altcoin oke, **naik** → short altcoin oke. Untuk `BTCUSDT` sendiri dibalik (BTCDOM naik → long BTC).
+- USDT.D sengaja **tidak** dibuat. Menurut user arahnya selalu 1:−1 dengan BTC, jadi sudah diwakili `btc4h` (bisa dijadikan
+  konfluensi wajib). Histori total market cap gratis juga tidak tersedia (CoinGecko global chart berbayar).
+- Belum diuji di lab.
+
+## 16. M0: liquidity POI, liquidity di belakang SL, OCL Break (permintaan user, 2026-11-18)
+- `poiLiq` (tafsiran A, sesuai materi "wick panjang = liquidity nyisa"): dari POI kena sampai OB valid terkonfirmasi,
+  tidak ada candle entry-TF yang tembus ekstrem POI (wick OB / ekstrem candle origin). **M0 wajib `poiLiq`** (`smc.m0RequirePoiLiq`).
+- `slLiqClear` (tafsiran B, ICT): tidak ada swing high/low yang belum disapu dalam `smc.slLiqZoneR` (1R) di belakang SL.
+  Tag filter untuk semua model, tidak wajib.
+- OCL Break bukan POI M0 lagi, kecuali TF di `smc.m0OclBreakTimeframes` (default `1w`, yang tidak dianalisis untuk setup,
+  jadi praktis cuma pantauan di chart).
+- Lab 40 koin top volume × 6 bulan, M0 saja, fill/exit 1m, fee, exit bertingkat + order flow (`ladderOF`):
+  | Filter | n | avg R | IS | OOS |
+  |---|---|---|---|---|
+  | semua M0 | 7881 | −0,10 | −0,07 | −0,17 |
+  | tanpa OCL Break | 6084 | −0,12 | −0,10 | −0,17 |
+  | OCL Break saja | 1797 | −0,06 | +0,02 | −0,20 |
+  | `poiLiq` | 5157 | −0,10 | −0,09 | −0,13 |
+  | tanpa `poiLiq` | 927 | −0,21 | −0,14 | −0,34 |
+  | `slLiqClear` / tanpa | 3114 / 2970 | −0,10 / −0,14 | | |
+  | `btc4h` + `poiLiq` + `slLiqClear` | 1366 | −0,07 | −0,07 | −0,05 |
+  | sama, minSlAtr 1,5 | 700 | −0,03 | −0,02 | −0,06 |
+  | `pdZone` | 3236 | −0,19 | −0,15 | −0,27 |
+- Kesimpulan: `poiLiq` konsisten membantu (IS & OOS). `slLiqClear` dan SL lebih lebar sedikit membantu. Membuang OCL Break
+  **tidak** membantu di lab (dibuang atas keputusan user). `pdZone` justru memperburuk M0. **Tidak ada kombinasi M0 yang
+  positif** di IS dan OOS.
+
+## 17. TF POI induk + poiStack (2026-11-18)
+
+User: POI 15m terlalu noise, mau POI yang ada di berbagai TF.
+
+- `bot.poiTimeframes` (POI induk yang boleh dipakai bot) sekarang berlaku untuk **M0, M1, M2a, M2b**. Dulu cuma M1/M2b, jadi
+  M2a banyak memakai POI 15m. M4 (breaker), M5, dan M6 tidak dibatasi. `smc.poiTimeframes` ditambah `1d` (tanpa itu M1/M2
+  tidak pernah membuat setup dari POI 1d).
+- Tag `poiStack` (filter, tanpa skor): POI induk berjarak ≤ `smc.poiStackPct` (default 0,3%) dari POI aktif searah di TF lain
+  (≥ 1h, bukan OCL Break) saat POI kena. `stackedTfs()` di `setups.ts`.
+
+Lab 40 koin top volume × 6 bulan, fill 1m + fee, exit ladderOF (avg R):
+
+| Grup | n | avg R | IS | OOS |
+|---|---|---|---|---|
+| Semua (M0/M1/M2a/M2b) | 10.472 | −0,105 | −0,110 | −0,093 |
+| POI 15m | 6.297 | −0,120 | −0,125 | −0,109 |
+| POI 1h | 2.982 | −0,135 | −0,125 | −0,157 |
+| POI 4h | 914 | −0,028 | −0,073 | +0,066 |
+| POI 1d | 279 | **+0,312** | +0,257 | +0,414 |
+| poiStack | 3.847 | −0,147 | −0,161 | −0,120 |
+| tanpa poiStack | 6.625 | −0,080 | −0,081 | −0,078 |
+| M0 POI 4h+1d | 693 | +0,118 | +0,078 | +0,201 |
+| M0 POI 4h+1d + btc4h | 378 | +0,108 | +0,105 | +0,116 |
+| M1 POI 4h+1d | 410 | −0,084 | −0,099 | −0,052 |
+| M2a POI 4h | 83 | +0,153 | −0,165 | +0,529 |
+
+Kesimpulan: TF POI induk adalah filter terkuat sejauh ini (1d > 4h >> 1h ≈ 15m). POI yang bertumpuk dengan POI TF lain justru
+lebih jelek (level yang jelas = liquidity yang disapu), jadi `poiStack` tidak dijadikan syarat. M0 dengan POI 4h/1d jadi
+kombinasi SMC pertama yang positif di IS dan OOS. M1 tetap negatif.
+
+
+## 18. Konfluensi wajib per model (lab + permintaan user, 2026-11-19)
+
+Lab: Backtest v2 (kode app) di 60 koin top volume 30 hari, data 12 Mei – 19 Nov 2026 (6 bulan, OOS = 60 hari terakhir),
+plus OI/funding dan BTCDOM. Exit sama dengan bot: SMC pakai bertingkat + order flow + TP liquidity, M4 TP 1R, M5/M6 trailing.
+POI M0–M2b 4h/1d. R bersih fee. Semua kombinasi 1–3 tag diuji (±2000). Yang diambil hanya yang positif di IS **dan** OOS,
+n ≥ 100, dan tersebar di banyak koin.
+
+| Model | Tanpa syarat | Rekomendasi | Hasil (IS / OOS) |
+|---|---|---|---|
+| M0 | +0,16R (n 1002) | `prevOpposite` + `slLiqClear` | +0,23R (+0,18 / +0,31), +`btcDom` → +0,30R (+0,28 / +0,34) |
+| M1 | −0,07R | — | tidak ada kombinasi yang berarti, matikan |
+| M2a | +0,09R (IS −0,20) | `trendParent` (n 39) | `pdZone` justru merusak |
+| M2b | n 9 | — | data kurang |
+| M4 | +0,01R | `fvg` + `btc1h` + `slLiqClear` | +0,27R (+0,24 / +0,32), 56 koin |
+| M5 | +0,05R | `btc1h` + `anomaly` | +0,23R (+0,24 / +0,22). `oiConfirm` + `oiHold` (default lama) rusak: OOS −0,23R |
+| M6 | +0,23R (OOS −0,01) | — | n kecil |
+
+Tiap model menempelkan tag yang berbeda: M0 tidak pernah punya `fvg`, M4 tidak pernah punya `prevOpposite`. Karena itu satu
+list SMC untuk semua model tidak bisa dipakai. Hasilnya `bot.modelConfluence` (list wajib per model) menggantikan
+`requireConfluence` dan `trendRequireConfluence`. Config lama dimigrasi sekali (`migr_bot_model_conf`): list SMC lama disalin ke
+M0–M4 dan list M5 ke M5, jadi perilaku bot tidak berubah. Tombol **Isi rekomendasi lab** di Settings → Bot mengisi
+`RECOMMENDED_MODEL_CONFLUENCE`. Catatan: M0/M5 bergantung pada beberapa trade trailing besar. Tanpa 5% trade terbaik, M0
+rekomendasi ≈ +0,03R dan M5 ≈ +0,02R. WR ±40%.

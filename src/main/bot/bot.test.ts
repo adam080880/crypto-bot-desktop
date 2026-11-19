@@ -4,7 +4,7 @@ import { botConfigSchema, exitConfigSchema, riskConfigSchema } from '@shared/con
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { BinanceApiError, isCryptoPerp, topCrypto, type ExchangeSymbol } from './binanceTrade'
 import { LiveBroker, PaperBroker, paperPnl } from './brokers'
-import { accountGate, claudeGate, setupGate, type Candidate } from './gate'
+import { accountGate, claudeGate, directionGate, setupGate, type Candidate } from './gate'
 import { pickLeverage, planOrder, roundStep } from './sizing'
 
 const RULES = { tickSize: 0.001, stepSize: 1, minQty: 1, minNotional: 5 }
@@ -83,6 +83,11 @@ describe('setupGate', () => {
   it('accepts a fresh pending setup from an HTF POI', () => expect(setupGate(cand(), o)).toBeNull())
   it('rejects coins outside the volume universe', () => expect(setupGate(cand({}, { symbol: 'XAUUSDT' }), o)).toMatch(/top 100/))
   it('rejects an LTF POI (needs HTF POI → LTF confirmation)', () => expect(setupGate(cand({ poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toMatch(/bukan HTF/))
+  it('the POI timeframe rule also applies to M2a, not to M4', () => {
+    const ob = { bot: { ...bot, models: ['M2a' as const, 'M4' as const] }, entryTf: '15m' as const, universe: new Set(['SOLUSDT']), now: NOW }
+    expect(setupGate(cand({ model: 'M2a', poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), ob)).toMatch(/bukan HTF/)
+    expect(setupGate(cand({ model: 'M4', poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), ob) ?? '').not.toMatch(/bukan HTF/)
+  })
   it('a coin profile replaces the global models / confluences / POIs for that coin', () => {
     const profile = {
       symbol: 'SOLUSDT',
@@ -104,7 +109,15 @@ describe('setupGate', () => {
   it('rejects models the bot does not trade and missing required confluences', () => {
     expect(setupGate(cand({ model: 'M0' }), o)).toMatch(/tidak dipakai bot/)
     expect(setupGate(cand({ confluence: ['fvg', 'pdZone'] }), o)).toMatch(/konfluensi wajib: trendParent/)
-    expect(setupGate(cand({ model: 'M4', poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
+    expect(setupGate(cand({ model: 'M4', confluence: ['fvg', 'btc1h', 'slLiqClear'], poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
+  })
+  it('each model has its own required confluence list', () => {
+    const b = { ...bot, models: ['M0' as const, 'M4' as const], modelConfluence: { ...bot.modelConfluence, M0: ['prevOpposite' as const], M4: ['fvg' as const] } }
+    const ob = { ...o, bot: b }
+    expect(setupGate(cand({ model: 'M0', confluence: ['prevOpposite'] }), ob)).toBeNull()
+    expect(setupGate(cand({ model: 'M0', confluence: ['fvg'] }), ob)).toMatch(/konfluensi wajib: prevOpposite/)
+    expect(setupGate(cand({ model: 'M4', confluence: ['fvg'] }), ob)).toBeNull()
+    expect(setupGate(cand({ model: 'M4', confluence: ['prevOpposite'] }), ob)).toMatch(/konfluensi wajib: fvg/)
   })
   it('rejects stale setups and price past TP / entry', () => {
     expect(setupGate(cand({ createdT: NOW - 3 * 3_600_000 }), o)).toMatch(/menit/)
@@ -136,6 +149,17 @@ describe('accountGate', () => {
     expect(accountGate({ ...base, pnlToday: -0.3 })).toMatch(/berhenti/)
     expect(accountGate({ ...base, newsWindow: 'CPI' })).toMatch(/news/)
     expect(accountGate({ ...base, activeTrades: 3 })).toMatch(/maks 3/)
+  })
+})
+
+describe('directionGate', () => {
+  it('caps active trades on one side, 0 = off', () => {
+    const t = (direction: 'bullish' | 'bearish') => ({ direction })
+    const shorts = [t('bearish'), t('bearish'), t('bullish')]
+    expect(directionGate(shorts, 'bearish', 3)).toBeNull()
+    expect(directionGate([...shorts, t('bearish')], 'bearish', 3)).toMatch(/3 posisi\/order SHORT.*maks 3/)
+    expect(directionGate([...shorts, t('bearish')], 'bullish', 3)).toBeNull()
+    expect(directionGate([...shorts, t('bearish')], 'bearish', 0)).toBeNull()
   })
 })
 

@@ -1,5 +1,6 @@
 import type { BacktestParams, BacktestProgress, BacktestResult, BtResult, BtSetup, ReactionRow } from '@shared/backtest'
 import type { AppConfig } from '@shared/config'
+import type { Candle } from '@shared/candles'
 import { ENTRY_MODELS } from '@shared/smc'
 import { CandleRepo } from '../db/candles'
 import type { Db } from '../db/client'
@@ -29,13 +30,13 @@ const CODE: Record<SimStatus, BtResult['s']> = { win: 'w', be: 'b', loss: 'l', o
  * every exit plan side by side, fills and exits on stored 1m candles. The renderer filters the
  * per-setup results itself (no re-run for a different filter).
  */
-export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, onProgress?: (p: BacktestProgress) => void, flow?: FlowData): BacktestResult | null {
+export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, onProgress?: (p: BacktestProgress) => void, flow?: FlowData, btcDom?: readonly Candle[]): BacktestResult | null {
   const started = Date.now()
   const progress = (stage: BacktestProgress['stage'], done = 0, total = 0): void => onProgress?.({ symbol: params.symbol, stage, done, total })
   progress('load')
   const smc = new SmcService(db)
   const cfg = { ...config.smc, models: [...ENTRY_MODELS] }
-  const h = smc.history(params.symbol, cfg)
+  const h = smc.history(params.symbol, cfg, btcDom)
   if (!h || h.entry.candles.length < 100) return null
   const sym = symbolByName(db, params.symbol)!
   const c = h.entry.candles
@@ -47,7 +48,7 @@ export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, o
   const fees = { makerFeePct: params.makerFeePct, takerFeePct: params.takerFeePct, slippagePct: params.slippagePct }
 
   progress('detect')
-  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc, flow })
+  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc, flow, btcDom: h.btcDom })
   const plans = defaultPlans(config.exit, cfg)
   const setups: BtSetup[] = []
   // trend trades (M5) can run for weeks: follow every open trade up to 90 days

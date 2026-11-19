@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeSmc } from './analyze'
 import { atrSeries } from './atr'
-import { detectSetups, trendKnownAt } from './setups'
+import { detectSetups, liquidityBehindSl, poiLiqIntact, stackedTfs, trendKnownAt, type Poi } from './setups'
 import { at, bars, cfg } from './testkit'
 
 type Row = [number, number, number, number]
@@ -47,6 +47,21 @@ describe('setups: POI hit → OB valid (§8)', () => {
     expect(s.status).toBe('win')
     expect(s.statusT).toBe(at(19))
     expect(s.confluence).toContain('prevOpposite')
+  })
+
+  it('tags btcDom: alt long while BTC dominance trends down, BTC long while it trends up', () => {
+    const c = cfg({ minRR: 2, models: ['M0'] })
+    const entry = analyzeSmc(bars(ROWS), '15m', c)
+    const dom = (trend: 'bullish' | 'bearish') => ({ timeframe: '4h' as const, trendChanges: [{ t: at(0) - 8 * 3_600_000, trend }] })
+    const tags = (symbol: string, trend: 'bullish' | 'bearish') =>
+      detectSetups({ symbol, entry, poiAnalyses: [], cfg: c, btcDom: dom(trend) }).find((x) => x.child.t === at(14))!.confluence
+    expect(tags('TESTUSDT', 'bearish')).toContain('btcDom')
+    expect(tags('TESTUSDT', 'bullish')).not.toContain('btcDom')
+    expect(tags('BTCUSDT', 'bullish')).toContain('btcDom')
+    expect(tags('BTCUSDT', 'bearish')).not.toContain('btcDom')
+    // a dominance change that only closes after the setup is known does not count (no look-ahead)
+    const late = { timeframe: '4h' as const, trendChanges: [{ t: at(30), trend: 'bearish' as const }] }
+    expect(detectSetups({ symbol: 'TESTUSDT', entry, poiAnalyses: [], cfg: c, btcDom: late }).find((x) => x.child.t === at(14))!.confluence).not.toContain('btcDom')
   })
 
   it('widens a stop tighter than minSlAtr × ATR14 (entry unchanged)', () => {
@@ -107,5 +122,59 @@ describe('setups: limit cancelled when price reaches the TP first', () => {
     const entry = analyzeSmc(bars(ROWS), '15m', c)
     const s = detectSetups({ symbol: 'T', entry, poiAnalyses: [], cfg: c }).find((x) => x.child.t === at(14))!
     expect(s.filledT).toBe(at(18))
+  })
+})
+
+describe('liquidity tags (user 2026-11-18)', () => {
+  it('poiLiq: the POI extreme was not traded through between the hit and the OB valid', () => {
+    const c = bars([
+      [10, 10.2, 9.8, 10],
+      [10, 10.1, 9.5, 9.9], // hit, low 9.5
+      [9.9, 10.3, 9.6, 10.2]
+    ])
+    expect(poiLiqIntact(c, { direction: 'bullish', extreme: 9.4 }, 1, 2)).toBe(true)
+    expect(poiLiqIntact(c, { direction: 'bullish', extreme: 9.55 }, 1, 2)).toBe(false) // wick swept
+    expect(poiLiqIntact(c, { direction: 'bearish', extreme: 10.25 }, 1, 2)).toBe(false)
+    expect(poiLiqIntact(c, { direction: 'bullish' }, 1, 2)).toBe(false) // unknown extreme
+  })
+
+  it('slLiqClear: unswept swing just behind the SL counts, swept / far / later ones do not', () => {
+    const c = cfg({ models: ['M0'] })
+    const a = analyzeSmc(bars(ROWS), '15m', c)
+    const lows = a.liquidity.filter((l) => l.kind === 'swing' && l.side === 'sell')
+    expect(lows.length).toBeGreaterThan(0)
+    const end = at(ROWS.length) + 3_600_000
+    const unswept = lows.find((l) => l.sweptT === null)
+    expect(unswept).toBeDefined()
+    if (unswept) {
+      // SL just above that low → liquidity right behind the stop
+      expect(liquidityBehindSl([a], true, unswept.top + 0.01, 0.5, end)).toBe(true)
+      // zone too small to reach it
+      expect(liquidityBehindSl([a], true, unswept.top + 1, 0.5, end)).toBe(false)
+      // not known yet at the start of the data
+      expect(liquidityBehindSl([a], true, unswept.top + 0.01, 0.5, at(0))).toBe(false)
+    }
+    // short side looks for buy-side liquidity (highs) above the SL
+    expect(liquidityBehindSl([a], false, 1000, 1, end)).toBe(false)
+  })
+})
+
+describe('stackedTfs (poiStack)', () => {
+  const P = (o: Partial<Poi>): Poi => ({ kind: 'OB', timeframe: '4h', direction: 'bullish', level: 100, t: 0, activeFrom: 1000, invalidT: null, origin: 'sweep', ...o })
+  const parent = { timeframe: '1h' as const, level: 100 }
+  it('counts an active same-direction POI of another TF ≥ 1h near the parent level', () => {
+    expect(stackedTfs([P({}), P({ timeframe: '1d', level: 100.2 })], parent, 'bullish', 2000, 0.3).sort()).toEqual(['1d', '4h'])
+  })
+  it('ignores own TF, 15m, other direction, too far, not yet known, invalidated and OCL Break', () => {
+    const pois = [
+      P({ timeframe: '1h' }),
+      P({ timeframe: '15m' }),
+      P({ direction: 'bearish' }),
+      P({ level: 101 }),
+      P({ activeFrom: 30_000_000 }),
+      P({ invalidT: 0 }),
+      P({ kind: 'OCL_BREAK' })
+    ]
+    expect(stackedTfs(pois, parent, 'bullish', 20_000_000, 0.3)).toEqual([])
   })
 })

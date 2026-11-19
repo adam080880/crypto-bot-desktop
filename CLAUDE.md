@@ -68,6 +68,24 @@ dites ke exchange beneran.
 - **Premium/discount + Bollinger + blacklist SL** (2026-11-16, `docs/entry-v2.md §14`): tag `pdZone` (long di discount /
   short di premium range 4h 60 candle) **wajib default** untuk SMC, `bbMomentum` (BB 1h) cuma filter, blacklist koin
   setelah 3× SL dalam 7 hari (`bot.slBlacklist*`, `src/main/bot/blacklist.ts`). SBR/RBS memang break pakai close (body).
+- **BTC dominance** (2026-11-17, `docs/entry-v2.md §15`): tag `btcDom` dari `BTCDOMUSDT` 4h (REST langsung, tidak disimpan,
+  `src/main/flow/btcDom.ts`). Alt long saat BTCDOM turun, short saat naik, BTC dibalik. USDT.D tidak dibuat (= kebalikan `btc4h`).
+- **M0 + liquidity** (2026-11-18, `docs/entry-v2.md §16`): M0 wajib `poiLiq` (wick POI belum diambil), tag `slLiqClear`
+  (tidak ada swing di belakang SL ≤ 1R), OCL Break cuma weekly. Lab 40 koin: M0 terbaik tetap ≈ −0,03 s/d −0,07R, belum ada edge.
+- **Batas posisi searah** (2026-11-18, `bot.maxSameDirection`, default 0 = mati atas permintaan user, `gate.ts directionGate`): pending + open per arah.
+  Pemicu: 5 short alt kena SL bareng saat BTC pump +2,5%. Filter momentum BTC **tidak** dibuat: di lab M0, setup yang melawan
+  momentum BTC 2–4h justru lebih bagus (reversal), jadi risikonya korelasi (variance), bukan expectancy. M0 dimatikan lagi.
+- **TF POI + poiStack** (2026-11-18, `docs/entry-v2.md §17`): `bot.poiTimeframes` sekarang berlaku untuk M0/M1/M2a/M2b
+  (M4/M5/M6 tidak), user set 4h + 1d; `smc.poiTimeframes` ditambah 1d. Tag `poiStack` (POI induk berdekatan ≤ `smc.poiStackPct`
+  dengan POI aktif TF lain ≥ 1h) justru **lebih jelek** di lab (−0,15R vs −0,08R), jadi cuma info. Lab 40 koin: POI 1d +0,31R
+  (OOS +0,41), 4h+1d +0,05R; M0 4h+1d +0,12R (IS +0,08, OOS +0,20), M0 POI 1d +0,37R. M1 tetap negatif di semua TF POI.
+- **Konfluensi per model** (2026-11-19, `docs/entry-v2.md §18`): `bot.modelConfluence` (list wajib per model) menggantikan
+  `requireConfluence` + `trendRequireConfluence` (dimigrasi sekali di `AppState`). Alasannya, M0 tidak pernah punya `fvg` dan M4 tidak pernah
+  punya `prevOpposite`. Rekomendasi lab (`RECOMMENDED_MODEL_CONFLUENCE`, tombol di Settings): M0 `prevOpposite+slLiqClear`, M4
+  `fvg+btc1h+slLiqClear`, M5 `btc1h+anomaly` (default lama M5 `oiConfirm+oiHold` OOS −0,23R). M1 negatif di semua kombinasi.
+- **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
+  berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
+  (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
   lookback 75 hari, 8 per sisi, rebalance mingguan. Tidak pernah kirim order. Lab realistis: OOS −41% s/d +5% tergantung
   hari rebalance, DD 44–62%. Jangan dijadikan bot live tanpa forward test yang meyakinkan.

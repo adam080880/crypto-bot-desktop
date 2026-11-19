@@ -43,6 +43,8 @@ export function exitFor<E extends ExitConfig>(
   return base
 }
 
+const POI_TF_MODELS = new Set<string>(['M0', 'M1', 'M2a', 'M2b'])
+
 /** When the setup became known: close of the OB valid confirmation candle. */
 export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.createdT + TF_MS[entryTf]
 
@@ -64,11 +66,11 @@ export function setupGate(
   // profiles saved before breakers had their own key stored M4 as "OB|tf"
   if (p && p.pois.length && !p.pois.includes(pk) && !(s.model === 'M4' && p.pois.includes(`OB|${s.poi.timeframe}`)))
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan POI profil ${c.symbol}`
-  if (!p?.pois.length && (s.model === 'M1' || s.model === 'M2b') && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
+  // SMC models whose POI is the reason (M4 breakers, M5 trend and M6 radar are not limited)
+  if (!p?.pois.length && POI_TF_MODELS.has(s.model) && !(o.bot.poiTimeframes as string[]).includes(s.poi.timeframe))
     return `POI ${setupPoiLabel(s.model, s.poi.kind)} ${s.poi.timeframe} bukan HTF (${o.bot.poiTimeframes.join('/')})`
-  // SMC models and the M5 trend model have their own required list (a profile, saved from one model, has one)
-  // M6 (radar) has no confluence list: the radar hit + breakout is the whole signal
-  const required = p ? p.requireConfluence : s.model === 'M5' ? o.bot.trendRequireConfluence : s.model === 'M6' ? [] : o.bot.requireConfluence
+  // every model has its own required list (a profile, saved from one model, has one)
+  const required = p ? p.requireConfluence : (o.bot.modelConfluence[s.model] ?? [])
   const missing = required.filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
   const minScore = p ? p.minScore : o.bot.minScore
@@ -114,6 +116,13 @@ export function accountGate(o: {
   if (o.newsWindow && !o.newsStrategy) return `news window: ${o.newsWindow}`
   if (o.activeTrades >= o.risk.maxOpenPositions) return `posisi/order aktif sudah ${o.activeTrades} (maks ${o.risk.maxOpenPositions})`
   return null
+}
+
+/** Too many active trades (pending + open) already on this side (bot.maxSameDirection; 0 = off). */
+export function directionGate(active: readonly { direction: 'bullish' | 'bearish' }[], dir: 'bullish' | 'bearish', max: number): string | null {
+  if (max <= 0) return null
+  const n = active.filter((t) => t.direction === dir).length
+  return n >= max ? `sudah ${n} posisi/order ${dir === 'bullish' ? 'LONG' : 'SHORT'} aktif (maks ${max} searah)` : null
 }
 
 /** Planned TP for a setup under an exit plan (null = no TP order). */

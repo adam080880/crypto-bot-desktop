@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ENTRY_MODELS, REQUIRABLE_CONFLUENCES } from './smc'
+import { ENTRY_MODELS, REQUIRABLE_CONFLUENCES, type EntryModel } from './smc'
 
 /**
  * Risk guard config. The limits are enforced in code (src/main/risk), never via prompts.
@@ -186,7 +186,19 @@ export const smcConfigSchema = z.object({
   bbPeriod: z.number().int().min(5).max(100).default(20),
   bbStdDev: z.number().min(0.5).max(4).default(2),
   /** Middle-band slope and band-width change are measured over N candles. */
-  bbSlopeCandles: z.number().int().min(1).max(20).default(3)
+  bbSlopeCandles: z.number().int().min(1).max(20).default(3),
+  /** Trend timeframe of BTC dominance (BTCDOMUSDT, fetched from Binance, not stored) for the btcDom tag. */
+  btcDomTimeframe: z.enum(['1h', '4h']).default('4h'),
+  /** slLiqClear: look for unswept swing liquidity up to this many R beyond the SL. */
+  slLiqZoneR: z.number().min(0.1).max(5).default(1),
+  /** poiStack: another timeframe's POI counts when its level is within this % of the parent POI's level. */
+  poiStackPct: z.number().min(0.01).max(5).default(0.3),
+  /** Timeframes on which M0 may still use an OCL Break as its POI (user 2026-11-18: OCL Break often fakes out;
+   *  only the weekly one is kept, as a level to watch / confirm). [] = never. */
+  m0OclBreakTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default(['1w']),
+  /** M0 only enters while the POI's wick liquidity is still resting (tag poiLiq). Lab 40 coins / 6 months:
+   *  without it −0.21R vs −0.10R per trade (OOS −0.34 vs −0.13). */
+  m0RequirePoiLiq: z.boolean().default(true)
 })
 export type SmcConfig = z.infer<typeof smcConfigSchema>
 
@@ -347,6 +359,24 @@ export type ScreenerConfig = z.infer<typeof screenerConfigSchema>
  * crypto coins by volume, gated by a fresh Claude analysis (bias == direction, confidence ≥ min).
  * `live` is never set through a config patch: it needs the explicit confirmation IPC.
  */
+const confList = z.array(z.enum(REQUIRABLE_CONFLUENCES))
+export const modelConfluenceSchema = z.object(Object.fromEntries(ENTRY_MODELS.map((m) => [m, confList.default([])])) as Record<EntryModel, z.ZodDefault<typeof confList>>)
+export type ModelConfluence = z.infer<typeof modelConfluenceSchema>
+
+/**
+ * Confluence lab 2026-11-19 (60 top-volume coins, 6 months, OOS = last 60 days, bot exits, after fees;
+ * docs/entry-v2.md §18). M1/M2b: nothing positive, kept at the old SMC list. M6: radar = the signal.
+ */
+export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
+  M0: ['prevOpposite', 'slLiqClear'], // +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
+  M1: ['fvg', 'trendParent', 'pdZone'],
+  M2a: ['trendParent'], // n 39 only; pdZone hurts M2a
+  M2b: ['fvg', 'trendParent', 'pdZone'],
+  M4: ['fvg', 'btc1h', 'slLiqClear'], // +0,27R (IS +0,24 / OOS +0,32) vs +0,01R
+  M5: ['btc1h', 'anomaly'], // +0,23R (IS +0,24 / OOS +0,22); old oiConfirm+oiHold: OOS −0,23R
+  M6: []
+}
+
 export const botConfigSchema = z.object({
   /** Bot running (paper unless `live`). */
   enabled: z.boolean().default(false),
@@ -354,10 +384,12 @@ export const botConfigSchema = z.object({
   requireClaude: z.boolean().default(false),
   /** Entry models the bot may trade (docs/entry-v2.md). M0/M2a lost money in the 2-year backtest. */
   models: z.array(z.enum(ENTRY_MODELS)).min(1).default(['M1', 'M2b', 'M4', 'M5', 'M6']),
-  /** Every one of these confluences must be present on SMC setups (M0–M4). Backtest: FVG in the leg + trend of the POI TF. */
-  requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['fvg', 'trendParent', 'pdZone']),
-  /** Same for the M5 trend model. Lab: OI rising with the move = +0,19R vs −0,05R without (docs/entry-v2.md §10). */
-  trendRequireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).default(['oiConfirm', 'oiHold']),
+  /**
+   * Required confluences per entry model (user 2026-11-19): every listed tag must be on the setup.
+   * Each model tags different things (M0 never has `fvg`, M4 never `prevOpposite`), so one shared list
+   * cannot serve all. Replaces `requireConfluence` (M0–M4) + `trendRequireConfluence` (M5), migrated in AppState.
+   */
+  modelConfluence: modelConfluenceSchema.default(RECOMMENDED_MODEL_CONFLUENCE),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),
@@ -369,7 +401,7 @@ export const botConfigSchema = z.object({
   riskPerTradePct: z.number().positive().max(100).default(1),
   /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
   topVolume: z.number().int().min(5).max(300).default(100),
-  /** M1/M2b: the parent POI (the reason) must come from these timeframes. M4 breakers are not limited. */
+  /** M0/M1/M2a/M2b: the parent POI (the reason) must come from these timeframes. M4/M5/M6 are not limited. */
   poiTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
   /** Only take setups confirmed within the last N minutes (no chasing old ones). */
   maxSetupAgeMin: z.number().int().min(1).max(525600).default(60),
@@ -381,6 +413,13 @@ export const botConfigSchema = z.object({
    */
   slBlacklistCount: z.number().int().min(0).max(20).default(3),
   slBlacklistHours: z.number().int().min(1).max(2160).default(168),
+  /**
+   * Max active trades (pending + open) in one direction (user 2026-11-18: 5 alt shorts filled within 35 min
+   * while BTC pumped and all hit SL together; alts move with BTC, so same-side trades are one bet). 0 = off.
+   */
+  maxSameDirection: z.number().int().min(0).max(50).default(0),
+  /** Bot page statistics count trades opened at/after this time (ms; 0 = all). User 2026-11-18: judge a new setup alone. */
+  statsSince: z.number().int().min(0).default(0),
   /** Paper account starting balance (USDT). */
   paperEquity: z.number().positive().max(1e9).default(10)
 })

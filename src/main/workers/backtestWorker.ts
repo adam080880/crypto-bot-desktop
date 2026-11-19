@@ -9,6 +9,9 @@ import { runBacktest } from '../backtest/runBacktest'
 import { openDatabase } from '../db/client'
 import { symbolByName } from '../db/symbolsRepo'
 import { downloadFlow } from '../flow/visionFlow'
+import { fetchBtcDom } from '../flow/btcDom'
+import type { Candle } from '@shared/candles'
+import { TF_MS } from '@shared/timeframes'
 import { initLogger, logger } from '../logger'
 import { installCloudflareDns } from '../net/dns'
 import type { FlowData } from '../strategy/flow'
@@ -50,12 +53,22 @@ port.once('message', async ({ data: msg }: { data: ToBacktestWorker }) => {
         log.warn({ err: (err as Error).message }, 'flow download failed; backtest without OI/funding')
       }
     }
+    // BTC dominance for the btcDom tag (download only, never stored); 300 candles of warm-up for the structure
+    let btcDom: Candle[] | undefined
+    if (span?.a != null && span.b != null) {
+      const tf = msg.config.smc.btcDomTimeframe
+      try {
+        btcDom = await fetchBtcDom(tf, span.a - 300 * TF_MS[tf], span.b + TF_MS[tf])
+      } catch (err) {
+        log.warn({ err: (err as Error).message }, 'BTCDOM download failed; backtest without btcDom')
+      }
+    }
     const result = runBacktest(db, msg.params, msg.config, (progress) => {
       if (progress.stage !== 'simulate' || Date.now() - last > 250) {
         last = Date.now()
         send({ type: 'progress', progress })
       }
-    }, flow)
+    }, flow, btcDom)
     send({ type: 'result', result })
     db.$client.close()
   } catch (err) {

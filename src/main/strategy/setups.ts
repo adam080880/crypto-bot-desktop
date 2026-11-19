@@ -26,6 +26,8 @@ export interface Poi {
   invalidT: number | null
   /** Why the POI formed (null = no sweep and no HTF tap → not tradable as a reason). */
   origin: PoiOrigin | null
+  /** End of the POI's own liquidity (OB: wick end; others: extreme of the origin candle), for poiLiq. */
+  extreme?: number
 }
 
 const closeTime = (t: number, tf: Timeframe): number => t + TF_MS[tf]
@@ -70,23 +72,27 @@ function rawPois(a: SmcAnalysisFull): RawPoi[] {
   const idx = (t: number): number => indexAtOrAfter(c, t)
   const out: RawPoi[] = []
   const base = { timeframe: tf, origin: null, inherentSweep: false }
+  const ext = (i: number, bull: boolean): number | undefined => (c[i] ? (bull ? c[i]!.l : c[i]!.h) : undefined)
   for (const ob of a.orderBlocksIdx)
-    out.push({ ...base, kind: 'OB', direction: ob.direction, level: ob.line, t: ob.t, activeFrom: closeTime(ob.confirmedT, tf), invalidT: ob.invalidT, originIdx: ob.i })
+    out.push({ ...base, kind: 'OB', direction: ob.direction, level: ob.line, t: ob.t, activeFrom: closeTime(ob.confirmedT, tf), invalidT: ob.invalidT, originIdx: ob.i, extreme: ob.wickEnd })
   for (const f of a.srFlips) {
     const bull = f.direction === 'bullish'
     // the leg that broke the level started at the extreme between the source swing and the break
     const e = extremeIdx(c, idx(f.sourceT), idx(f.breakT), bull)
-    out.push({ ...base, kind: f.kind, direction: f.direction, level: f.level, t: f.sourceT, activeFrom: closeTime(f.breakT, tf), invalidT: f.invalidT, originIdx: e })
+    out.push({ ...base, kind: f.kind, direction: f.direction, level: f.level, t: f.sourceT, activeFrom: closeTime(f.breakT, tf), invalidT: f.invalidT, originIdx: e, extreme: ext(e, bull) })
   }
   for (const q of a.qms)
-    out.push({ ...base, kind: 'QM', direction: q.direction, level: q.level, t: q.points.h1, activeFrom: closeTime(q.activeT, tf), invalidT: q.invalidT, originIdx: idx(q.points.h2), inherentSweep: true })
+    out.push({ ...base, kind: 'QM', direction: q.direction, level: q.level, t: q.points.h1, activeFrom: closeTime(q.activeT, tf), invalidT: q.invalidT, originIdx: idx(q.points.h2), inherentSweep: true, extreme: ext(idx(q.points.h2), q.direction === 'bullish') })
   for (const o of a.ocls) {
     const i = idx(o.t)
     const bull = o.direction === 'bullish'
-    if (o.kind === 'OCL')
-      out.push({ ...base, kind: 'OCL', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.invalidT, originIdx: extremeIdx(c, i - 2, i + 1, bull) })
-    else if (o.breakT !== null)
-      out.push({ ...base, kind: 'OCL_BREAK', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.breakT, tf), invalidT: o.invalidT, originIdx: extremeIdx(c, i, idx(o.breakT), bull) })
+    if (o.kind === 'OCL') {
+      const e = extremeIdx(c, i - 2, i + 1, bull)
+      out.push({ ...base, kind: 'OCL', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.t, tf) + TF_MS[tf], invalidT: o.invalidT, originIdx: e, extreme: ext(e, bull) })
+    } else if (o.breakT !== null) {
+      const e = extremeIdx(c, i, idx(o.breakT), bull)
+      out.push({ ...base, kind: 'OCL_BREAK', direction: o.direction, level: o.level, t: o.t, activeFrom: closeTime(o.breakT, tf), invalidT: o.invalidT, originIdx: e, extreme: ext(e, bull) })
+    }
   }
   return out
 }
@@ -167,6 +173,8 @@ export interface SetupInput {
   btc?: { '4h'?: TrendSrc; '1h'?: TrendSrc }
   /** Open interest / funding of this symbol (omit for none → no flow tags). */
   flow?: FlowData
+  /** BTC dominance (BTCDOMUSDT) trend source for the btcDom tag (omit for none). */
+  btcDom?: TrendSrc
 }
 
 interface Draft {
@@ -213,7 +221,7 @@ export function detectSetups(input: SetupInput): Setup[] {
   const best = new Map<string, Setup>()
   for (const d0 of drafts) {
     const d = atr && d0.model !== 'M5' && d0.model !== 'M6' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
-    const s = finalize(input, all, d, vol1h)
+    const s = finalize(input, all, d, vol1h, pois)
     if (!s) continue
     const prev = best.get(s.id)
     if (!prev || s.score > prev.score) best.set(s.id, s)
@@ -254,9 +262,21 @@ const poiRef = (p: Poi, hitT: number | null): Setup['poi'] => ({ kind: p.kind, t
 
 // ---------- M0: old rule (baseline) ----------
 
+/**
+ * poiLiq (user 2026-11-18, materi: "wick lebih panjang = liquidity yang nyisa"): from the POI hit to the
+ * candle that confirms the OB valid, no entry-TF candle traded beyond the POI's extreme (its wick
+ * liquidity is still resting). false when the POI has no known extreme.
+ */
+export function poiLiqIntact(c: readonly Candle[], poi: Pick<Poi, 'direction' | 'extreme'>, from: number, to: number): boolean {
+  if (poi.extreme === undefined) return false
+  const bull = poi.direction === 'bullish'
+  for (let m = Math.max(0, from); m <= Math.min(to, c.length - 1); m++) if (bull ? c[m]!.l < poi.extreme : c[m]!.h > poi.extreme) return false
+  return true
+}
+
 function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
   const c = entry.candles
-  const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])]
+  const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])].filter((p) => p.kind !== 'OCL_BREAK' || (cfg.m0OclBreakTimeframes as Timeframe[]).includes(p.timeframe))
   const near = cfg.obValidNearPct / 100
   const out: Draft[] = []
   for (const poi of raw) {
@@ -280,6 +300,9 @@ function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[])
     )
     if (!ob) continue
     const sl = bull ? ob.wickEnd * (1 - cfg.slBufferPct / 100) : ob.wickEnd * (1 + cfg.slBufferPct / 100)
+    const confluence: Confluence[] = ob.prevOpposite ? ['prevOpposite'] : []
+    if (poiLiqIntact(c, poi, hitIdx, ob.confirmedAt)) confluence.push('poiLiq')
+    else if (cfg.m0RequirePoiLiq) continue
     out.push({
       model: 'M0',
       dir: poi.direction,
@@ -289,7 +312,7 @@ function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[])
       sl,
       knownIdx: ob.confirmedAt,
       invalidLevel: ob.wickEnd,
-      confluence: ob.prevOpposite ? ['prevOpposite'] : [],
+      confluence,
       reasons: [`${POI_LABEL[poi.kind]} ${poi.timeframe} kena → OB ${entry.timeframe} (aturan lama)`]
     })
   }
@@ -769,7 +792,11 @@ const CONF_LABEL: Record<Confluence, string> = {
   oiHold: 'open interest 15 menit tidak turun',
   anomaly: 'koin lagi ramai (volume 24 jam jauh di atas biasa)',
   pdZone: 'long di discount / short di premium (range HTF)',
-  bbMomentum: 'momentum Bollinger searah (di sisi band tengah, band melebar)'
+  bbMomentum: 'momentum Bollinger searah (di sisi band tengah, band melebar)',
+  btcDom: 'BTC dominance mendukung arah (alt: long saat BTCDOM turun, short saat naik)',
+  poiLiq: 'liquidity wick POI belum diambil',
+  slLiqClear: 'tidak ada liquidity swing di belakang SL',
+  poiStack: 'POI numpuk dengan POI TF lain'
 }
 
 /** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
@@ -783,7 +810,7 @@ function bbOf(c: readonly Candle[], cfg: Pick<SmcConfig, 'bbPeriod' | 'bbStdDev'
   return bb
 }
 
-function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, vol1h: { c: readonly Candle[]; vr: number[] } | null): Setup | null {
+function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, vol1h: { c: readonly Candle[]; vr: number[] } | null, pois: readonly Poi[] = []): Setup | null {
   const { entry, cfg, symbol } = input
   const c = entry.candles
   const bull = d.dir === 'bullish'
@@ -803,6 +830,14 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, 
     if (t1 === d.dir) conf.add('btc1h')
     if (t4 && t1 && t4 !== d.dir && t1 !== d.dir) conf.add('btcAgainst')
   }
+  // BTC dominance: alts gain when it falls (long), lose when it rises (short); BTC itself the other way round
+  if (input.btcDom) {
+    const td = trendKnownAt(input.btcDom, known)
+    if (td && (symbol === 'BTCUSDT' ? td === d.dir : td !== d.dir)) conf.add('btcDom')
+  }
+  // liquidity behind the stop already cleared: no unswept swing on the SL side within slLiqZoneR × risk beyond the SL
+  if (!liquidityBehindSl(all, bull, d.sl, risk * cfg.slLiqZoneR, known)) conf.add('slLiqClear')
+  if (STACK_MODELS.has(d.model) && stackedTfs(pois, d.poi, d.dir, d.poi.hitT ?? known, cfg.poiStackPct).length) conf.add('poiStack')
   // Wyckoff: highest timeframe that has a phase at that time
   for (const a of [...all].sort((x, y) => TF_RANK[y.timeframe] - TF_RANK[x.timeframe])) {
     if (!a.wyckoff.length) continue
@@ -892,6 +927,38 @@ function targets(a: SmcAnalysisFull) {
     targetCache.set(a.liquidity, t)
   }
   return t
+}
+
+/**
+ * Unswept swing liquidity (any analysed TF, known at `knownAt`) just behind the stop: for a long a swing low
+ * in [sl − zone, sl], for a short a swing high in [sl, sl + zone]. Price tends to run it, taking the SL first.
+ */
+export function liquidityBehindSl(analyses: readonly SmcAnalysisFull[], bull: boolean, sl: number, zone: number, knownAt: number): boolean {
+  for (const a of analyses) {
+    for (const l of targets(a)) {
+      if (l.side !== (bull ? 'sell' : 'buy') || l.knownT > knownAt) continue
+      if (l.sweptT !== null && l.sweptT < knownAt) continue
+      if (bull ? l.price <= sl && l.price >= sl - zone : l.price >= sl && l.price <= sl + zone) return true
+    }
+  }
+  return false
+}
+
+const STACK_MODELS = new Set<EntryModel>(['M0', 'M1', 'M2a', 'M2b'])
+
+/**
+ * Other timeframes (≥ 1h, not the parent's own) with an active same-direction POI whose level is within
+ * `pct` % of the parent POI's level at time `at` (known by then, not yet invalidated). OCL Break excluded.
+ */
+export function stackedTfs(pois: readonly Poi[], parent: Pick<Setup['poi'], 'timeframe' | 'level'>, dir: Dir, at: number, pct: number): Timeframe[] {
+  const out = new Set<Timeframe>()
+  const near = (parent.level * pct) / 100
+  for (const p of pois) {
+    if (p.direction !== dir || p.timeframe === parent.timeframe || TF_RANK[p.timeframe] < TF_RANK['1h'] || p.kind === 'OCL_BREAK') continue
+    if (p.activeFrom > at || (p.invalidT !== null && closeTime(p.invalidT, p.timeframe) <= at)) continue
+    if (Math.abs(p.level - parent.level) <= near) out.add(p.timeframe)
+  }
+  return [...out]
 }
 
 /** Nearest unswept opposite swing (from any analysed TF) known at `knownAt`. */

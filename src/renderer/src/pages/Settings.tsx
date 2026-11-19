@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, ShieldCheck, Trash2 } from 'lucide-react'
-import type { AppConfig, DataConfig, NotifyConfig, RadarConfig, RiskConfig } from '@shared/config'
+import { RECOMMENDED_MODEL_CONFLUENCE, type AppConfig, type DataConfig, type NotifyConfig, type RadarConfig, type RiskConfig } from '@shared/config'
 import type { SecretName, SecretStatus } from '@shared/ipc'
 import { CONFLUENCE_CHOICES, ENTRY_MODELS, MODEL_LABEL } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -386,7 +386,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
   const [msg, setMsg] = useState<string | null>(null)
   // Keep the form in sync when config changes elsewhere (Bot page Start/Stop, other windows)
   useEffect(() => setB(config.bot), [config.bot])
-  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours', label: string, step: number) => (
+  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours' | 'maxSameDirection', label: string, step: number) => (
     <>
       <Label htmlFor={`bot-${k}`}>{label}</Label>
       <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
@@ -412,6 +412,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           {num('paperEquity', 'Modal akun paper (USDT)', 1)}
           {num('slBlacklistCount', 'Blacklist koin setelah N× SL (BE tidak dihitung; 0 = mati)', 1)}
           {num('slBlacklistHours', 'Jendela blacklist SL (jam)', 24)}
+          {num('maxSameDirection', 'Maks posisi/order searah (long atau short) sekaligus; 0 = mati', 1)}
           <div className="col-span-2 space-y-1">
             <Label>Model entry yang boleh dipakai (minimal 1; profil koin dari Backtest punya model sendiri)</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
@@ -433,32 +434,49 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
               })}
             </div>
           </div>
-          {(
-            [
-              ['requireConfluence', 'Konfluensi wajib untuk model SMC M0–M4 (semua yang dicentang harus ada; kosong = bebas)'],
-              ['trendRequireConfluence', 'Konfluensi wajib untuk M5 trend (default: OI naik searah harga)']
-            ] as const
-          ).map(([field, title]) => (
-            <div key={field} className="col-span-2 space-y-1">
-              <Label>{title}</Label>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                {CONFLUENCE_CHOICES.map(({ key, label }) => {
-                  const k = key as (typeof b.requireConfluence)[number]
-                  const list = b[field]
-                  return (
-                    <label key={key} className="flex items-center gap-1">
-                      <input
-                        type="checkbox"
-                        checked={list.includes(k)}
-                        onChange={(e) => setB({ ...b, [field]: e.target.checked ? [...list, k] : list.filter((x) => x !== k) })}
-                      />
-                      {label}
-                    </label>
-                  )
-                })}
-              </div>
+          <div className="col-span-2 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <Label>Konfluensi wajib per model (semua yang dicentang harus ada; kosong = bebas). Profil koin punya list sendiri</Label>
+              <Button
+                size="sm"
+                variant="outline"
+                title="Hasil lab 19 Nov 2026 (60 koin, 6 bulan, positif di IS dan OOS): M0 prevOpposite+slLiqClear, M4 FVG+BTC 1h+slLiqClear, M5 BTC 1h+anomaly"
+                onClick={() => setB({ ...b, modelConfluence: structuredClone(RECOMMENDED_MODEL_CONFLUENCE) })}
+              >
+                Isi rekomendasi lab
+              </Button>
             </div>
-          ))}
+            {ENTRY_MODELS.map((m) => {
+              const list = b.modelConfluence[m]
+              const name = (k: string): string => CONFLUENCE_CHOICES.find((c) => c.key === k)?.label ?? k
+              return (
+                <details key={m} className={`rounded border px-2 py-1 text-xs ${b.models.includes(m) ? '' : 'opacity-50'}`}>
+                  <summary className="cursor-pointer">
+                    <span className="font-medium">{MODEL_LABEL[m]}</span>
+                    <span className="text-muted-foreground"> · {list.length ? list.map(name).join(' + ') : 'bebas'}</span>
+                    {b.models.includes(m) ? '' : <span className="text-muted-foreground"> (model mati)</span>}
+                  </summary>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                    {CONFLUENCE_CHOICES.map(({ key, label }) => {
+                      const k = key as (typeof list)[number]
+                      return (
+                        <label key={key} className="flex items-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={list.includes(k)}
+                            onChange={(e) =>
+                              setB({ ...b, modelConfluence: { ...b.modelConfluence, [m]: e.target.checked ? [...list, k] : list.filter((x) => x !== k) } })
+                            }
+                          />
+                          {label}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </details>
+              )
+            })}
+          </div>
           <Label>POI HTF yang dipakai</Label>
           <div className="flex justify-end gap-3 text-xs">
             {(['1h', '4h', '1d'] as const).map((tf) => (

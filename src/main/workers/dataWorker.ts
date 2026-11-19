@@ -21,6 +21,7 @@ import { initLogger, logger } from '../logger'
 import { installCloudflareDns } from '../net/dns'
 import { AutoSync } from '../sync/autoSync'
 import { FlowSync } from '../flow/flowSync'
+import { btcDomFeed } from '../flow/btcDom'
 import { RotationService } from '../rotation/rotationService'
 import { RadarService } from '../radar/radarService'
 import { BinanceTradeClient } from '../bot/binanceTrade'
@@ -220,6 +221,11 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
       flowSync.start()
+      // BTC dominance for the btcDom tag: warm up before the first scan, then re-check every 20 s
+      // (fetches only after a new candle closed, so the scan 1 min after a close sees it)
+      btcDomFeed.enable()
+      void btcDomFeed.refresh(config.smc.btcDomTimeframe)
+      setInterval(() => btcDomFeed.get(config.smc), 20_000).unref()
       rotation.start()
       send({ type: 'rotation-state', state: rotation.getState() })
       radar.start()

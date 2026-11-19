@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { modelStats, tradeR, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
+import { modelStats, tradeR, tradeStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
 import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import { MODEL_LABEL, setupPath } from '@shared/smc'
@@ -14,7 +14,7 @@ import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTra
 import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
 import { slBlacklist } from './blacklist'
 import { fmtR, rAt, targetsText, tpText } from './rText'
-import { accountGate, candidatesOf, claudeGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
+import { accountGate, candidatesOf, claudeGate, directionGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
 import type { CoinProfile } from '@shared/backtest'
 import { BotRepo } from './repo'
 import { pickLeverage, planOrder, roundStep, type LeverageBracket, type SymbolRules } from './sizing'
@@ -380,11 +380,17 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       awaitingClaude: [...this.awaiting],
       trades: this.repo.recent(100),
       blacklist: [...this.blacklist(this.mode(), Date.now()).values()],
-      modelStats: modelStats(this.repo.closedSince(this.mode(), 0)),
+      ...this.stats(bot.statsSince),
       events: this.repo.events(200),
       lastError: this.lastError
     }
     this.emit('state', state)
+  }
+
+  /** Per-model and total statistics of trades opened since `since`. */
+  private stats(since: number): Pick<BotState, 'modelStats' | 'statsTotal'> {
+    const ts = this.repo.closedSince(this.mode(), 0).filter((t) => t.createdAt >= since)
+    return { modelStats: modelStats(ts), statsTotal: tradeStats(ts) }
   }
 
   /** Coins blocked by repeated SL (bot.slBlacklistCount within bot.slBlacklistHours). */
@@ -479,6 +485,11 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       }
       if (this.repo.active().some((t) => t.symbol === c.symbol)) {
         this.skip(key, c.symbol, 'sudah ada order/posisi bot di koin ini')
+        continue
+      }
+      const dg = directionGate(this.repo.active().filter((t) => t.mode === mode), c.direction, bot.maxSameDirection)
+      if (dg) {
+        this.skip(key, c.symbol, `setup ${c.direction === 'bullish' ? 'LONG' : 'SHORT'} dilewati: ${dg}`)
         continue
       }
       if (!bot.requireClaude) {

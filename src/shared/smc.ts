@@ -231,6 +231,19 @@ export type Confluence =
   /** Bollinger momentum (smc.bbTimeframe): close on the trade side of the middle band, middle band sloping
    *  that way and the bands widening (expansion, not a squeeze). Filter tag, no score. */
   | 'bbMomentum'
+  /** BTC dominance (BTCDOMUSDT, smc.btcDomTimeframe) on the trade's side: for an altcoin long BTCDOM is
+   *  trending down (alts gaining on BTC), short BTCDOM trending up; for BTCUSDT itself the other way round.
+   *  Filter tag, no score (user 2026-11-17). */
+  | 'btcDom'
+  /** M0: the parent POI's own liquidity (wick / extreme) was not taken between the hit and the OB valid
+   *  (materi: the longer wick = liquidity still resting). Filter tag, no score (user 2026-11-18). */
+  | 'poiLiq'
+  /** No unswept swing high/low just behind the stop (within smc.slLiqZoneR × risk beyond the SL), so
+   *  there is no obvious liquidity pool for price to run through the SL. Filter tag, no score. */
+  | 'slLiqClear'
+  /** The parent POI lines up with an active same-direction POI of another timeframe (≥ 1h) within
+   *  smc.poiStackPct at the hit (user 2026-11-18: "pastiin POI ada di berbagai TF"). Filter tag, no score. */
+  | 'poiStack'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -253,7 +266,11 @@ export const REQUIRABLE_CONFLUENCES = [
   'oiHold',
   'anomaly',
   'pdZone',
-  'bbMomentum'
+  'bbMomentum',
+  'btcDom',
+  'poiLiq',
+  'slLiqClear',
+  'poiStack'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -277,7 +294,11 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'oiHold', label: 'OI 15m tidak turun' },
   { key: 'anomaly', label: 'anomali: volume 24j ≥ 3× median' },
   { key: 'pdZone', label: 'long di discount / short di premium (HTF)' },
-  { key: 'bbMomentum', label: 'momentum Bollinger searah' }
+  { key: 'bbMomentum', label: 'momentum Bollinger searah' },
+  { key: 'btcDom', label: 'BTC dominance mendukung (alt long saat BTCDOM turun)' },
+  { key: 'poiLiq', label: 'M0: liquidity wick POI belum diambil' },
+  { key: 'slLiqClear', label: 'tidak ada liquidity di belakang SL' },
+  { key: 'poiStack', label: 'POI numpuk dengan POI TF lain (≥ 1h)' }
 ]
 
 /** A candidate entry (never an order by itself). */

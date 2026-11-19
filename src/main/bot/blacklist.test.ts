@@ -43,4 +43,18 @@ describe('modelStats', () => {
     expect(s.find((m) => m.model === 'M1')!.totalR).toBeCloseTo(1.05)
     expect(s.find((m) => m.model === 'M2a')).toMatchObject({ trades: 1, losses: 1, wr: 0 })
   })
+  it('total stats with the max drawdown of the cumulative R in close order', async () => {
+    const { tradeStats } = await import('@shared/bot')
+    const base = { status: 'closed', riskUsd: 1, direction: 'bullish', entry: 100, sl: 99, model: 'M0' } as const
+    const s = tradeStats([
+      { ...base, pnl: -1, closedAt: 2 },
+      { ...base, pnl: 2, closedAt: 1 },
+      { ...base, pnl: -1, closedAt: 3 },
+      { ...base, pnl: 3, closedAt: 4 }
+    ] as never)
+    expect(s).toMatchObject({ trades: 4, wins: 2, losses: 2 })
+    expect(s!.totalR).toBeCloseTo(3)
+    expect(s!.maxDdR).toBeCloseTo(2)
+    expect(tradeStats([])).toBeNull()
+  })
 })
