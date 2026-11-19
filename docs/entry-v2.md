@@ -456,3 +456,18 @@ vs +0,11R untuk yang diambil, model lain juga datar. Jadi itu efek periode, buka
 **Campur tangan manual (simulasi trade live, ExitTracker sama dengan bot).** TP manual terlalu cepat: +12,4R aktual vs +20,2R
 kalau dibiarkan. Cancel di Binance: +6,7R hilang. "Lewat TP = batal" impas kalau limit tetap ditunggu sampai expired 24 jam
 (+0,4R di 75 order), jadi aturan itu tetap. BE menyelamatkan ±3,5R dibanding SL awal vs TP saja.
+
+## 19. Order flow tanpa geser SL (lab + permintaan user, 2026-11-19)
+
+Pemicu: AAVE short M0 (entry 110,05, SL 110,95). Sesudah ±1R, wick reaktif menggeser SL ke 110,37, lalu ke-sentil −0,36R.
+User: order flow cukup jadi validasi untuk **menahan** posisi (tanpa partial, trailing berhenti), SL jangan ikut digeser.
+
+Lab 100 koin, 6 bulan, filter bot (POI 4h/1d + konfluensi wajib), avg R:
+
+| Model | SL ke retest (lama) | SL tetap, BE jalan | SL tetap + tanpa BE selama hold | SL tetap, tanpa TP (trailing) |
+|---|---|---|---|---|
+| M0 (n 763) | +0,26 (IS +0,27 / OOS +0,25) | **+0,35** (IS +0,33 / OOS +0,38) | +0,35 | +0,49 (OOS +0,37) |
+| M2a (n 74) | +0,28 | **+0,37** (IS +0,28 / OOS +0,44) | +0,28 | +0,71 (n kecil) |
+
+→ `exit.orderFlowMoveSl` (default **false**). Order flow tetap menahan posisi, BE/tight-BE tetap jalan. Varian tanpa TP belum
+dipakai (OOS M0 tidak lebih baik dan n M2a kecil). Trade terbuka dari sebelum perubahan juga ikut aturan baru setelah restart.

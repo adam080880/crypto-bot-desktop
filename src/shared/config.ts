@@ -238,6 +238,12 @@ export const exitConfigSchema = z.object({
   orderFlowSignals: z.array(z.enum(['fvg', 'wick'])).min(1).default(['fvg', 'wick']),
   orderFlowWickRatio: z.number().min(0.3).max(0.95).default(0.5),
   /**
+   * Move the stop to the retest / wick extreme when the order flow confirms. Off (user, 2026-11-19):
+   * lab 100 coins, bot filters: M0 +0,26R → +0,35R (IS and OOS), M2a +0,28R → +0,37R with the stop left
+   * where it was. The order flow still holds the position (no partials, trailing paused).
+   */
+  orderFlowMoveSl: z.boolean().default(false),
+  /**
    * Tight stop (user): when |entry − SL| is below tightSlPct % of the entry, 1R is mostly fees and
    * noise, so the break-even step (slToR 0) fires at tightBeAtR at the earliest and locks
    * tightBeLockR net of fees instead of plain BE. Stops ≥ tightSlPct keep the normal BE step. 0 = off.

@@ -40,7 +40,7 @@ export interface BotTrade {
   /** Stop order generation (live: new algo id per move). */
   slSeq: number
   /** Exit plan frozen at entry (null for trades from before the tiered exit). */
-  exitPlan: (Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> & Partial<Pick<ExitConfig, 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>) | null
+  exitPlan: (Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio'> & Partial<Pick<ExitConfig, 'orderFlowMoveSl' | 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>) | null
   /** Live view of the exit: best R so far and whether the order flow is holding the position. */
   exitState: { bestR: number; holding: boolean; holds: number } | null
   /** Equity used for sizing and the planned loss at the SL (USDT). */

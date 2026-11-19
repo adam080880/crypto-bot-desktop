@@ -220,8 +220,8 @@ describe('order-flow hold (FVG retest / reactive wick → hold; BE step still ap
     k(6, 103.4, 103.5, 100.6, 100.7) // back down: stop at the retest low
   ]
 
-  it('holds after the FVG retest: no partial at 3R, stop at the retest low', () => {
-    const plan = exitConfigSchema.parse({ orderFlowSignals: ['fvg'] })
+  it('holds after the FVG retest: no partial at 3R, stop at the retest low (orderFlowMoveSl)', () => {
+    const plan = exitConfigSchema.parse({ orderFlowSignals: ['fvg'], orderFlowMoveSl: true })
     const x = new ExitTracker('bullish', 100, 99, null, plan, NO)
     FVG_RUN.slice(0, 6).forEach((b, i) => x.bar(b, i === 0))
     const mid = x.result()
@@ -232,6 +232,18 @@ describe('order-flow hold (FVG retest / reactive wick → hold; BE step still ap
     expect(x.result().r).toBeCloseTo(100.8 * 0.999 - 100, 6)
   })
 
+  it('default: holds after the FVG retest (no partial at 3R) but the stop stays at break-even', () => {
+    const plan = exitConfigSchema.parse({ orderFlowSignals: ['fvg'] })
+    const x = new ExitTracker('bullish', 100, 99, null, plan, NO)
+    FVG_RUN.slice(0, 6).forEach((b, i) => x.bar(b, i === 0))
+    const mid = x.result()
+    expect(mid.holding).toBe(true)
+    expect(mid.fills).toHaveLength(0)
+    expect(mid.sl).toBeCloseTo(100, 6)
+    x.bar(FVG_RUN[6]!) // low 100.6 stays above BE → still open
+    expect(x.result().done).toBe(false)
+  })
+
   it('without order flow the ladder takes 50 % at 3R and stops the rest at 1R', () => {
     const plan = exitConfigSchema.parse({ orderFlowHold: false })
     const x = new ExitTracker('bullish', 100, 99, null, plan, NO)
@@ -240,7 +252,7 @@ describe('order-flow hold (FVG retest / reactive wick → hold; BE step still ap
   })
 
   it('a reactive wick back at the entry confirms the POI; the stop never drops below break-even once reached', () => {
-    const plan = exitConfigSchema.parse({ orderFlowSignals: ['wick'] })
+    const plan = exitConfigSchema.parse({ orderFlowSignals: ['wick'], orderFlowMoveSl: true })
     const x = new ExitTracker('bullish', 100, 99, null, plan, NO)
     x.bar(k(0, 100, 100.2, 99.8, 100.1), true) // fill candle: its wick is not a signal
     x.bar(k(1, 100.1, 101.5, 100.05, 101.4)) // ≥ 1R → BE

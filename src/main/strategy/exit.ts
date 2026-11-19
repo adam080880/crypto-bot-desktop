@@ -50,7 +50,7 @@ interface Bucket {
 }
 
 export type ExitPlan = Pick<ExitConfig, 'ladder' | 'trailStepR' | 'trailGapR'> &
-  Partial<Pick<ExitConfig, 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio' | 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>
+  Partial<Pick<ExitConfig, 'orderFlowHold' | 'orderFlowTf' | 'orderFlowSignals' | 'orderFlowWickRatio' | 'orderFlowMoveSl' | 'tightSlPct' | 'tightBeAtR' | 'tightBeLockR'>>
 
 interface LadderStep {
   atR: number
@@ -86,12 +86,12 @@ export function effectiveLadder(plan: ExitPlan, entry: number, sl0: number): Lad
  *  - order-flow hold (user): bars are grouped into `orderFlowTf` candles. After entry, a strong move
  *    that leaves an FVG in the trade direction, then a candle that trades back into that FVG and
  *    closes on the right side (retest held) = order flow. While it holds the ladder takes no partials
- *    and the trailing pauses (the 1R → break-even step still applies); the stop goes to the retest
- *    extreme (+buffer) if that is tighter. A close through the FVG breaks it → ladder/trailing resume.
+ *    and the trailing pauses (the 1R → break-even step still applies); with orderFlowMoveSl the stop
+ *    goes to the retest extreme (+buffer) if that is tighter (off by default: the stop stays). A close through the FVG breaks it → ladder/trailing resume.
  *    The fill candle is never a signal (it formed partly before the entry).
  *    Reactive wick (user): a candle that comes back to the entry area and rejects it with a long wick
  *    (≥ orderFlowWickRatio of its range and ≥ 1.5 × body, close on the trade side of the entry) also
- *    confirms the POI → hold, stop beyond the wick (if tighter). Needs the bar's open.
+ *    confirms the POI → hold (stop beyond the wick only with orderFlowMoveSl). Needs the bar's open.
  * Per bar, conservative order: stop first, then TP, then ladder/trail (a stop moved on this bar
  * only protects from the next bar on). Feed 1m bars for a realistic result.
  */
@@ -156,6 +156,7 @@ export class ExitTracker {
     const buf = this.bufferPct / 100
     if (!this.holding) this.holds++
     this.holding = true
+    if (!this.plan.orderFlowMoveSl) return
     // the 1R → break-even step keeps working while holding; once there, the stop never drops below it
     this.moveSl(this.bull ? extreme * (1 - buf) : extreme * (1 + buf), 'orderflow')
   }

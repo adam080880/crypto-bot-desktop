@@ -165,7 +165,7 @@ export function Bot() {
             {cfg.exit.ladder.some((l) => l.slToR === 0) && cfg.exit.tightSlPct > 0
               ? ` · SL < ${cfg.exit.tightSlPct}%: BE baru di ${cfg.exit.tightBeAtR}R, kunci +${cfg.exit.tightBeLockR}R bersih fee`
               : ''}
-            {cfg.exit.orderFlowHold ? ` + tahan order flow (${cfg.exit.orderFlowSignals.join('/')} ${cfg.exit.orderFlowTf})` : ''} ·{' '}
+            {cfg.exit.orderFlowHold ? ` + tahan order flow (${cfg.exit.orderFlowSignals.join('/')} ${cfg.exit.orderFlowTf}${cfg.exit.orderFlowMoveSl ? ', SL ke retest' : ', SL tetap'})` : ''} ·{' '}
             <button type="button" className="underline decoration-dotted" onClick={() => void setRequireClaude(!cfg.bot.requireClaude)} title="Klik untuk ganti">
               {cfg.bot.requireClaude ? `Claude wajib ≥ ${cfg.bot.minConfidence}` : 'tanpa Claude (murni ICT)'}
             </button>

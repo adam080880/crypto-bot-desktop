@@ -84,6 +84,8 @@ dites ke exchange beneran.
   punya `prevOpposite`. Rekomendasi lab (`RECOMMENDED_MODEL_CONFLUENCE`, tombol di Settings): M0 `prevOpposite+slLiqClear`, M4
   `fvg+oiConfirm+slLiqClear` (lab 300 koin), M5 `btc1h+anomaly` (default lama M5 `oiConfirm+oiHold` OOS −0,23R). M1 negatif di semua kombinasi.
   Filter momentum sebelum fill (koin > 2R / BTC > 0,6% melawan) tidak ada edge di lab 300 koin, jadi tidak dibuat.
+- **Order flow tanpa geser SL** (2026-11-19, `docs/entry-v2.md §19`): `exit.orderFlowMoveSl` default false. Order flow cuma menahan
+  posisi (tanpa partial/trailing), SL tidak ditarik ke retest/wick. Lab 100 koin: M0 +0,26R → +0,35R, M2a +0,28R → +0,37R (IS dan OOS).
 - **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
