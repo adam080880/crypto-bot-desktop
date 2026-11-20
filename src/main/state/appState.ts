@@ -59,6 +59,13 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_bot_model_conf', true)
     }
+    // user 2026-11-20: plain HTF OCL is no longer a POI, the HTF OCL Break is (M0 too); once, so later
+    // Settings changes stick
+    if (!readSetting(db, 'migr_ocl_break_htf', z.boolean())) {
+      this.config = { ...this.config, smc: { ...this.config.smc, oclParentTimeframes: [], m0OclBreakTimeframes: ['4h', '1d', '1w'] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_ocl_break_htf', true)
+    }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {

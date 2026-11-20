@@ -75,6 +75,8 @@ dites ke exchange beneran.
 - **Batas posisi searah** (2026-11-18, `bot.maxSameDirection`, default 0 = mati atas permintaan user, `gate.ts directionGate`): pending + open per arah.
   Pemicu: 5 short alt kena SL bareng saat BTC pump +2,5%. Filter momentum BTC **tidak** dibuat: di lab M0, setup yang melawan
   momentum BTC 2–4h justru lebih bagus (reversal), jadi risikonya korelasi (variance), bukan expectancy. M0 dimatikan lagi.
+- **OCL bukan POI, OCL Break HTF iya** (2026-11-20, `docs/entry-v2.md §16`): `smc.oclParentTimeframes` [] (OCL biasa cuma di chart),
+  `smc.m0OclBreakTimeframes` 4h/1d/1w. Membatalkan keputusan 2026-11-18 (OCL Break M0 cuma 1w).
 - **TF POI + poiStack** (2026-11-18, `docs/entry-v2.md §17`): `bot.poiTimeframes` sekarang berlaku untuk M0/M1/M2a/M2b
   (M4/M5/M6 tidak), user set 4h + 1d; `smc.poiTimeframes` ditambah 1d. Tag `poiStack` (POI induk berdekatan ≤ `smc.poiStackPct`
   dengan POI aktif TF lain ≥ 1h) justru **lebih jelek** di lab (−0,15R vs −0,08R), jadi cuma info. Lab 40 koin: POI 1d +0,31R

@@ -388,6 +388,10 @@ Catatan: koin dipilih karena sering anomali (bias seleksi), dan M5 di lab ini ta
   **tidak** membantu di lab (dibuang atas keputusan user). `pdZone` justru memperburuk M0. **Tidak ada kombinasi M0 yang
   positif** di IS dan OOS.
 
+- **Update 2026-11-20 (user, kasus ZAMA "OCL 1d → OB 15m"):** OCL biasa (belum break) **tidak** jadi POI lagi untuk semua model
+  termasuk M0 (`smc.oclParentTimeframes` = [], masih digambar di chart). Penggantinya OCL Break HTF: `smc.m0OclBreakTimeframes`
+  = 4h/1d/1w (bot tetap dibatasi `bot.poiTimeframes`). Dimigrasi sekali di `AppState` (`migr_ocl_break_htf`).
+
 ## 17. TF POI induk + poiStack (2026-11-18)
 
 User: POI 15m terlalu noise, mau POI yang ada di berbagai TF.

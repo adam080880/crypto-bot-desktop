@@ -33,3 +33,14 @@ describe('per-model confluence migration', () => {
     expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().bot.modelConfluence.M0).toEqual(['prevOpposite'])
   })
 })
+
+describe('OCL → OCL Break HTF migration (2026-11-20)', () => {
+  it('drops the plain OCL as POI and allows the 4h/1d/1w OCL Break once', () => {
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    writeSetting(db, 'app_config', { smc: { oclParentTimeframes: ['4h', '1d', '1w'], m0OclBreakTimeframes: ['1w'] } })
+    const state = new AppState(db, { dbPath: ':memory:', version: 't' })
+    expect(state.getConfig().smc).toMatchObject({ oclParentTimeframes: [], m0OclBreakTimeframes: ['4h', '1d', '1w'] })
+    state.updateConfig(parseConfigPatch({ smc: { m0OclBreakTimeframes: ['1d'] } }))
+    expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().smc.m0OclBreakTimeframes).toEqual(['1d'])
+  })
+})

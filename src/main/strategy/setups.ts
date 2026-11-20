@@ -276,7 +276,11 @@ export function poiLiqIntact(c: readonly Candle[], poi: Pick<Poi, 'direction' | 
 
 function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
   const c = entry.candles
-  const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])].filter((p) => p.kind !== 'OCL_BREAK' || (cfg.m0OclBreakTimeframes as Timeframe[]).includes(p.timeframe))
+  const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])].filter(
+    (p) =>
+      (p.kind !== 'OCL_BREAK' || (cfg.m0OclBreakTimeframes as Timeframe[]).includes(p.timeframe)) &&
+      (p.kind !== 'OCL' || (cfg.oclParentTimeframes as Timeframe[]).includes(p.timeframe))
+  )
   const near = cfg.obValidNearPct / 100
   const out: Draft[] = []
   for (const poi of raw) {

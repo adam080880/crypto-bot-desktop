@@ -108,8 +108,9 @@ export const smcConfigSchema = z.object({
   originSwings: z.number().int().min(1).max(10).default(3),
   /** Parent POIs (the reason) must have an origin too (sweep / HTF POI). */
   parentNeedsOrigin: z.boolean().default(true),
-  /** Plain OCL may be a parent (reason) only from these timeframes ("OC dari high timeframe"). */
-  oclParentTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default(['4h', '1d', '1w']),
+  /** Plain OCL may be a parent (reason) only from these timeframes, every model incl. M0. [] = never (user
+   *  2026-11-20: plain HTF OCL is not a POI, only the HTF OCL Break is; still drawn on the chart). */
+  oclParentTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default([]),
   /** Wyckoff range: N candles whose range ≤ wyRangeAtr × ATR (ATR measured before the range). */
   wyRangeCandles: z.number().int().min(5).max(200).default(24),
   wyRangeAtr: z.number().min(1).max(30).default(4),
@@ -193,9 +194,9 @@ export const smcConfigSchema = z.object({
   slLiqZoneR: z.number().min(0.1).max(5).default(1),
   /** poiStack: another timeframe's POI counts when its level is within this % of the parent POI's level. */
   poiStackPct: z.number().min(0.01).max(5).default(0.3),
-  /** Timeframes on which M0 may still use an OCL Break as its POI (user 2026-11-18: OCL Break often fakes out;
-   *  only the weekly one is kept, as a level to watch / confirm). [] = never. */
-  m0OclBreakTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default(['1w']),
+  /** Timeframes on which M0 may use an OCL Break as its POI. 2026-11-18 only 1w; user 2026-11-20: the HTF
+   *  OCL Break replaces the plain OCL, so 4h/1d/1w (bot.poiTimeframes still limits what the bot trades). [] = never. */
+  m0OclBreakTimeframes: z.array(z.enum(['1h', '4h', '1d', '1w'])).default(['4h', '1d', '1w']),
   /** M0 only enters while the POI's wick liquidity is still resting (tag poiLiq). Lab 40 coins / 6 months:
    *  without it −0.21R vs −0.10R per trade (OOS −0.34 vs −0.13). */
   m0RequirePoiLiq: z.boolean().default(true)
