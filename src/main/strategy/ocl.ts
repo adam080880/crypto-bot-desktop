@@ -30,6 +30,7 @@ export function detectOcls(c: readonly Candle[], breakMaxCandles: number): Ocl[]
           o.kind = 'OCL_BREAK'
           o.direction = up ? 'bearish' : 'bullish'
           o.breakT = x.t
+          o.hitT = null // a touch while it was still a plain OCL is not a hit of the OCL Break POI
           continue
         }
         if (o.hitT === null && (up ? x.l <= o.level : x.h >= o.level)) o.hitT = x.t

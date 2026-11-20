@@ -115,6 +115,19 @@ describe('OCL (§6)', () => {
     expect(o).toMatchObject({ kind: 'OCL_BREAK', direction: 'bullish', level: 100, breakT: at(2), hitT: at(4), invalidT: null })
   })
 
+  it('a touch before the break does not count as a hit of the OCL Break', () => {
+    const c = bars([
+      [105, 106, 99, 100], // 0 red OCL @100
+      [100, 101, 97, 99], // 1 red
+      [99, 100.5, 98, 99.5], // 2 wicks up to the level while it is still a plain OCL
+      [99.5, 106, 99.2, 105.5], // 3 green closes above 105 → OCL Break Buy @100
+      [105.5, 108.2, 105.3, 108],
+      [108, 108.1, 99.8, 102] // 5 pullback to 100 → the real hit
+    ])
+    const o = analyzeSmc(c, '15m', cfg()).ocls.find((x) => x.t === at(0))!
+    expect(o).toMatchObject({ kind: 'OCL_BREAK', breakT: at(3), hitT: at(5) })
+  })
+
   it('no break when the green candle only closes inside the OCL area', () => {
     const c = bars([
       [105, 106, 99, 100],
