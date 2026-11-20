@@ -169,6 +169,8 @@ export class LiveBroker implements Broker {
       await this.client.stopLoss({ symbol: t.symbol, side: side(t, false), triggerPrice: fmtStep(t.sl, rules.tickSize), clientId: id })
       return { slOrderId: id }
     } catch (err) {
+      // -4116 duplicate client id: this exact stop is already on the exchange (placed by an earlier call)
+      if (err instanceof BinanceApiError && err.code === -4116) return { slOrderId: id }
       await this.client.cancelOrder(t.symbol, t.entryOrderId!).catch(() => null)
       await this.flatten(t)
       const r = await this.client.realised(t.symbol, (t.filledAt ?? t.createdAt) - 60_000).catch(() => null)
@@ -221,7 +223,8 @@ export class LiveBroker implements Broker {
     } catch (err) {
       refused = err
     }
-    if (!refused) {
+    // -4116: the stop with this id is already placed (an earlier call got through) → treat as moved
+    if (!refused || (refused instanceof BinanceApiError && refused.code === -4116)) {
       if (t.slOrderId) await this.client.cancelAlgo(t.symbol, t.slOrderId).catch(() => undefined)
       return { sl, slOrderId: id, slSeq: seq }
     }

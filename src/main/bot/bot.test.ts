@@ -327,6 +327,23 @@ describe('LiveBroker SL after fill (Binance -4509: closePosition stop needs an o
     expect(calls).toEqual(['sl smc-y-s', 'cancelEntry', 'cancelAll', 'marketClose'])
   })
 
+  it('-4116 duplicate SL id = that stop is already on the exchange: keep the position, no market close', async () => {
+    const calls: string[] = []
+    const client = {
+      getOrder: async () => ({ status: 'FILLED', executedQty: '10', updateTime: 5 }),
+      stopLoss: async (p: { clientId: string }) => {
+        calls.push(`sl ${p.clientId}`)
+        throw new BinanceApiError(-4116, 'ClientOrderId is duplicated.', '/fapi/v1/algoOrder')
+      },
+      limitTakeProfit: async (p: { clientId: string }) => void calls.push(`tp ${p.clientId}`),
+      cancelAll: async () => void calls.push('cancelAll'),
+      marketClose: async () => void calls.push('marketClose')
+    }
+    const r = await new LiveBroker(client as never).sync(pend, null, RULES)
+    expect(r).toMatchObject({ status: 'open', slOrderId: 'smc-y-s' })
+    expect(calls).toEqual(['sl smc-y-s', 'tp smc-y-t0'])
+  })
+
   it('open position without a stop (restart between fill and SL) gets one', async () => {
     const { broker, calls } = fake({ status: 'FILLED', executedQty: '10' })
     expect(await broker.sync({ ...pend, status: 'open' } as BotTrade, null, RULES)).toEqual({ slOrderId: 'smc-y-s' })

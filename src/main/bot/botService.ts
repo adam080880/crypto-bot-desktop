@@ -73,6 +73,8 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   private logged = new Map<string, string>()
   private tickTimer: ReturnType<typeof setInterval> | null = null
   private busy = false
+  /** A tick is running: the 5 s timer must not start a second one (2026-11-19: BASED got its SL placed twice → -4116 → flattened). */
+  private ticking = false
   private equityCache: { v: number; at: number } | null = null
   private lastError: string | null = null
   /** Tiered exit per open trade (id → tracker), fed with closed 1m candles. */
@@ -648,8 +650,18 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     }
   }
 
-  /** Exposed for tests; normally driven by the 5 s timer. */
+  /** Exposed for tests; normally driven by the 5 s timer. Never overlaps itself (REST calls can take > 5 s). */
   async tick(): Promise<void> {
+    if (this.ticking) return
+    this.ticking = true
+    try {
+      await this.tickInner()
+    } finally {
+      this.ticking = false
+    }
+  }
+
+  private async tickInner(): Promise<void> {
     const active = this.repo.active()
     if (!active.length) {
       this.bars.clear()
