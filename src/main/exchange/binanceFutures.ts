@@ -123,6 +123,12 @@ export class BinanceFuturesClient {
   }
 }
 
+/** REST kline row: [openTime, o, h, l, c, volume, closeTime, quoteVolume, trades, takerBuyBase, takerBuyQuote, ignore]. */
 export function parseKline(k: (string | number)[]): Candle {
-  return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }
+  const c: Candle = { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) }
+  if (k.length >= 10) {
+    c.nt = Number(k[8])
+    c.bv = Number(k[9])
+  }
+  return c
 }

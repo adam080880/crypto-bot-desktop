@@ -325,6 +325,102 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
     }
   }
 
+  /**
+   * Fill taker buy volume + trade count into rows stored before migration 0007 (`--flow`): re-download
+   * the 1m zips (REST for the newest hours) over the span still missing them, upsert only those two
+   * columns, then rebuild 5m–4h over that span. 1d/1w via REST. Does not move sync_state.
+   */
+  async enrichFlow(p: {
+    symbols?: string[]
+    limit?: number
+    data: DataConfig
+    signal?: AbortSignal
+    now?: number
+    onSymbol?: (e: { index: number; total: number; symbol: string; filled: number; bytes: number; ms: number; error?: string }) => void
+  }): Promise<{ symbols: number; filled: number; bytes: number; errors: { symbol: string; error: string }[] }> {
+    const now = p.now ?? Date.now()
+    const synced = new Set(this.db.$client.prepare(`SELECT symbol_id FROM sync_state WHERE timeframe = '1m'`).pluck().all() as number[])
+    let targets = activeSymbols(this.db).filter((s) => synced.has(s.id))
+    if (p.symbols?.length) {
+      const want = new Set(p.symbols.map((s) => s.toUpperCase()))
+      targets = targets.filter((s) => want.has(s.symbol))
+    }
+    if (p.limit) targets = targets.slice(0, p.limit)
+    const out = { symbols: targets.length, filled: 0, bytes: 0, errors: [] as { symbol: string; error: string }[] }
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < targets.length && !p.signal?.aborted) {
+        const index = next++
+        const sym = targets[index]!
+        const t0 = Date.now()
+        let filled = 0
+        let bytes = 0
+        try {
+          const r = await this.enrichSymbol(sym, now, p.signal)
+          filled = r.filled
+          bytes = r.bytes
+          out.filled += filled
+          out.bytes += bytes
+          p.onSymbol?.({ index, total: targets.length, symbol: sym.symbol, filled, bytes, ms: Date.now() - t0 })
+        } catch (err) {
+          if (p.signal?.aborted) return
+          const error = (err as Error).message
+          out.errors.push({ symbol: sym.symbol, error })
+          log.error({ symbol: sym.symbol, err: error }, 'flow enrich failed')
+          p.onSymbol?.({ index, total: targets.length, symbol: sym.symbol, filled, bytes, ms: Date.now() - t0, error })
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(p.data.concurrency, targets.length || 1) }, worker))
+    return out
+  }
+
+  private async enrichSymbol(sym: SymbolRow, now: number, signal?: AbortSignal): Promise<{ filled: number; bytes: number }> {
+    let filled = 0
+    let bytes = 0
+    const write = (tf: '1m' | '1d' | '1w', rows: Candle[], from: number, to: number): Promise<void> =>
+      this.locks.run(sym.symbol, async () => {
+        const keep = rows.filter((r) => r.t >= from && r.t <= to && r.bv != null)
+        if (keep.length) this.db.$client.transaction(() => (filled += this.repo.insertNative(tf, sym.id, keep)))()
+      })
+
+    const gap = this.repo.missingFlow('1m', sym.id)
+    if (gap) {
+      const today = Math.floor(now / DAY) * DAY
+      const curMonth = monthStart(now)
+      const file = async (period: VisionPeriod): Promise<boolean> => {
+        const f = await fetchVisionKlines(sym.symbol, '1m', period, signal)
+        if (!f) return false
+        bytes += f.bytes
+        await write('1m', f.candles, gap.first, gap.last)
+        return true
+      }
+      for (let m = monthStart(gap.first); m <= gap.last && m < curMonth; m = nextMonth(m)) {
+        if (await file({ kind: 'monthly', ...ymd(m) })) continue
+        for (let d = Math.max(m, Math.floor(gap.first / DAY) * DAY); d < nextMonth(m) && d <= gap.last; d += DAY) await file({ kind: 'daily', ...ymd(d) })
+      }
+      for (let d = Math.max(curMonth, Math.floor(gap.first / DAY) * DAY); d < today && d <= gap.last; d += DAY) await file({ kind: 'daily', ...ymd(d) })
+      // whatever the zips didn't cover (today, unpublished days): REST
+      const rest = this.repo.missingFlow('1m', sym.id)
+      if (rest && rest.last >= now - 3 * DAY) {
+        const from = Math.max(rest.first, Math.floor(now / DAY) * DAY - 2 * DAY)
+        for await (const rows of this.client.klines(sym.symbol, '1m', from, rest.last + MIN, signal)) await write('1m', rows, from, rest.last)
+      }
+      // 5m–4h over the refilled span (only up to what's final in 1m)
+      const last1m = getSyncState(this.db, sym.id, '1m')?.lastOpenTime
+      if (last1m != null)
+        await this.locks.run(sym.symbol, async () => {
+          rebuildDerived(this.db, this.repo, sym.id, gap.first, Math.min(gap.last, last1m) + MIN)
+        })
+    }
+    for (const tf of ['1d', '1w'] as const) {
+      const g = this.repo.missingFlow(tf, sym.id)
+      if (!g) continue
+      for await (const rows of this.client.klines(sym.symbol, tf, g.first, g.last + TF_MS[tf], signal)) await write(tf, rows, g.first, g.last)
+    }
+    return { filled, bytes }
+  }
+
   /** Rolling retention: drop 1m beyond its window, derived beyond theirs. */
   pruneRetention(data: DataConfig, now = Date.now()): Record<string, number> {
     const removed: Record<string, number> = {}

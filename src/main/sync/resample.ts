@@ -8,6 +8,8 @@ import type { Db } from '../db/client'
  * Pure OHLCV aggregation into `tf` buckets (UTC-aligned).
  *   open = first source open, high = max, low = min, close = last source close,
  *   volume = sum, n = number of underlying 1m candles (source.n, or 1 for raw 1m).
+ *   taker buy volume (bv) / trades (nt) = sum, null when any source minute lacks them (old rows);
+ *   left out entirely when the sources don't carry them (plain OHLCV input).
  * Input must be ascending by `t`. Buckets are emitted even if incomplete; callers decide
  * which ones are final (see `rebuildDerived`) and `n` exposes gaps.
  */
@@ -20,12 +22,16 @@ export function aggregate(source: readonly (Candle | DerivedCandle)[], tf: Deriv
     if (!cur || cur.t !== b) {
       if (cur) out.push(cur)
       cur = { t: b, o: s.o, h: s.h, l: s.l, c: s.c, v: s.v, n }
+      if (s.bv !== undefined) cur.bv = s.bv
+      if (s.nt !== undefined) cur.nt = s.nt
     } else {
       if (s.h > cur.h) cur.h = s.h
       if (s.l < cur.l) cur.l = s.l
       cur.c = s.c
       cur.v += s.v
       cur.n += n
+      if (cur.bv !== undefined) cur.bv = cur.bv === null || s.bv == null ? null : cur.bv + s.bv
+      if (cur.nt !== undefined) cur.nt = cur.nt === null || s.nt == null ? null : cur.nt + s.nt
     }
   }
   if (cur) out.push(cur)
@@ -57,7 +63,7 @@ export function rebuildDerived(
       let last: number | null = null
       for (let a = start; a < coveredUntil; a += CHUNK_MS) {
         const b = Math.min(a + CHUNK_MS, coveredUntil)
-        const rows = repo.range(src, symbolId, a, b)
+        const rows = repo.rangeFlow(src, symbolId, a, b)
         if (!rows.length) continue
         const buckets = aggregate(rows, target).filter((k) => k.t + TF_MS[target] <= coveredUntil)
         if (!buckets.length) continue

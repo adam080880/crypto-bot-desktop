@@ -41,4 +41,27 @@ describe('candle repo', () => {
     expect(wk).toHaveLength(48)
     expect(repo.pruneOlderThan('1m', mon + 1440 * 60_000)).toBe(1440)
   })
+
+  it('fills taker buy volume + trades into old rows without touching OHLCV', async () => {
+    const { CandleRepo } = await import('./candles')
+    const { upsertSymbols, symbolByName } = await import('./symbolsRepo')
+    const { rebuildDerived } = await import('../sync/resample')
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    upsertSymbols(db, [{ symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', onboardDate: 0, status: 'TRADING' }])
+    const sym = symbolByName(db, 'BTCUSDT')!
+    const repo = new CandleRepo(db)
+    const t0 = Date.UTC(2026, 10, 9)
+    const old = Array.from({ length: 10 }, (_, i) => ({ t: t0 + i * 60_000, o: 1, h: 2, l: 0.5, c: 1.5, v: 4 }))
+    repo.insertNative('1m', sym.id, old)
+    expect(repo.missingFlow('1m', sym.id)).toEqual({ first: t0, last: t0 + 9 * 60_000, count: 10 })
+    // a re-download with different OHLCV only fills the two new columns
+    const fresh = old.map((c) => ({ ...c, o: 99, bv: 1, nt: 5 }))
+    expect(repo.insertNative('1m', sym.id, fresh)).toBe(10)
+    expect(repo.insertNative('1m', sym.id, fresh)).toBe(0) // already filled
+    expect(repo.missingFlow('1m', sym.id)).toBeNull()
+    expect(repo.rangeFlow('1m', sym.id, t0, t0 + 60_000)).toEqual([{ t: t0, o: 1, h: 2, l: 0.5, c: 1.5, v: 4, bv: 1, nt: 5 }])
+    rebuildDerived(db, repo, sym.id, t0, t0 + 10 * 60_000)
+    expect(repo.rangeFlow('5m', sym.id, t0, t0 + 10 * 60_000).map((c) => [c.bv, c.nt])).toEqual([[5, 25], [5, 25]])
+    expect(repo.range('1m', sym.id, t0, t0 + 60_000)[0]).not.toHaveProperty('bv') // hot path stays lean
+  })
 })

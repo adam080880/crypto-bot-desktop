@@ -26,28 +26,45 @@ export class CandleRepo {
     return s
   }
 
-  /** Insert closed native candles; existing rows are kept (idempotent re-runs). Returns rows inserted. */
+  /**
+   * Insert closed native candles; existing rows are kept (idempotent re-runs), except that a row still
+   * missing taker buy volume / trades (stored before migration 0007) gets them filled in.
+   * Returns rows inserted or filled.
+   */
   insertNative(tf: '1m' | '1d' | '1w', symbolId: number, rows: readonly Candle[]): number {
     const s = this.stmt(`ins:${tf}`, () =>
-      `INSERT INTO ${table(tf)} (symbol_id, open_time, open, high, low, close, volume)
-       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`
+      `INSERT INTO ${table(tf)} (symbol_id, open_time, open, high, low, close, volume, buy_volume, trades)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (symbol_id, open_time) DO UPDATE SET buy_volume = excluded.buy_volume, trades = excluded.trades
+       WHERE buy_volume IS NULL AND excluded.buy_volume IS NOT NULL`
     )
     let n = 0
-    for (const r of rows) n += s.run(symbolId, r.t, r.o, r.h, r.l, r.c, r.v).changes
+    for (const r of rows) n += s.run(symbolId, r.t, r.o, r.h, r.l, r.c, r.v, r.bv ?? null, r.nt ?? null).changes
     return n
+  }
+
+  /** Open-time span of `tf` rows that still lack taker buy volume (null = none). */
+  missingFlow(tf: Timeframe, symbolId: number): { first: number; last: number; count: number } | null {
+    const s = this.stmt(`mfl:${tf}`, () =>
+      `SELECT min(open_time) AS first, max(open_time) AS last, count(*) AS count
+       FROM ${table(tf)} WHERE symbol_id = ? AND buy_volume IS NULL`
+    )
+    const r = s.get(symbolId) as { first: number | null; last: number | null; count: number }
+    return r.count ? { first: r.first!, last: r.last!, count: r.count } : null
   }
 
   /** Upsert derived candles (they're recomputed when source data changes). */
   upsertDerived(tf: Timeframe, symbolId: number, rows: readonly DerivedCandle[]): void {
     if (!isDerived(tf)) throw new Error(`${tf} is not a derived timeframe`)
     const s = this.stmt(`ups:${tf}`, () =>
-      `INSERT INTO ${table(tf)} (symbol_id, open_time, open, high, low, close, volume, n)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ${table(tf)} (symbol_id, open_time, open, high, low, close, volume, n, buy_volume, trades)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (symbol_id, open_time) DO UPDATE SET
          open = excluded.open, high = excluded.high, low = excluded.low,
-         close = excluded.close, volume = excluded.volume, n = excluded.n`
+         close = excluded.close, volume = excluded.volume, n = excluded.n,
+         buy_volume = excluded.buy_volume, trades = excluded.trades`
     )
-    for (const r of rows) s.run(symbolId, r.t, r.o, r.h, r.l, r.c, r.v, r.n)
+    for (const r of rows) s.run(symbolId, r.t, r.o, r.h, r.l, r.c, r.v, r.n, r.bv ?? null, r.nt ?? null)
   }
 
   /** Candles with open_time in [from, to), ascending. */
@@ -55,6 +72,20 @@ export class CandleRepo {
     const cols = isDerived(tf) ? ', n' : ''
     const s = this.stmt(`rng:${tf}`, () =>
       `SELECT open_time AS t, open AS o, high AS h, low AS l, close AS c, volume AS v${cols}
+       FROM ${table(tf)} WHERE symbol_id = ? AND open_time >= ? AND open_time < ?
+       ORDER BY open_time`
+    )
+    return s.all(symbolId, from, to) as Candle[]
+  }
+
+  /**
+   * Like `range`, plus taker buy volume (`bv`) and trade count (`nt`), null for rows stored before
+   * migration 0007. Kept separate so the hot SMC/backtest reads stay lean.
+   */
+  rangeFlow(tf: Timeframe, symbolId: number, from: number, to: number): Candle[] | DerivedCandle[] {
+    const cols = isDerived(tf) ? ', n' : ''
+    const s = this.stmt(`rngf:${tf}`, () =>
+      `SELECT open_time AS t, open AS o, high AS h, low AS l, close AS c, volume AS v${cols}, buy_volume AS bv, trades AS nt
        FROM ${table(tf)} WHERE symbol_id = ? AND open_time >= ? AND open_time < ?
        ORDER BY open_time`
     )

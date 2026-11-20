@@ -6,6 +6,8 @@
  *   --limit N              first N active symbols
  *   --all                  every active USDT-M perpetual (required for a full run)
  *   --estimate             only print the full-backfill estimate (uses last run's measurements)
+ *   --flow                 fill taker buy volume + trade count into rows stored before migration 0007
+ *                          (with --all / --symbols / --limit; re-downloads the 1m zips, ±5 GB for all)
  *   --verify               compare resampled 5m/15m/1h/4h with Binance native klines
  *   --sources 1m,1d,1w     which source timeframes to fetch (default all)
  *   --concurrency N        parallel symbols (default from config: 4)
@@ -37,6 +39,7 @@ const { values: args } = parseArgs({
     all: { type: 'boolean', default: false },
     estimate: { type: 'boolean', default: false },
     verify: { type: 'boolean', default: false },
+    flow: { type: 'boolean', default: false },
     sources: { type: 'string' },
     concurrency: { type: 'string' },
     db: { type: 'string' }
@@ -122,6 +125,26 @@ async function main(): Promise<void> {
   if (!symbols && !limit && !args.all) {
     console.error('Pilih salah satu: --test, --symbols, --limit N, atau --all (full backfill).')
     process.exitCode = 2
+    return
+  }
+
+  if (args.flow) {
+    await backfiller.refreshSymbols(data)
+    const t0 = Date.now()
+    console.log('Isi taker buy volume + jumlah trade untuk data lama (download ulang zip 1m)...')
+    const r = await backfiller.enrichFlow({
+      symbols,
+      limit,
+      data,
+      signal: ctrl.signal,
+      onSymbol: (e) =>
+        console.log(
+          `[${String(e.index + 1).padStart(3)}/${e.total}] ${e.symbol.padEnd(14)} ${e.error ? `ERROR ${e.error}` : `${fmtInt(e.filled)} baris, ${fmtBytes(e.bytes)}`} (${fmtDur(e.ms)})`
+        )
+    })
+    console.log(`
+Selesai dalam ${fmtDur(Date.now() - t0)} — ${r.symbols} simbol, ${fmtInt(r.filled)} baris diisi, download ${fmtBytes(r.bytes)}, ${r.errors.length} error${ctrl.signal.aborted ? ' (dibatalkan, jalankan lagi untuk melanjutkan)' : ''}`)
+    db.$client.close()
     return
   }
   const sources = (args.sources?.split(',') ?? [...SOURCE_TIMEFRAMES]) as SourceTimeframe[]

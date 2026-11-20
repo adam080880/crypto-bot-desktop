@@ -32,11 +32,17 @@ export function parseKlineCsv(text: string): Candle[] {
     if (!line) continue
     const c0 = line.charCodeAt(0)
     if (c0 < 48 || c0 > 57) continue // header or junk
-    const f = line.split(',', 6)
+    // open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,...
+    const f = line.split(',', 10)
     if (f.length < 6) continue
     let t = Number(f[0])
     if (t > 1e14) t = Math.floor(t / 1000) // µs → ms
-    out.push({ t, o: Number(f[1]), h: Number(f[2]), l: Number(f[3]), c: Number(f[4]), v: Number(f[5]) })
+    const c: Candle = { t, o: Number(f[1]), h: Number(f[2]), l: Number(f[3]), c: Number(f[4]), v: Number(f[5]) }
+    if (f.length >= 10) {
+      c.nt = Number(f[8])
+      c.bv = Number(f[9])
+    }
+    out.push(c)
   }
   return out
 }

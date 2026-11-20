@@ -13,6 +13,11 @@ describe('vision', () => {
     ])
   })
 
+  it('reads trade count + taker buy volume when the CSV has them', () => {
+    const row = '1790812800000,1,2,0.5,1.5,10,1790812859999,15,42,6.5,9.75,0\n'
+    expect(parseKlineCsv(row)).toEqual([{ t: 1790812800000, o: 1, h: 2, l: 0.5, c: 1.5, v: 10, nt: 42, bv: 6.5 }])
+  })
+
   it('builds monthly and daily URLs', () => {
     expect(visionUrl('BTCUSDT', '1m', { kind: 'monthly', year: 2026, month: 5 })).toBe(
       'https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2026-05.zip'

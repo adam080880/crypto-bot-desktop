@@ -36,6 +36,13 @@ describe('aggregate', () => {
     expect(c4h[0]!.t).toBe(T0)
   })
 
+  it('sums taker buy volume + trades; a bucket with an old (null) minute stays null', () => {
+    const m = minutes(10).map((c, i) => ({ ...c, bv: 0.5, nt: i === 7 ? null : 3 }))
+    const out = aggregate(m, '5m')
+    expect(out.map((c) => [c.bv, c.nt])).toEqual([[2.5, 15], [2.5, null]])
+    expect(aggregate(minutes(5), '5m')[0]).not.toHaveProperty('bv') // plain OHLCV in → plain out
+  })
+
   it('aligns buckets to UTC boundaries and counts gaps via n', () => {
     const m = minutes(10, T0 + 3 * M).filter((_, i) => i !== 4) // starts at :03, one missing minute
     const out = aggregate(m, '5m')

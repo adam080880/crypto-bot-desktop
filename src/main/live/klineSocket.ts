@@ -130,7 +130,7 @@ class KlineConnection {
       }
       const d = msg.data
       if (!d || d.e !== 'kline' || !d.k || !d.s) return
-      const k = d.k as { t: number; o: string; h: string; l: string; c: string; v: string; x: boolean }
+      const k = d.k as { t: number; o: string; h: string; l: string; c: string; v: string; V?: string; n?: number; x: boolean }
       if (!this.symbols.has(d.s)) return
       const eventTime = d.E ?? Date.now()
       this.maxLatencyMs = Math.max(this.maxLatencyMs * 0.9, Date.now() - eventTime)
@@ -138,7 +138,7 @@ class KlineConnection {
         symbol: d.s,
         eventTime,
         closed: k.x,
-        candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
+        candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, bv: k.V !== undefined ? +k.V : null, nt: k.n ?? null }
       })
     }
     ws.onerror = () => {
