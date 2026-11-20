@@ -21,7 +21,7 @@ SMC/ICT, screener, backtest, bot (paper/live), radar pump, kalender news USD, da
 | **Chart** | Candle 1m–1w (lightweight-charts), overlay SMC (structure, BOS, OB, FVG, RBS/SBR, OCL, QM, liquidity), setup aktif, posisi bot live dengan R berjalan, tombol close/cancel, buka trade lama dari Bot/Backtest |
 | **Screener** | Scan semua koin yang punya histori: setup aktif, harga dekat POI 1h/4h, BOS baru, trend searah. Otomatis tiap 15 menit |
 | **Backtest** | Satu koin, semua model × semua rencana exit sekaligus, fill/exit di candle 1m, fee + slippage, split in-sample / out-of-sample, tab Meta untuk menyimpan profil per koin |
-| **Bot** | Paper atau live. Risk per trade dalam % equity, SL wajib, leverage aman di bawah likuidasi, exit bertingkat, hasil win / BE / loss terpisah |
+| **Bot** | Paper atau live. Risk per trade dalam % dari saldo atau dari modal tetap, SL wajib, leverage aman di bawah likuidasi, exit bertingkat + order flow, statistik per model (win / BE / loss, DD maks) sejak tanggal tertentu |
 | **Rotasi** | Forward test rotasi momentum long/short. **Paper saja**, tidak pernah kirim order |
 | **Kalender** | Event USD (jadwal + forecast + actual dari BLS/FRED), bias USD → crypto, news window |
 | **Claude Analyses** | Analisis berkala koin watchlist lewat Claude Agent SDK (opsional, read-only tools) |
@@ -44,7 +44,7 @@ bisa dites. Semua detektor ada di `src/main/strategy/`.
 | **OB valid** | "POI kena POI": setelah OB/POI pertama kena, terbentuk OB baru di dekatnya. Itulah yang dipakai untuk limit |
 | **FVG** (Fair Value Gap) | Celah tiga candle yang wick-nya tidak saling menutup. **Hanya konfluensi**, app tidak pernah entry di FVG |
 | **RBS / SBR** | Resistance yang ditembus close jadi support (RBS), atau sebaliknya (SBR) |
-| **OCL / OCL Break** | Dua candle searah berurutan (level = close candle pertama); OCL Break = candle lawan arah yang close melewati body itu. Hanya dipakai sebagai POI induk dari TF besar |
+| **OCL / OCL Break** | Dua candle searah berurutan (level = close candle pertama); OCL Break = candle lawan arah yang close melewati body itu. OCL biasa cuma digambar di chart; yang jadi POI induk hanya **OCL Break dari TF besar** (4h/1d/1w) |
 | **QM** (Quasimodo) | Pola "tiga gunung": gunung kedua menembus gunung pertama, entry saat harga kembali ke body gunung pertama |
 | **Liquidity** | Wick OB yang belum tersapu + swing high/low (BSL/SSL) dan equal high/low yang belum disapu |
 | **Sweep** | Harga menembus liquidity lalu balik. Banyak model mensyaratkan POI terbentuk karena sweep (*origin*) |
@@ -72,15 +72,19 @@ otomatis mengecil (risk per trade tetap).
 
 **Exit bertingkat** (`src/main/strategy/exit.ts`, dipakai backtest dan bot): di 1R SL ke break-even bersih
 fee; kalau SL < 1% dari harga, BE baru di 2R dan mengunci +0,5R. Di 3R tutup 50% dan SL ke 1R, lalu trailing.
-Kalau ada *order flow* (FVG searah yang diretest dan mantul, atau wick penolakan di area entry), posisi ditahan.
+Kalau ada *order flow* (FVG searah yang diretest dan mantul, atau wick penolakan di area entry), posisi ditahan:
+partial dan trailing ditunda, tapi SL **tidak** digeser ke retest/wick (`exit.orderFlowMoveSl`, default mati; lab:
+lebih baik dibiarkan).
 
 **Konfluensi** (tag, bisa diwajibkan per model): FVG, searah trend TF POI, sweep, POI HTF, trend BTC 4h/1h,
 Wyckoff, killzone, open interest naik searah (`oiConfirm`), OI tidak turun (`oiHold`), funding lawan crowd, dan
 `anomaly` (volume 24 jam ≥ 3× median). Skor setup cuma info, di backtest tidak berkorelasi dengan hasil.
 
-**Pengaman sebelum order** (`src/main/bot/gate.ts`): koin crypto top 100 volume, satu posisi per koin, batas
-posisi terbuka, berhenti sisa hari kalau rugi harian ≥ batas, tidak entry di news window USD, setup harus baru,
-harga belum lewat TP/entry, dan (opsional) analisis Claude searah dengan confidence ≥ batas.
+**Pengaman sebelum order** (`src/main/bot/gate.ts`): koin crypto top N volume (`bot.topVolume`), TF POI induk
+(`bot.poiTimeframes`), satu posisi per koin, batas posisi terbuka, batas posisi searah (`bot.maxSameDirection`,
+opsional), blacklist koin setelah 3× SL dalam 7 hari, berhenti sisa hari kalau rugi harian ≥ batas, tidak entry baru di
+news window USD (posisi/limit yang sudah ada dibiarkan), setup harus baru, harga belum lewat TP/entry, dan (opsional)
+analisis Claude searah dengan confidence ≥ batas.
 
 ## Instalasi
 
@@ -99,13 +103,14 @@ pnpm dev
 
 Harga diambil dari endpoint **publik** Binance (tanpa API key): zip bulanan/harian `data.binance.vision`
 (dicek SHA-256) lalu REST untuk sisa terbaru. 1m disimpan 6 bulan; 5m/15m/1h/4h di-resample dari 1m;
-1d/1w 2 tahun.
+1d/1w 2 tahun. Tiap candle menyimpan OHLCV + **taker buy volume** + **jumlah trade** (sejak migration 0007).
 
 ```bash
 pnpm data:backfill --test       # 5 simbol + estimasi ukuran
 pnpm data:backfill --estimate   # proyeksi ukuran DB/waktu
 pnpm data:backfill --all        # semua simbol (~10 GB, ±1 jam) — bisa Ctrl+C lalu dilanjutkan
 pnpm data:backfill --verify     # cocokkan hasil resample dengan kline asli Binance
+pnpm data:backfill --all --flow # isi taker buy volume + jumlah trade ke data lama (download ulang zip 1m, ±4,5 GB)
 ```
 
 ### Build
@@ -140,6 +145,25 @@ fitur analis memakai `claude` yang terinstal di mesin kamu.
 Yang dikirim: radar pump, order bot (entry, fill, SL geser, close), peringatan/error bot, dan opsional setup
 screener. URL webhook itu rahasia, jangan dibagikan.
 
+## Rekomendasi setting
+
+Titik awal dari hasil lab (bukan jaminan). Semua ada di **Settings**, kecuali saklar live di halaman **Bot**.
+
+| Setting | Rekomendasi | Alasan |
+|---|---|---|
+| Mode | **Paper dulu**, live setelah beberapa minggu hasil paper sesuai backtest | Live belum pernah dites lewat testnet |
+| Model bot | **M0, M2a, M4** | Lab 100 koin × 6 bulan (bot asli + fee): ±+0,39R/trade, IS +0,40 / OOS +0,38. M1 negatif di semua kombinasi |
+| TF POI induk (`bot.poiTimeframes`) | **4h + 1d** | Lab 40 koin: POI 1d paling kuat (+0,31R, OOS +0,41); M0 di 4h+1d +0,12R |
+| Konfluensi wajib | Tombol **Rekomendasi** di Settings: M0 `prevOpposite+slLiqClear`, M4 `fvg+oiConfirm+slLiqClear`, M5 `btc1h+anomaly` | Lab 60–300 koin, positif di IS dan OOS |
+| Exit | Bertingkat + order flow, **SL tidak digeser** saat order flow | M0 +0,26 → +0,35R, M2a +0,28 → +0,37R |
+| Risk per trade | **1–2%**, jangan 5%+ | Winrate ±30–50%: 5 SL beruntun di 10%/trade = −41% |
+| Patokan risk (`bot.riskBaseUsdt`) | Isi **modal awal** | 1R tetap, tidak mengecil saat drawdown / membesar saat profit |
+| Rem harian (`risk.maxDailyLossPct`) | Sesuaikan dengan toleransi (mis. 3–5× risk per trade) | Berhenti sisa hari UTC |
+| Batas posisi searah (`bot.maxSameDirection`) | 0 (mati) atau **2–3** kalau mau variance lebih kecil | Saat BTC dump, 8 long kena SL bareng (−6,2R); maks 2 searah = −3,3R. Expectancy tidak berubah |
+| News USD | Biarkan news window (blok entry baru saja). **Jangan** batalkan limit/tutup posisi sebelum news | Lab: batal/tutup sebelum news menurunkan total R (420 → 397R) |
+| Killzone | **Jangan** dijadikan filter atau alasan close | Tidak ada edge; close saat killzone berlawanan malah turun ke 327–404R |
+| Claude (`bot.requireClaude`) | Mati (murni SMC) | Belum pernah divalidasi dengan model asli |
+
 ## Hasil riset (jujur)
 
 Backtest lab 2 tahun dengan fee + slippage, fill di candle 1m (detail di [`docs/entry-v2.md`](docs/entry-v2.md)):
@@ -151,6 +175,14 @@ Backtest lab 2 tahun dengan fee + slippage, fill di candle 1m (detail di [`docs/
   diwajibkan per model.
 - Pump tidak bisa dideteksi saat koin masih sepi. M6 otomatis rugi di out-of-sample, jadi TP-nya manual.
 - Rotasi momentum: out-of-sample −41% s/d +5% tergantung hari rebalance → paper saja.
+- Bot sekarang (M0/M2a/M4, POI 4h/1d, konfluensi rekomendasi, exit + order flow), lab 100 koin × 6 bulan:
+  1066 trade, +0,39R/trade (IS +0,40 / OOS +0,38). Fee ±0,15–0,2R per trade sudah dihitung.
+- Tidak ada edge: killzone ICT sebagai filter, filter momentum BTC / "harga datang terlalu cepat", filter koin habis
+  pump (M4 setelah pump justru lebih baik), `poiStack`.
+- News "surfing" (ikut arah setelah rilis USD besar): umumnya tidak stabil. Yang bertahan cuma kejutan besar vs
+  forecast (EURUSD gerak ≥ 0,10% di menit rilis) di BTC/ETH/SOL: ±+0,33R, tapi cuma ±4 trade/bulan. Belum dibuat fitur.
+- Prekursor pump koin kecil (taker buy, jumlah trade, CVD, 513 koin): volume/trade yang ramai menaikkan peluang
+  gerak besar ±5×, tapi pump dan dump sama-sama. Taker buy tinggi tidak menaikkan peluang pump.
 
 Sampelnya terbatas (beberapa koin, 2 tahun). Validasi sendiri di halaman Backtest sebelum memakai uang
 sungguhan.
