@@ -44,7 +44,7 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
     this.config = readSetting(db, 'app_config', appConfigSchema) ?? defaultAppConfig
     // smc.models has no UI: configs saved before M5 existed get the new model detected (the bot still
     // only trades what bot.models allows)
-    for (const m of ['M5', 'M6'] as const)
+    for (const m of ['M5', 'M6', 'M7'] as const)
       if (!this.config.smc.models.includes(m)) this.config = { ...this.config, smc: { ...this.config.smc, models: [...this.config.smc.models, m] } }
     // M6 (user, 2026-11-15) joins the bot's models once; removing it later in Settings sticks
     if (!readSetting(db, 'migr_bot_m6', z.boolean())) {

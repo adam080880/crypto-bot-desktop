@@ -90,6 +90,9 @@ dites ke exchange beneran.
   posisi (tanpa partial/trailing), SL tidak ditarik ke retest/wick. Lab 100 koin: M0 +0,26R → +0,35R, M2a +0,28R → +0,37R (IS dan OOS).
 - **Patokan risk tetap** (2026-11-20): `bot.riskBaseUsdt` (0 = saldo saat ini). > 0 → 1R = `riskPerTradePct` % × patokan, tidak ikut
   naik-turun saldo (`sizing.ts planOrder riskBase`). Batas notional/leverage tetap pakai equity asli. User set ke modal 69,27 USDT.
+- **M7 MSNR** (2026-11-20, `docs/entry-v2.md §20`): level A/V fresh dari close 4h, storyline EMA20 harian, TP level fresh berikutnya.
+  Aturan dari internet (bukan materi). Mesin app 150 koin: +0,10R (IS −0,01 / OOS +0,32), profit kebanyakan short di Nov. Tidak masuk
+  bot otomatis. Lab strategi lain (breakout sesi, reversal harian, lonjakan volume, mean reversion BB) semuanya negatif.
 - **Taker buy volume + jumlah trade** (2026-11-20, migration `0007_candle_flow`): kolom `buy_volume` (base) + `trades` di semua tabel
   candle (`Candle.bv` / `Candle.nt`), diisi dari zip vision, REST, dan WS kline (`V`, `n`), dijumlah saat resample (null kalau ada menit lama).
   Data lama = NULL sampai user jalankan `pnpm data:backfill --all --flow` (download ulang zip 1m ±5 GB, cuma isi 2 kolom, sync_state

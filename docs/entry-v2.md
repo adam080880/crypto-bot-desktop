@@ -475,3 +475,21 @@ Lab 100 koin, 6 bulan, filter bot (POI 4h/1d + konfluensi wajib), avg R:
 
 → `exit.orderFlowMoveSl` (default **false**). Order flow tetap menahan posisi, BE/tight-BE tetap jalan. Varian tanpa TP belum
 dipakai (OOS M0 tidak lebih baik dan n M2a kecil). Trade terbuka dari sebelum perubahan juga ikut aturan baru setelah restart.
+
+## 20. M7 MSNR (Malaysian SnR) + lab strategi lain (permintaan user, 2026-11-20)
+Aturan dari sumber publik (LuxAlgo, indikator TradingView), **bukan materi kursus**. Detektor `modelM7` + `snrLevels` di `setups.ts`,
+config `smc.msnr*`, exit `msnrExit` (TP di level, tanpa ladder/trailing).
+- Level A/V = puncak/lembah **close** 4h (line chart, pivot 2 kiri-kanan). **Fresh** sampai kena wick pertama.
+- Storyline = close harian (dari 4h) di atas EMA20 yang naik (3 hari) → long di level V; di bawah EMA20 yang turun → short di level A.
+- Limit dipasang saat close 15m masuk ≤ `msnrNearAtr` × ATR(14) 4h dari level yang masih fresh. SL `msnrSlAtr` (1) × ATR di balik
+  level, TP = level fresh berlawanan terdekat (min `msnrMinRR` 1,5). Limit expired 24 jam; selama level masih fresh, pendekatan
+  berikutnya memasang limit baru.
+- Lab cepat (script terpisah, 150 koin, 6 bulan, fill wajib tembus 0,1%): +0,22R (IS +0,12 / OOS +0,43), 6 dari 7 bulan positif.
+- **Lewat mesin app** (detector + `simulateSetup`, fill/exit 1m, fee, plan `liq`), 150 koin: n 11.836, WR 30%, **+0,10R**
+  (IS −0,01 / OOS +0,32). Long −0,03R, short +0,19R. Per bulan: Mei +0,33, Jun +0,01, Jul +0,06, Agu −0,13, Sep −0,05, Okt +0,17,
+  **Nov +0,84** (dump BTC). `btc4h`: +0,18R (IS +0,04 / OOS +0,40), Jul −0,12. Jarak pemasangan 1/3/6 ATR hasilnya sama.
+- Kesimpulan: **belum ada edge yang stabil**; profit kebanyakan dari short saat pasar turun (Nov). M7 terdeteksi di chart/screener/
+  backtest, **tidak** masuk `bot.models` otomatis. Konfluensi rekomendasi M7 kosong.
+- Strategi lain di lab yang sama (150 koin, 15m, fee): breakout range Asia → London −0,05 s/d −0,09R; reversal harian cross-section
+  (long 5 terburuk / short 5 terbaik 24 jam) −0,05R; ikut lonjakan volume 1h −0,04 s/d −0,15R (OOS −0,3 s/d −0,4); mean reversion
+  Bollinger 1h ±0 s/d −0,04R. Semua tidak dibuat.

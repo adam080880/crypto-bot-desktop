@@ -1,5 +1,5 @@
 import type { Candle } from '@shared/candles'
-import { breakerExit, type ExitConfig, type SmcConfig } from '@shared/config'
+import { breakerExit, msnrExit, type ExitConfig, type SmcConfig } from '@shared/config'
 import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Setup, SetupStatus } from '@shared/smc'
 import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -192,6 +192,8 @@ interface Draft {
   reasons: string[]
   /** Pending expiry in entry candles (default cfg.setupExpiryCandles). */
   expiry?: number
+  /** Model's own target (M7: next fresh level); replaces the liquidity target. */
+  tp?: number
 }
 
 /**
@@ -214,13 +216,14 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M4')) drafts.push(...modelM4(input, all))
   if (models.has('M5')) drafts.push(...modelM5(input, all))
   if (models.has('M6')) drafts.push(...modelM6(input, all))
+  if (models.has('M7')) drafts.push(...modelM7(input, all))
 
   const atr = cfg.minSlAtr > 0 ? atrSeries(c, 14) : null
   const h1 = all.find((a) => a.timeframe === '1h')
   const vol1h = h1 && h1.candles.length >= RADAR_BARS ? { c: h1.candles, vr: volRatioSeries(h1.candles) } : null
   const best = new Map<string, Setup>()
   for (const d0 of drafts) {
-    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
+    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
     const s = finalize(input, all, d, vol1h, pois)
     if (!s) continue
     const prev = best.get(s.id)
@@ -660,6 +663,136 @@ function modelM5({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): D
   return out
 }
 
+// ---------- M7: MSNR (Malaysian SnR) fresh A/V level in the storyline direction ----------
+
+/** A/V level of a line chart (closes): `p` closes on each side lower (A) / higher (V). */
+interface SnrLevel {
+  i: number
+  kind: 'A' | 'V'
+  price: number
+  /** Close time of the candle that confirms the pivot. */
+  knownT: number
+  /** Open time of the first `tf` candle after confirmation whose wick touched the level (Infinity = still fresh). */
+  touchT: number
+}
+
+export function snrLevels(c: readonly Candle[], tf: Timeframe, p: number): SnrLevel[] {
+  const out: SnrLevel[] = []
+  for (let i = p; i + p < c.length; i++) {
+    const x = c[i]!.c
+    let A = true
+    let V = true
+    for (let k = 1; k <= p; k++) {
+      if (!(x > c[i - k]!.c && x >= c[i + k]!.c)) A = false
+      if (!(x < c[i - k]!.c && x <= c[i + k]!.c)) V = false
+    }
+    if (!A && !V) continue
+    let touchT = Infinity
+    for (let k = i + p + 1; k < c.length; k++)
+      if (A ? c[k]!.h >= x : c[k]!.l <= x) {
+        touchT = c[k]!.t
+        break
+      }
+    out.push({ i, kind: A ? 'A' : 'V', price: x, knownT: closeTime(c[i + p]!.t, tf), touchT })
+  }
+  return out
+}
+
+/** Daily storyline from `tf` candles: last full UTC day closed above a rising EMA → bullish, below a falling one → bearish. */
+function storyline(c: readonly Candle[], emaN: number): (t: number) => Dir | null {
+  const DAY = TF_MS['1d']
+  const days: { end: number; c: number }[] = []
+  for (const x of c) {
+    const d = Math.floor(x.t / DAY) * DAY
+    const last = days[days.length - 1]
+    if (last && last.end === d + DAY) last.c = x.c
+    else days.push({ end: d + DAY, c: x.c })
+  }
+  const k = 2 / (emaN + 1)
+  const ema: number[] = []
+  for (let i = 0; i < days.length; i++) ema.push(i ? days[i]!.c * k + ema[i - 1]! * (1 - k) : days[i]!.c)
+  return (t) => {
+    let j = -1
+    for (let lo = 0, hi = days.length - 1; lo <= hi; ) {
+      const m = (lo + hi) >> 1
+      if (days[m]!.end <= t) {
+        j = m
+        lo = m + 1
+      } else hi = m - 1
+    }
+    // the day containing the last candle may be incomplete (its end is in the future → never picked)
+    if (j < Math.max(3, emaN / 2)) return null
+    const e = ema[j]!
+    if (days[j]!.c > e && e > ema[j - 3]!) return 'bullish'
+    if (days[j]!.c < e && e < ema[j - 3]!) return 'bearish'
+    return null
+  }
+}
+
+/**
+ * M7 (user 2026-11-20, docs/entry-v2.md §20). Not from the course: rules from public MSNR sources. A fresh V level
+ * (support) in a bullish storyline / A level (resistance) in a bearish one: once an entry-TF close comes within
+ * msnrNearAtr × ATR of the level while it is still fresh → limit at the level, SL msnrSlAtr × ATR beyond it,
+ * TP the nearest opposite level that is known and fresh at that time (≥ msnrMinRR). After an unfilled limit
+ * expires, a later approach re-arms the level while it is still fresh.
+ */
+function modelM7({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): Draft[] {
+  const a = all.find((x) => x.timeframe === cfg.msnrTimeframe)
+  if (!a || a.candles.length < 50) return []
+  const h = a.candles
+  const c = entry.candles
+  const atr = atrSeries(h, 14)
+  const story = storyline(h, cfg.msnrStoryEma)
+  const levels = snrLevels(h, a.timeframe, cfg.msnrPivot)
+  const tfMs = TF_MS[a.timeframe]
+  const out: Draft[] = []
+  for (const L of levels) {
+    const bull = L.kind === 'V'
+    const maxT = L.knownT + cfg.msnrMaxAgeDays * TF_MS['1d']
+    for (let m = indexAtOrAfter(c, L.knownT); m < c.length && c[m]!.t < maxT; m++) {
+      const x = c[m]!
+      // fresh up to here: no closed `tf` candle before this bucket touched it, and no entry candle in this bucket did
+      const bucket = Math.floor(x.t / tfMs) * tfMs
+      if (L.touchT < bucket) break
+      if (bull ? x.l <= L.price : x.h >= L.price) break
+      const known = closeTime(x.t, entry.timeframe)
+      const k4 = lastClosedBy(h, a.timeframe, known)
+      if (k4 < 14) continue
+      const near = cfg.msnrNearAtr * atr[k4]!
+      if (Math.abs(x.c - L.price) > near) continue
+      // storyline and target as of this candle (a later approach may qualify while the level is still fresh)
+      if (story(known) !== (bull ? 'bullish' : 'bearish')) continue
+      const sl = bull ? L.price - cfg.msnrSlAtr * atr[k4]! : L.price + cfg.msnrSlAtr * atr[k4]!
+      let tp: number | null = null
+      for (const o of levels) {
+        if (o.kind === L.kind || o.knownT > known || o.touchT < bucket) continue
+        if (bull ? o.price > L.price && (tp === null || o.price < tp) : o.price < L.price && (tp === null || o.price > tp)) tp = o.price
+      }
+      if (tp === null || Math.abs(tp - L.price) / Math.abs(L.price - sl) < cfg.msnrMinRR) continue
+      out.push({
+        model: 'M7',
+        dir: bull ? 'bullish' : 'bearish',
+        poi: { kind: 'SNR', timeframe: a.timeframe, level: L.price, t: h[L.i]!.t, hitT: null, origin: null },
+        child: { kind: 'LEVEL', timeframe: entry.timeframe, t: x.t, level: L.price, extreme: sl, hasFvg: false, origin: null },
+        entry: L.price,
+        sl,
+        tp,
+        knownIdx: m,
+        invalidLevel: sl,
+        confluence: [],
+        reasons: [
+          `level ${L.kind} ${a.timeframe} ${L.price} masih fresh (belum kena wick), storyline 1d ${bull ? 'naik' : 'turun'}`,
+          `SL ${cfg.msnrSlAtr}×ATR ${a.timeframe}, TP level fresh berikutnya ${tp}`
+        ],
+        expiry: cfg.msnrExpiryCandles
+      })
+      // an unfilled limit expires; while the level stays fresh, the next approach after that arms a new one
+      m += cfg.msnrExpiryCandles
+    }
+  }
+  return out
+}
+
 // ---------- M6: radar pump → 1h breakout (not SMC, docs/entry-v2.md §12–13) ----------
 
 /**
@@ -879,8 +1012,8 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, 
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
   const trailOnly = d.model === 'M5' || d.model === 'M6'
-  const tpLiquidity = trailOnly ? null : nearestTarget(all, bull, d.entry, known)
-  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
+  const tpLiquidity = trailOnly ? null : (d.tp ?? nearestTarget(all, bull, d.entry, known))
+  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : d.model === 'M7' ? msnrExit() : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk

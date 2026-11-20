@@ -167,6 +167,24 @@ export const smcConfigSchema = z.object({
   /** Exit: no TP (manual), no break-even; every m6TrailStepR of new best R the SL goes to best − m6TrailGapR. */
   m6TrailGapR: z.number().min(0.5).max(20).default(2),
   m6TrailStepR: z.number().min(0.05).max(5).default(0.25),
+  /**
+   * M7 MSNR (Malaysian SnR, user 2026-11-20, docs/entry-v2.md §20; rules from public sources, not the course).
+   * A/V levels = peaks/valleys of the `msnrTimeframe` closes (line chart, pivot msnrPivot each side); fresh until a
+   * wick touches them. Storyline = daily close vs EMA(msnrStoryEma) with that EMA sloping the same way (over 3 days).
+   * Limit at a fresh level in the storyline direction once price comes within msnrNearAtr × ATR(14); SL msnrSlAtr × ATR
+   * beyond it; TP = next fresh opposite level, at least msnrMinRR. Lab 150 coins / 6 months (fee, fill needs 0.1% through):
+   * +0,22R (IS +0,12 / OOS +0,43), 6 of 7 months positive.
+   */
+  msnrTimeframe: z.enum(['1h', '4h', '1d']).default('4h'),
+  msnrPivot: z.number().int().min(1).max(10).default(2),
+  msnrStoryEma: z.number().int().min(5).max(200).default(20),
+  msnrSlAtr: z.number().min(0.1).max(5).default(1),
+  msnrMinRR: z.number().min(0.5).max(10).default(1.5),
+  msnrNearAtr: z.number().min(0.1).max(10).default(1),
+  /** A level older than this (days since it became known) is not traded any more. */
+  msnrMaxAgeDays: z.number().min(1).max(90).default(20),
+  /** Pending limit expires after N entry-TF candles (96 × 15m = 24h). */
+  msnrExpiryCandles: z.number().int().min(1).max(1000).default(96),
 
   // ---- order flow from futures positioning (open interest / funding), docs/entry-v2.md §10 ----
   /** oiFlush: open interest down at least this % over the last 4h. */
@@ -381,7 +399,8 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M2b: ['fvg', 'trendParent', 'pdZone'],
   M4: ['fvg', 'oiConfirm', 'slLiqClear'], // 300 koin: +0,27R (IS +0,27 / OOS +0,28) vs −0,04R; fvg+btc1h+slLiqClear +0,17R
   M5: ['btc1h', 'anomaly'], // +0,23R (IS +0,24 / OOS +0,22); old oiConfirm+oiHold: OOS −0,23R
-  M6: []
+  M6: [],
+  M7: [] // MSNR: the level + storyline is the signal
 }
 
 export const botConfigSchema = z.object({
@@ -497,6 +516,11 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 /** Exit of M6 (radar pump): no TP (the user takes profit by hand), no break-even, trailing stop only. */
 export function m6Exit(smc: Pick<SmcConfig, 'm6TrailGapR' | 'm6TrailStepR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold'> {
   return { tpMode: 'trail', tpR: 50, ladder: [], trailStepR: smc.m6TrailStepR, trailGapR: smc.m6TrailGapR, orderFlowHold: false }
+}
+
+/** Exit of M7 (MSNR): TP at the next fresh level (setup.tpLiquidity), no ladder, no trailing — as in the lab. */
+export function msnrExit(): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold'> {
+  return { tpMode: 'liquidity', tpR: 3, ladder: [], trailStepR: 0, orderFlowHold: false }
 }
 
 /** Exit of M4 (breaker) when smc.breakerTpR > 0: fixed TP, no ladder, no trailing. */

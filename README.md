@@ -66,6 +66,7 @@ satu per satu di **Settings → Bot entry**, dan dibandingkan di halaman **Backt
 | **M4** breaker | OB 1h/4h yang dijebol setelah sweep berubah fungsi → limit saat harga retest | Ujung lain OB | **TP 1R** |
 | **M5** trend 4h (bukan SMC) | Close 4h tembus high/low 20 candle dan di sisi benar EMA200 → limit di close itu | 3× ATR | Trailing saja, tanpa BE/TP |
 | **M6** radar pump (bukan SMC) | Radar bunyi (volume 24j ≥ 8× median, atau funding ≤ −0,05% + volume ≥ 3×) → close 1h tembus box 24 jam → limit di close itu. Long saja | 3× ATR 1h | **Tanpa TP: ambil profit manual**, SL trailing |
+| **M7** MSNR (bukan dari materi) | Level A/V fresh dari close 4h (line chart) searah storyline harian (EMA20) → limit di level saat harga mendekat | 1× ATR 4h di balik level | **TP di level fresh berikutnya** |
 
 SL semua model SMC (M0–M4) minimal 1× ATR(14) TF entry; kalau lebih sempit, SL dilebarkan dan ukuran posisi
 otomatis mengecil (risk per trade tetap).
@@ -181,6 +182,9 @@ Backtest lab 2 tahun dengan fee + slippage, fill di candle 1m (detail di [`docs/
   pump (M4 setelah pump justru lebih baik), `poiStack`.
 - News "surfing" (ikut arah setelah rilis USD besar): umumnya tidak stabil. Yang bertahan cuma kejutan besar vs
   forecast (EURUSD gerak ≥ 0,10% di menit rilis) di BTC/ETH/SOL: ±+0,33R, tapi cuma ±4 trade/bulan. Belum dibuat fitur.
+- **M7 MSNR** (Malaysian SnR) lewat mesin app, 150 koin: +0,10R/trade (IS −0,01 / OOS +0,32), profitnya kebanyakan short saat
+  pasar turun (Nov). Breakout sesi Asia→London, reversal harian cross-section, ikut lonjakan volume, dan mean reversion Bollinger
+  semuanya negatif setelah fee.
 - Prekursor pump koin kecil (taker buy, jumlah trade, CVD, 513 koin): volume/trade yang ramai menaikkan peluang
   gerak besar ±5×, tapi pump dan dump sama-sama. Taker buy tinggi tidak menaikkan peluang pump.
 

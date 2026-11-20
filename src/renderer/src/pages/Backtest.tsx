@@ -573,7 +573,7 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
       savedAt: Date.now(),
       models: [row.model],
       pois: [row.poi],
-      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' ? [] : filter.conf,
+      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' || row.model === 'M7' ? [] : filter.conf,
       minScore: filter.minScore,
       plan: r.plans[row.plan]!,
       stats: { trades: row.all.trades, winrate: row.all.winrate, avgR: row.all.avgR, oosTrades: row.oos.trades, oosAvgR: row.oos.avgR }

@@ -129,7 +129,7 @@ export interface SmcAnalysis {
 }
 
 /** BO = Donchian channel breakout (M5 trend model; not an SMC POI, it is the reason of a trend trade). */
-export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK' | 'BO'
+export type PoiKind = 'OB' | 'RBS' | 'SBR' | 'QM' | 'OCL' | 'OCL_BREAK' | 'BO' | 'SNR'
 
 /** Display names (OB = Order Block; OCL Break is NOT an OB). */
 export const POI_LABEL: Record<PoiKind, string> = {
@@ -139,7 +139,8 @@ export const POI_LABEL: Record<PoiKind, string> = {
   QM: 'QM',
   OCL: 'OCL',
   OCL_BREAK: 'OCL Break',
-  BO: 'Breakout'
+  BO: 'Breakout',
+  SNR: 'Level A/V'
 }
 
 /**
@@ -158,6 +159,7 @@ export function setupPath(model: string, poiKind: PoiKind, poiTf: string, childK
   if (model === 'M4') return `Breaker ${childTf}`
   if (model === 'M5') return `Breakout ${poiTf}`
   if (model === 'M6') return `Radar pump → breakout ${childTf}`
+  if (model === 'M7') return `MSNR level ${poiTf}`
   return `${POI_LABEL[poiKind]} ${poiTf} → ${childKind === 'BREAKER' ? 'Breaker' : childKind} ${childTf}`
 }
 
@@ -181,8 +183,10 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *      limit at that close, SL k × ATR, exit by trailing only (no break-even, no TP). Lab 2y BTC/ETH/SOL: +0,15R.
  *  M6  radar pump (not SMC): 24h volume ≥ N × median or negative funding + volume → 1h close beyond the
  *      24h box → limit at that close, SL k × ATR, no TP (user takes profit by hand), trailing stop.
+ *  M7  MSNR (Malaysian SnR, not from the course): fresh A/V level of the 4h closes in the daily storyline direction →
+ *      limit at the level when price comes near, SL k × ATR beyond it, TP at the next fresh opposite level.
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
@@ -191,10 +195,11 @@ export const MODEL_LABEL: Record<EntryModel, string> = {
   M2b: 'M2b liquidity grab + CHoCH',
   M4: 'M4 breaker',
   M5: 'M5 trend breakout 4h',
-  M6: 'M6 radar pump (TP manual)'
+  M6: 'M6 radar pump (TP manual)',
+  M7: 'M7 MSNR level A/V fresh'
 }
 
-export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT'
+export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT' | 'LEVEL'
 
 /** Score/filter tags; FVG is information only (never an entry level). */
 export type Confluence =
