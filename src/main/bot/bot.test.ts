@@ -11,6 +11,16 @@ const RULES = { tickSize: 0.001, stepSize: 1, minQty: 1, minNotional: 5 }
 const FEE = 0.09
 
 describe('planOrder (risk-based sizing)', () => {
+  it('a fixed risk base sizes 1R from the base, not the equity; the notional cap still uses the equity', () => {
+    const a = planOrder({ direction: 'bullish', entry: 1, sl: 0.99, tp: 1.05, equity: 10, riskPct: 1, maxLeverage: 20, rules: RULES, feePct: FEE })
+    const b = planOrder({ direction: 'bullish', entry: 1, sl: 0.99, tp: 1.05, equity: 10, riskPct: 1, riskBase: 20, maxLeverage: 20, rules: RULES, feePct: FEE })
+    if (typeof a === 'string' || typeof b === 'string') throw new Error('no plan')
+    expect(b.riskUsd / a.riskUsd).toBeCloseTo(2, 1)
+    const c = planOrder({ direction: 'bullish', entry: 1, sl: 0.99, tp: 1.05, equity: 10, riskPct: 1, riskBase: 1000, maxLeverage: 20, rules: RULES, feePct: FEE })
+    if (typeof c === 'string') throw new Error('no plan')
+    expect(c.notional).toBeLessThanOrEqual(10 * 20)
+  })
+
   it('sizes so that hitting the SL loses ≈ risk% of equity incl. fees', () => {
     // equity 10, risk 1% = 0.10; entry 1.000 SL 0.990 → 0.010/unit + fees
     const p = planOrder({ direction: 'bullish', entry: 1, sl: 0.99, tp: 1.05, equity: 10, riskPct: 1, maxLeverage: 20, rules: RULES, feePct: FEE })

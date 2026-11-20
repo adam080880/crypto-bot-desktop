@@ -87,6 +87,8 @@ export function planOrder(p: {
   tp: number | null
   equity: number
   riskPct: number
+  /** Fixed USDT base for riskPct (bot.riskBaseUsdt); 0/undefined = the equity. */
+  riskBase?: number
   maxLeverage: number
   rules: SymbolRules
   /** Fees for the planned loss: maker entry + taker stop + slippage, % of notional. */
@@ -101,7 +103,7 @@ export function planOrder(p: {
   if (bull ? !(sl < entry && entry < far) : !(far < entry && entry < sl)) return 'level SL/entry/TP tidak valid setelah dibulatkan ke tick'
   if (!(p.equity > 0)) return 'equity 0'
   const dist = Math.abs(entry - sl)
-  const budget = p.equity * (p.riskPct / 100)
+  const budget = (p.riskBase && p.riskBase > 0 ? p.riskBase : p.equity) * (p.riskPct / 100)
   // loss per unit at the SL including fees on both legs
   const lossPerUnit = dist + (entry + sl) * (p.feePct / 100)
   let qty = budget / lossPerUnit
@@ -111,7 +113,7 @@ export function planOrder(p: {
   const notional = qty * entry
   if (qty < r.minQty || notional < r.minNotional) {
     const need = Math.max(r.minNotional / entry, r.minQty)
-    const needRisk = (need * lossPerUnit) / p.equity
+    const needRisk = (need * lossPerUnit) / (p.riskBase && p.riskBase > 0 ? p.riskBase : p.equity)
     return `ukuran ${notional.toFixed(2)} USDT di bawah minimal order ${r.minNotional} USDT (butuh risk ≈ ${(needRisk * 100).toFixed(2)}% atau modal lebih besar)`
   }
   const leverage = Math.min(p.maxLeverage, Math.max(1, Math.ceil(notional / p.equity)))

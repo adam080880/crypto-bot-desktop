@@ -405,6 +405,12 @@ export const botConfigSchema = z.object({
    * Size = equity × riskPerTradePct ÷ |entry − SL| distance (capped by risk.maxLeverage).
    */
   riskPerTradePct: z.number().positive().max(100).default(1),
+  /**
+   * Base for the risk % (user, 2026-11-20): 0 = the current equity (size follows the balance); > 0 = a fixed
+   * USDT base, so 1R stays riskPerTradePct % of this amount however the balance moves. Notional / leverage
+   * limits still use the real equity.
+   */
+  riskBaseUsdt: z.number().min(0).max(1e9).default(0),
   /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
   topVolume: z.number().int().min(5).max(300).default(100),
   /** M0/M1/M2a/M2b: the parent POI (the reason) must come from these timeframes. M4/M5/M6 are not limited. */

@@ -146,7 +146,7 @@ export function Bot() {
           <div>
             <div className="text-xs text-muted-foreground">Risk per order</div>
             <div className="text-lg font-semibold">
-              {cfg.bot.riskPerTradePct}% · maks {cfg.risk.maxLeverage}× · {cfg.risk.maxOpenPositions} posisi
+              {cfg.bot.riskPerTradePct}%{cfg.bot.riskBaseUsdt > 0 ? ` × ${cfg.bot.riskBaseUsdt} USDT = ${((cfg.bot.riskBaseUsdt * cfg.bot.riskPerTradePct) / 100).toFixed(2)} USDT` : ' saldo'} · maks {cfg.risk.maxLeverage}× · {cfg.risk.maxOpenPositions} posisi
             </div>
           </div>
           <div className="text-xs text-muted-foreground sm:col-span-2 lg:col-span-4">

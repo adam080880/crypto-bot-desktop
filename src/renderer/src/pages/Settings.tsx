@@ -386,7 +386,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
   const [msg, setMsg] = useState<string | null>(null)
   // Keep the form in sync when config changes elsewhere (Bot page Start/Stop, other windows)
   useEffect(() => setB(config.bot), [config.bot])
-  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours' | 'maxSameDirection', label: string, step: number) => (
+  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'riskBaseUsdt' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours' | 'maxSameDirection', label: string, step: number) => (
     <>
       <Label htmlFor={`bot-${k}`}>{label}</Label>
       <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
@@ -404,6 +404,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
       <CardContent className="space-y-3">
         <div className="grid grid-cols-[1fr_140px] items-center gap-3">
           {num('riskPerTradePct', 'Risk per order (% equity yang rela hilang kalau kena SL)', 0.1)}
+          {num('riskBaseUsdt', `Patokan risk (USDT). 0 = saldo saat ini (ikut naik-turun); > 0 = modal tetap → 1R = ${b.riskPerTradePct}% × ${b.riskBaseUsdt || 'saldo'}${b.riskBaseUsdt > 0 ? ` = ${((b.riskBaseUsdt * b.riskPerTradePct) / 100).toFixed(2)} USDT` : ''}`, 1)}
           {num('minScore', 'Min skor setup (0 = mati; skor = 3 + jumlah konfluensi). Profil koin dari Backtest punya min skor sendiri', 1)}
           {num('minConfidence', 'Min confidence Claude (0–100, cuma dipakai kalau "Claude wajib" nyala)', 1)}
           {num('maxAnalysisAgeMin', 'Umur maks analisis Claude (menit)', 5)}
@@ -492,9 +493,10 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Ukuran posisi = equity × {b.riskPerTradePct}% ÷ jarak entry–SL (fee ikut dihitung). Contoh: equity 10 USDT, SL 0,5% dari entry → rugi maks{' '}
+          Ukuran posisi = {b.riskBaseUsdt > 0 ? `${b.riskBaseUsdt} USDT (patokan tetap)` : 'equity'} × {b.riskPerTradePct}% ÷ jarak entry–SL (fee ikut dihitung). Contoh: equity 10 USDT, SL 0,5% dari entry → rugi maks{' '}
           {((10 * b.riskPerTradePct) / 100).toFixed(2)} USDT, ukuran posisi ≈ {((10 * b.riskPerTradePct) / 100 / 0.0068).toFixed(0)} USDT (dibatasi leverage maks{' '}
           {config.risk.maxLeverage}×). Order di bawah minimal Binance (biasanya 5 USDT, BTC 50, ETH 20) dilewati, bukan digedein.
+          {b.riskBaseUsdt > 0 && ' Patokan tetap: kalau saldo turun jauh di bawah patokan, % rugi per SL terhadap saldo asli jadi lebih besar; update patokan kalau nambah/narik modal.'}
         </p>
         <div className="flex items-center gap-3">
           <Button

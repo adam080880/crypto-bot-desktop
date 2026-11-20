@@ -86,6 +86,8 @@ dites ke exchange beneran.
   Filter momentum sebelum fill (koin > 2R / BTC > 0,6% melawan) tidak ada edge di lab 300 koin, jadi tidak dibuat.
 - **Order flow tanpa geser SL** (2026-11-19, `docs/entry-v2.md §19`): `exit.orderFlowMoveSl` default false. Order flow cuma menahan
   posisi (tanpa partial/trailing), SL tidak ditarik ke retest/wick. Lab 100 koin: M0 +0,26R → +0,35R, M2a +0,28R → +0,37R (IS dan OOS).
+- **Patokan risk tetap** (2026-11-20): `bot.riskBaseUsdt` (0 = saldo saat ini). > 0 → 1R = `riskPerTradePct` % × patokan, tidak ikut
+  naik-turun saldo (`sizing.ts planOrder riskBase`). Batas notional/leverage tetap pakai equity asli. User set ke modal 69,27 USDT.
 - **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.

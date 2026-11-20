@@ -542,6 +542,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       tp: planTpFor(c.setup, c.direction === 'bullish', exit),
       equity,
       riskPct: bot.riskPerTradePct,
+      riskBase: bot.riskBaseUsdt,
       maxLeverage: risk.maxLeverage,
       rules,
       feePct: FEES.makerPct + FEES.takerPct + FEES.slippagePct
