@@ -379,10 +379,11 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
     let filled = 0
     let bytes = 0
     const write = (tf: '1m' | '1d' | '1w', rows: Candle[], from: number, to: number): Promise<void> =>
-      this.locks.run(sym.symbol, async () => {
-        const keep = rows.filter((r) => r.t >= from && r.t <= to && r.bv != null)
-        if (keep.length) this.db.$client.transaction(() => (filled += this.repo.insertNative(tf, sym.id, keep)))()
-      })
+      retryBusy(() =>
+        this.locks.run(sym.symbol, async () => {
+          const keep = rows.filter((r) => r.t >= from && r.t <= to && r.bv != null)
+          if (keep.length) this.db.$client.transaction(() => (filled += this.repo.insertNative(tf, sym.id, keep)))()
+        }), signal)
 
     const gap = this.repo.missingFlow('1m', sym.id)
     if (gap) {
@@ -406,12 +407,21 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
         const from = Math.max(rest.first, Math.floor(now / DAY) * DAY - 2 * DAY)
         for await (const rows of this.client.klines(sym.symbol, '1m', from, rest.last + MIN, signal)) await write('1m', rows, from, rest.last)
       }
-      // 5m–4h over the refilled span (only up to what's final in 1m)
-      const last1m = getSyncState(this.db, sym.id, '1m')?.lastOpenTime
-      if (last1m != null)
-        await this.locks.run(sym.symbol, async () => {
-          rebuildDerived(this.db, this.repo, sym.id, gap.first, Math.min(gap.last, last1m) + MIN)
-        })
+    }
+    // 5m–4h over the refilled span, plus derived rows still empty although their 1m is filled (a previous
+    // run whose resample failed). Only up to what's final in 1m; older derived rows have no 1m left.
+    const first1m = this.repo.bounds('1m', sym.id).first
+    const last1m = getSyncState(this.db, sym.id, '1m')?.lastOpenTime
+    if (first1m != null && last1m != null) {
+      let from = gap ? gap.first : Infinity
+      let to = gap ? gap.last : -Infinity
+      const d = this.repo.missingFlow('5m', sym.id, first1m)
+      if (d && d.count > 2) {
+        // a lone empty bucket at the edge of the 1m window can't be filled; don't rebuild 6 months for it
+        from = Math.min(from, d.first)
+        to = Math.max(to, d.last)
+      }
+      if (from <= to) await this.rebuildChunked(sym, Math.max(from, first1m), Math.min(to, last1m) + MIN, signal)
     }
     for (const tf of ['1d', '1w'] as const) {
       const g = this.repo.missingFlow(tf, sym.id)
@@ -419,6 +429,18 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
       for await (const rows of this.client.klines(sym.symbol, tf, g.first, g.last + TF_MS[tf], signal)) await write(tf, rows, g.first, g.last)
     }
     return { filled, bytes }
+  }
+
+  /**
+   * rebuildDerived in weekly transactions (4h-aligned edges), so a long refill never holds the write lock
+   * for long; retried when the app's writer has the DB busy.
+   */
+  private async rebuildChunked(sym: SymbolRow, from: number, until: number, signal?: AbortSignal): Promise<void> {
+    const WEEK = 7 * DAY
+    for (let a = Math.floor(from / (4 * 3600_000)) * 4 * 3600_000; a < until; a += WEEK) {
+      const b = Math.min(a + WEEK, until)
+      await retryBusy(() => this.locks.run(sym.symbol, async () => void rebuildDerived(this.db, this.repo, sym.id, a, b)), signal)
+    }
   }
 
   /** Rolling retention: drop 1m beyond its window, derived beyond theirs. */
@@ -435,6 +457,19 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
       .run(oneMinuteStart(now, data))
     if (Object.values(removed).some((n) => n > 0)) log.info({ removed }, 'retention prune')
     return removed
+  }
+}
+
+/** Retry a write while another process (the app's data worker) holds the SQLite write lock. */
+async function retryBusy(fn: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) return
+    try {
+      return await fn()
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'SQLITE_BUSY' || attempt >= 6) throw err
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+    }
   }
 }
 

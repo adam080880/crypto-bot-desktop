@@ -44,12 +44,12 @@ export class CandleRepo {
   }
 
   /** Open-time span of `tf` rows that still lack taker buy volume (null = none). */
-  missingFlow(tf: Timeframe, symbolId: number): { first: number; last: number; count: number } | null {
+  missingFlow(tf: Timeframe, symbolId: number, from = 0): { first: number; last: number; count: number } | null {
     const s = this.stmt(`mfl:${tf}`, () =>
       `SELECT min(open_time) AS first, max(open_time) AS last, count(*) AS count
-       FROM ${table(tf)} WHERE symbol_id = ? AND buy_volume IS NULL`
+       FROM ${table(tf)} WHERE symbol_id = ? AND open_time >= ? AND buy_volume IS NULL`
     )
-    const r = s.get(symbolId) as { first: number | null; last: number | null; count: number }
+    const r = s.get(symbolId, from) as { first: number | null; last: number | null; count: number }
     return r.count ? { first: r.first!, last: r.last!, count: r.count } : null
   }
 
