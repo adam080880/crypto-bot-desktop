@@ -92,6 +92,9 @@ dites ke exchange beneran.
   candle (`Candle.bv` / `Candle.nt`), diisi dari zip vision, REST, dan WS kline (`V`, `n`), dijumlah saat resample (null kalau ada menit lama).
   Data lama = NULL sampai user jalankan `pnpm data:backfill --all --flow` (download ulang zip 1m ±5 GB, cuma isi 2 kolom, sync_state
   tidak berubah). Baca lewat `CandleRepo.rangeFlow` (`range`/`latest` sengaja tidak memuatnya). Untuk riset pump/akumulasi.
+  Lab pertama (513 koin, 6 bln, micin 0,3–50 jt/hari, pump ≥ 15%/4j): volume/jumlah trade naikkan peluang gerak besar ±5×, tapi pump
+  dan dump sama-sama (rasio tetap ±2:1). Taker buy/CVD tinggi tidak menaikkan peluang pump, cuma sedikit menurunkan dump. Koin sepi: pump
+  0,16%/jam, dengan filter terbaik 0,28%. Belum ada prekursor yang bisa dipakai.
 - **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
