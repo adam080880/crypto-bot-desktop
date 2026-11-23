@@ -72,8 +72,11 @@ export const smcConfigSchema = z.object({
   breakerTpR: z.number().min(0).max(20).default(1),
   /** §7: mountain 2's body must break mountain 1's wick ("biasanya"; user-confirmed). */
   qmRequireBodyBreak: z.boolean().default(true),
+  /** QM: the break of the reaction low/high (L1 for a sell) must be a candle CLOSE beyond it, not a wick only
+   *  (internet QM/QML "MSB with body confirmation", user 2026-11-23: "cari di internet dan sesuaikan"). */
+  qmRequireCloseBreak: z.boolean().default(true),
   /** §8 Q14 */
-  poiTimeframes: z.array(z.enum(['5m', '15m', '1h', '4h', '1d'])).default(['1d', '4h', '1h']),
+  poiTimeframes: z.array(z.enum(['5m', '10m', '15m', '45m', '1h', '2h', '3h', '4h', '1d'])).default(['1d', '4h', '1h']),
   entryTimeframe: z.enum(['1m', '5m', '15m', '1h']).default('15m'),
   sameTfPoi: z.boolean().default(true),
   /** §8 Q15: OB valid must form within N entry candles after the POI hit. */
@@ -192,7 +195,7 @@ export const smcConfigSchema = z.object({
    * fixed TP m8TpR. Armed once an entry-TF close is within m8NearR × risk of the line (re-armed after expiry while
    * the POI is untouched). Lab: +0,08R (IS +0,05 / OOS +0,12), 5/7 months positive; many combos tested → paper first.
    */
-  m8PoiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['4h', '1d']),
+  m8PoiTimeframes: z.array(z.enum(['45m', '1h', '2h', '3h', '4h', '1d'])).min(1).default(['4h', '1d']),
   m8Kinds: z.array(z.enum(['OB', 'RBS', 'SBR', 'QM', 'OCL', 'OCL_BREAK'])).min(1).default(['RBS', 'SBR', 'OCL_BREAK']),
   m8MinSlPct: z.number().min(0).max(20).default(1),
   m8TpR: z.number().min(0.5).max(10).default(3), // lab 2026-11-23: 3R +0,16R (IS +0,10 / OOS +0,24) vs 2R +0,12R
@@ -220,10 +223,14 @@ export const smcConfigSchema = z.object({
    * at most confirmLookback entry candles before the setup is known; SMT on 1h: one of coin / reference (BTC, or ETH
    * for BTC) took the smtRangeH-hour extreme in the last smtWindowH hours, the other did not.
    */
+  /** M10 (user 2026-11-23): QM confirmation timeframes after an HTF POI hit (3m = resampled 1m), window, pivot size. */
+  m10Timeframes: z.array(z.enum(['1m', '3m', '5m', '10m'])).min(1).default(['1m', '3m', '5m']),
+  m10WindowMin: z.number().int().min(15).max(1440).default(240),
+  m10Pivot: z.number().int().min(1).max(10).default(3),
   confirmLookback: z.number().int().min(1).max(200).default(16),
   smtWindowH: z.number().int().min(1).max(48).default(6),
   smtRangeH: z.number().int().min(4).max(240).default(24),
-  m9PoiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
+  m9PoiTimeframes: z.array(z.enum(['45m', '1h', '2h', '3h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
   m9Kinds: z.array(z.enum(['OB', 'RBS', 'SBR', 'QM', 'OCL', 'OCL_BREAK'])).min(1).default(['OB', 'QM']),
   m9MinSlPct: z.number().min(0).max(20).default(0),
   m9TpR: z.number().min(0).max(10).default(0),
@@ -412,8 +419,10 @@ export type ClaudeConfig = z.infer<typeof claudeConfigSchema>
 
 /** Screener over stored data: entry material across all synced symbols. Candidates only. */
 export const screenerConfigSchema = z.object({
-  /** Rescan one minute after every 15m close (and once after startup). */
+  /** Rescan automatically (and once after startup). */
   autoScan: z.boolean().default(true),
+  /** Minutes between automatic scans, one minute after each N-minute mark (user 2026-11-23: "per 3-5 menit"; was 15). */
+  scanEveryMin: z.number().int().min(1).max(15).default(5),
   /** "Harga dekat POI": max distance to an active POI, % of price. */
   nearPoiPct: z.number().min(0.05).max(10).default(1),
   poiTimeframes: z.array(z.enum(['15m', '1h', '4h'])).default(['1h', '4h']),
@@ -454,6 +463,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M6: [],
   M7: ['liqHtfBehind'], // MSNR: the level + storyline is the signal
   M8: [], // the BTC 4h / 1d trend filters are part of the model; shadow forward test logs the liquidity tags without requiring them
+  M10: ['btc4h', 'slLiqClear'], // lab 2026-11-23 (POI 4h/1d, trailing): +0,15R [IS +0,11 / OOS +0,20] n 254, 4/7; without −0,05R
   M9: ['cleanApproach'] // lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
 }
 
@@ -474,7 +484,8 @@ export const RECOMMENDED_MODEL_CONFLUENCE_ANY: ModelConfluence = {
   M6: [],
   M7: [],
   M8: ['anomaly'],
-  M9: ['bbMomentum', 'liqHtfBehind']
+  M9: ['bbMomentum', 'liqHtfBehind'],
+  M10: []
 }
 
 export const botConfigSchema = z.object({
@@ -518,7 +529,7 @@ export const botConfigSchema = z.object({
   /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
   topVolume: z.number().int().min(5).max(300).default(100),
   /** M0/M1/M2a/M2b: the parent POI (the reason) must come from these timeframes. M4/M5/M6 are not limited. */
-  poiTimeframes: z.array(z.enum(['15m', '1h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
+  poiTimeframes: z.array(z.enum(['15m', '45m', '1h', '2h', '3h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
   /** Only take setups confirmed within the last N minutes (no chasing old ones). */
   maxSetupAgeMin: z.number().int().min(1).max(525600).default(60),
   /** (requireClaude) The Claude analysis must be newer than the setup and at most this old. */

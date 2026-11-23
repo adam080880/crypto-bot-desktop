@@ -26,7 +26,7 @@ export interface PoiInducement {
   decisional: boolean
 }
 
-const RANK: Record<Timeframe, number> = { '1m': 0, '5m': 1, '15m': 2, '1h': 3, '4h': 4, '1d': 5, '1w': 6 }
+const RANK: Readonly<Record<Timeframe, number>> = TF_MS // order = length
 const closeTime = (t: number, tf: Timeframe): number => t + TF_MS[tf]
 
 function lowerBound(c: readonly { t: number }[], t: number): number {

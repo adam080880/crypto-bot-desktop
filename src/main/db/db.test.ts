@@ -32,10 +32,19 @@ describe('candle repo', () => {
 
     const end = mon + 2 * 1440 * 60_000
     const written = rebuildDerived(db, repo, sym.id, mon, end)
-    expect(written).toEqual({ '5m': 576, '15m': 192, '1h': 48, '4h': 12 })
+    expect(written).toEqual({ '3m': 960, '5m': 576, '10m': 288, '15m': 192, '45m': 64, '1h': 48, '2h': 24, '3h': 16, '4h': 12 })
     const h4 = repo.range('4h', sym.id, mon, end)
     expect(h4[0]).toMatchObject({ t: mon, o: 0, h: 240, l: -1, c: 239.5, v: 480, n: 240 })
     expect(getSyncState(db, sym.id, '4h')?.lastOpenTime).toBe(end - 4 * 3600_000)
+
+    // `only`: a timeframe added later is derived from its stored source alone (45m from 15m, aligned to UTC midnight)
+    const db2 = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    upsertSymbols(db2, [{ symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', onboardDate: 0, status: 'TRADING' }])
+    const repo2 = new CandleRepo(db2)
+    repo2.insertNative('1m', sym.id, rows)
+    expect(rebuildDerived(db2, repo2, sym.id, mon, end, ['5m', '15m'])).toMatchObject({ '5m': 576, '15m': 192, '45m': 0, '4h': 0 })
+    expect(rebuildDerived(db2, repo2, sym.id, mon + 50 * 60_000, end, ['45m'])).toMatchObject({ '15m': 0, '45m': 63 })
+    expect(repo2.range('45m', sym.id, mon + 45 * 60_000, mon + 90 * 60_000)[0]).toMatchObject({ t: mon + 45 * 60_000, o: 45, c: 89.5, n: 45 })
 
     const wk = repo.week('1h', sym.id, mon + 3 * 86400_000) // Thursday → same week
     expect(wk).toHaveLength(48)

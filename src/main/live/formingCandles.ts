@@ -2,19 +2,22 @@ import type { Candle } from '@shared/candles'
 import { TF_MS, bucketOpen, type DerivedTimeframe } from '@shared/timeframes'
 import { aggregate } from '../sync/resample'
 
-const LIVE_TFS = ['5m', '15m', '1h', '4h'] as const satisfies readonly DerivedTimeframe[]
+export const LIVE_TFS = ['3m', '5m', '10m', '15m', '45m', '1h', '2h', '3h', '4h'] as const satisfies readonly DerivedTimeframe[]
+
+/** Earliest bucket start among the live timeframes containing `now` (a 45m bucket can start before the 4h one). */
+export const formingStart = (now: number): number => Math.min(...LIVE_TFS.map((tf) => bucketOpen(now, tf)))
 const MIN = TF_MS['1m']
 
 /**
  * In-memory builder for forming higher-timeframe candles of one symbol.
- * Holds the closed 1m candles of the current 4h bucket (≤ 240) plus the forming 1m candle,
- * and derives forming 5m/15m/1h/4h with the same `aggregate()` used for stored data.
+ * Holds the closed 1m candles of the current buckets (≤ ~285, see formingStart) plus the forming 1m candle,
+ * and derives forming 3m…4h with the same `aggregate()` used for stored data.
  */
 export class FormingCandles {
   private closed: Candle[] = []
   private forming: Candle | null = null
 
-  /** Seed with closed 1m candles from the DB (any range; only the current 4h bucket is kept). */
+  /** Seed with closed 1m candles from the DB (any range; only the current buckets are kept). */
   seed(closed1m: readonly Candle[]): void {
     this.closed = [...closed1m].sort((a, b) => a.t - b.t)
     this.trim()
@@ -44,10 +47,10 @@ export class FormingCandles {
   }
 
   private trim(now = this.closed[this.closed.length - 1]?.t ?? 0): void {
-    const start = bucketOpen(now, '4h')
+    const start = formingStart(now)
     if (this.closed.length && this.closed[0]!.t < start) this.closed = this.closed.filter((c) => c.t >= start)
     // guard against unbounded growth if timestamps are odd
-    if (this.closed.length > 240) this.closed = this.closed.slice(-240)
+    if (this.closed.length > 300) this.closed = this.closed.slice(-300)
   }
 
   get closedCount(): number {

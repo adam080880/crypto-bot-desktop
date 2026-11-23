@@ -44,7 +44,7 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
     this.config = readSetting(db, 'app_config', appConfigSchema) ?? defaultAppConfig
     // smc.models has no UI: configs saved before M5 existed get the new model detected (the bot still
     // only trades what bot.models allows)
-    for (const m of ['M5', 'M6', 'M7', 'M8', 'M9'] as const)
+    for (const m of ['M5', 'M6', 'M7', 'M8', 'M9', 'M10'] as const)
       if (!this.config.smc.models.includes(m)) this.config = { ...this.config, smc: { ...this.config.smc, models: [...this.config.smc.models, m] } }
     // M9 (user, 2026-11-23) is forward-tested as shadow paper next to M8, once; removing it later sticks
     if (!readSetting(db, 'migr_shadow_m9', z.boolean())) {
@@ -110,6 +110,12 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       this.config = { ...this.config, bot: { ...this.config.bot, modelConfluenceAny: structuredClone(RECOMMENDED_MODEL_CONFLUENCE_ANY) } }
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_or_1123', true)
+    }
+    // M10 (user 2026-11-23, QM confirmation) gets its lab required list once; not traded until added to bot.models
+    if (!readSetting(db, 'migr_m10', z.boolean())) {
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: { ...this.config.bot.modelConfluence, M10: ['btc4h', 'slLiqClear'] } } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_m10', true)
     }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }

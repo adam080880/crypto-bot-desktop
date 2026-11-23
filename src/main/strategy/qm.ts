@@ -11,8 +11,16 @@ import type { Pivot } from './swings'
  *        Entry level = mountain 1's BODY top (like an OB line), hit when price comes back there
  *        (mountain 3). Invalid on a close above mountain 2's high.
  *  buy:  mirror (L1, H1, L2, H2 with H2 > H1; bodyLo[L2] < low[L1]; level = bodyLo[L1]).
+ *  `requireCloseBreak` (default true, internet QML "MSB with body confirmation"): the break of L1 (sell) / H1 (buy)
+ *  needs a candle close beyond it between mountain 2 and the confirmation of the new extreme, not a wick only.
+ *  Stop beyond mountain 2 (the head) — the POI extreme in setups.
  */
-export function detectQms(c: readonly Candle[], alt: readonly Pivot[], requireBodyBreak = true): Qm[] {
+export function detectQms(c: readonly Candle[], alt: readonly Pivot[], requireBodyBreak = true, requireCloseBreak = false): Qm[] {
+  // a close beyond `lvl` (below when `down`) on candles (from, to]
+  const closedBeyond = (from: number, to: number, lvl: number, down: boolean): boolean => {
+    for (let m = from + 1; m <= to; m++) if (down ? c[m]!.c < lvl : c[m]!.c > lvl) return true
+    return false
+  }
   const out: Qm[] = []
   for (let n = 0; n + 3 < alt.length; n++) {
     const [p1, p2, p3, p4] = [alt[n]!, alt[n + 1]!, alt[n + 2]!, alt[n + 3]!]
@@ -20,9 +28,9 @@ export function detectQms(c: readonly Candle[], alt: readonly Pivot[], requireBo
     const k3 = c[p3.i]!
     let q: Qm | null = null
     const points = { h1: k1.t, l1: c[p2.i]!.t, h2: k3.t, l2: c[p4.i]!.t }
-    if (p1.kind === 'high' && p3.price > p1.price && p4.price < p2.price && (!requireBodyBreak || bodyHi(k3) > k1.h)) {
+    if (p1.kind === 'high' && p3.price > p1.price && p4.price < p2.price && (!requireBodyBreak || bodyHi(k3) > k1.h) && (!requireCloseBreak || closedBeyond(p3.i, p4.confirmedAt, p2.price, true))) {
       q = { direction: 'bearish', level: bodyHi(k1), invalidLevel: k3.h, points, activeT: c[p4.confirmedAt]!.t, hitT: null, invalidT: null }
-    } else if (p1.kind === 'low' && p3.price < p1.price && p4.price > p2.price && (!requireBodyBreak || bodyLo(k3) < k1.l)) {
+    } else if (p1.kind === 'low' && p3.price < p1.price && p4.price > p2.price && (!requireBodyBreak || bodyLo(k3) < k1.l) && (!requireCloseBreak || closedBeyond(p3.i, p4.confirmedAt, p2.price, false))) {
       q = { direction: 'bullish', level: bodyLo(k1), invalidLevel: k3.l, points, activeT: c[p4.confirmedAt]!.t, hitT: null, invalidT: null }
     }
     if (!q) continue

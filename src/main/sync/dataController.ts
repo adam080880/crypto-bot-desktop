@@ -134,6 +134,10 @@ export class DataController {
     this.post({ type: 'bot-close', id })
   }
 
+  botRefresh(): void {
+    this.post({ type: 'bot-refresh' })
+  }
+
   botResetPaper(): void {
     this.post({ type: 'bot-reset-paper' })
   }

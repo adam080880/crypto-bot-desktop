@@ -1,5 +1,6 @@
 import type { ReactionRow } from '@shared/backtest'
 import type { Candle } from '@shared/candles'
+import { TF_MS } from '@shared/timeframes'
 import { indexAtOrAfter, type Poi } from '../strategy/setups'
 
 export const RACE_PCTS = [0.5, 1, 2] as const
@@ -92,7 +93,7 @@ export function reactionRows(pois: readonly Poi[], touches: readonly PoiTouch[])
     r.mfe.push(t.mfePct)
     r.mae.push(t.maePct)
   }
-  const TF = { '1m': 0, '5m': 1, '15m': 2, '1h': 3, '4h': 4, '1d': 5, '1w': 6 }
+  const TF = TF_MS
   return [...rows.values()]
     .map(({ mfe, mae, ...r }) => ({ ...r, medianMfePct: median(mfe), medianMaePct: median(mae) }))
     .sort((a, b) => TF[b.timeframe] - TF[a.timeframe] || b.touches - a.touches)

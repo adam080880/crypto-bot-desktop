@@ -67,6 +67,7 @@ export interface IpcInvokeMap {
   'bot:cancel': { req: { id: string }; res: void }
   'bot:retry': { req: { id: string }; res: void }
   'bot:close': { req: { id: string }; res: void }
+  'bot:refresh': { req: void; res: void }
   'bot:resetPaper': { req: void; res: void }
   'bot:testConnection': { req: void; res: ConnTestResult }
   'config:get': { req: void; res: AppConfig }
@@ -163,6 +164,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'bot:cancel',
   'bot:retry',
   'bot:close',
+  'bot:refresh',
   'bot:resetPaper',
   'bot:testConnection',
   'config:get',

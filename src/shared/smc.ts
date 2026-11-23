@@ -190,8 +190,9 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *      Shadow paper by default (bot.shadowModels): never sends a live order.
  *  M9  bait → POI behind (user 2026-11-23, docs/smc-rules.md §11): a same-direction POI without origin in front of a
  *      1h/4h/1d POI got touched (the bait) → limit at the POI behind it, SL beyond it, fixed TP. Shadow paper by default.
+ *  M10 HTF POI hit → entry-TF QM confirms (head inside the POI) → limit at the QM level, SL beyond the head (user 2026-11-23).
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
@@ -203,7 +204,8 @@ export const MODEL_LABEL: Record<EntryModel, string> = {
   M6: 'M6 radar pump (TP manual)',
   M7: 'M7 MSNR level A/V fresh',
   M8: 'M8 POI HTF searah trend',
-  M9: 'M9 umpan → POI di belakangnya'
+  M9: 'M9 umpan → POI di belakangnya',
+  M10: 'M10 POI HTF kena → QM konfirmasi'
 }
 
 export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT' | 'LEVEL'

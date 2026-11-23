@@ -1,6 +1,6 @@
 import type { Candle } from '@shared/candles'
 import { breakerExit, m8Exit, m9Exit, msnrExit, type ExitConfig, type SmcConfig } from '@shared/config'
-import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Setup, SetupStatus } from '@shared/smc'
+import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Qm, Setup, SetupStatus } from '@shared/smc'
 import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 import type { SmcAnalysisFull } from './analyze'
@@ -12,6 +12,8 @@ import { flowConfluence, type FlowData } from './flow'
 import { RADAR_BARS, volRatioSeries } from '../radar/radar'
 import { wyckoffAt } from './wyckoff'
 import { InducementIndex } from './inducement'
+import { analyzeStructure, findPivots } from './swings'
+import { detectQms } from './qm'
 import { cisdIn, ifvgIn, smtAt } from './confirm'
 import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
 
@@ -33,7 +35,8 @@ export interface Poi {
 }
 
 const closeTime = (t: number, tf: Timeframe): number => t + TF_MS[tf]
-const TF_RANK: Record<Timeframe, number> = { '1m': 0, '5m': 1, '15m': 2, '1h': 3, '4h': 4, '1d': 5, '1w': 6 }
+/** Timeframe order = its length (lets a lab add custom timeframes such as 45m / 2h / 3h to TF_MS). */
+const TF_RANK = TF_MS as Readonly<Record<Timeframe, number>>
 
 /** First index with candle open time ≥ t (binary search). */
 export function indexAtOrAfter(c: readonly Candle[], t: number): number {
@@ -180,6 +183,8 @@ export interface SetupInput {
   btcDom?: TrendSrc
   /** 1h candles of the SMT reference (BTC for alts, ETH for BTC); omit → no smt tag. */
   smtRef?: readonly Candle[]
+  /** Lower-timeframe candles for M10's QM confirmation (omit → no M10). */
+  ltf?: { '1m'?: readonly Candle[]; '3m'?: readonly Candle[]; '5m'?: readonly Candle[]; '10m'?: readonly Candle[] }
 }
 
 interface Draft {
@@ -216,6 +221,7 @@ export function detectSetups(input: SetupInput): Setup[] {
   const drafts: Draft[] = []
 
   if (models.has('M0')) drafts.push(...modelM0(input, pois))
+  if (models.has('M10')) drafts.push(...modelM10(input))
   if (models.has('M1')) drafts.push(...modelM1(input, pois))
   if (models.has('M2a') || models.has('M2b')) drafts.push(...modelM2(input, all, pois, models))
   if (models.has('M4')) drafts.push(...modelM4(input, all))
@@ -285,28 +291,37 @@ export function poiLiqIntact(c: readonly Candle[], poi: Pick<Poi, 'direction' | 
   return true
 }
 
-export function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
+/** M0/M10 parent POIs with their first hit on the entry TF (before the POI-TF candle that invalidated it closed). */
+function hitPois({ entry, poiAnalyses, cfg }: SetupInput): { poi: Poi; hitIdx: number }[] {
   const c = entry.candles
   const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])].filter(
     (p) =>
       (p.kind !== 'OCL_BREAK' || (cfg.m0OclBreakTimeframes as Timeframe[]).includes(p.timeframe)) &&
       (p.kind !== 'OCL' || (cfg.oclParentTimeframes as Timeframe[]).includes(p.timeframe))
   )
-  const near = cfg.obValidNearPct / 100
-  const out: Draft[] = []
+  const out: { poi: Poi; hitIdx: number }[] = []
   for (const poi of raw) {
     const bull = poi.direction === 'bullish'
-    let hitIdx = -1
     for (let m = indexAtOrAfter(c, poi.activeFrom); m < c.length; m++) {
       // invalid only once the POI-TF candle that closed through it has closed (2026-11-22: comparing with its open
       // time dropped trades whose POI broke right after the entry → backtest M0 looked better than live)
       if (poi.invalidT !== null && c[m]!.t >= closeTime(poi.invalidT, poi.timeframe)) break
       if (bull ? c[m]!.l <= poi.level : c[m]!.h >= poi.level) {
-        hitIdx = m
+        out.push({ poi, hitIdx: m })
         break
       }
     }
-    if (hitIdx < 0) continue
+  }
+  return out
+}
+
+export function modelM0(input: SetupInput, _pois: readonly Poi[]): Draft[] {
+  const { entry, cfg } = input
+  const c = entry.candles
+  const near = cfg.obValidNearPct / 100
+  const out: Draft[] = []
+  for (const { poi, hitIdx } of hitPois(input)) {
+    const bull = poi.direction === 'bullish'
     const ob = entry.orderBlocksIdx.find(
       (o) =>
         o.direction === poi.direction &&
@@ -331,6 +346,104 @@ export function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly
       invalidLevel: ob.wickEnd,
       confluence,
       reasons: [`${POI_LABEL[poi.kind]} ${poi.timeframe} kena → OB ${entry.timeframe} (aturan lama)`]
+    })
+  }
+  return out
+}
+
+/** 1m candles → 3m (UTC-aligned buckets); incomplete buckets are dropped. */
+const r3Cache = new WeakMap<readonly Candle[], Candle[]>()
+function resample3m(m1: readonly Candle[]): Candle[] {
+  const hit = r3Cache.get(m1)
+  if (hit) return hit
+  const out: Candle[] = []
+  const B = 180_000
+  for (let i = 0; i < m1.length; ) {
+    const t = Math.floor(m1[i]!.t / B) * B
+    let j = i
+    let h = -Infinity
+    let l = Infinity
+    let v = 0
+    while (j < m1.length && m1[j]!.t < t + B) {
+      h = Math.max(h, m1[j]!.h)
+      l = Math.min(l, m1[j]!.l)
+      v += m1[j]!.v
+      j++
+    }
+    if (j - i === 3) out.push({ t, o: m1[i]!.o, h, l, c: m1[j - 1]!.c, v })
+    i = j
+  }
+  r3Cache.set(m1, out)
+  return out
+}
+
+/**
+ * M10 (user 2026-11-23: "POI di HTF 1d/4h, lalu kebentuk QM di 1m / 3m / 5m"): a parent POI (same list as M0) is hit, then
+ * within m10WindowMin a QM (§7, incl. the close-break rule) forms on a lower timeframe (smc.m10Timeframes, 3m resampled
+ * from 1m) whose head (mountain 2) is at / after the hit and reaches into the POI (≤ obValidNearPct beyond its line).
+ * The earliest such QM over the timeframes: limit at its level, SL beyond the head + slBufferPct, invalid on a close
+ * beyond the head. Known at the close of the LTF candle that confirmed it; followed on the entry TF from the entry
+ * candle that contains that moment (the bot scans on entry-TF closes).
+ */
+export function modelM10(input: SetupInput): Draft[] {
+  const { entry, cfg, ltf } = input
+  if (!ltf) return []
+  const c = entry.candles
+  const near = cfg.obValidNearPct / 100
+  const srcs: { name: string; tf: Timeframe; ms: number; candles: readonly Candle[] }[] = []
+  for (const name of cfg.m10Timeframes) {
+    if (ltf[name]?.length) srcs.push({ name, tf: name, ms: TF_MS[name], candles: ltf[name]! })
+    // 3m before it was stored (or a caller without it): resampled from 1m
+    else if (name === '3m' && ltf['1m']?.length) srcs.push({ name, tf: '3m', ms: TF_MS['3m'], candles: resample3m(ltf['1m']) })
+  }
+  if (!srcs.length) return []
+  const out: Draft[] = []
+  for (const { poi, hitIdx } of hitPois(input)) {
+    const bull = poi.direction === 'bullish'
+    const hitT = c[hitIdx]!.t
+    const deadT = poi.invalidT === null ? Infinity : closeTime(poi.invalidT, poi.timeframe)
+    let best: { q: Qm; knownT: number; src: (typeof srcs)[number] } | null = null
+    for (const src of srcs) {
+      const L = src.candles
+      const a = indexAtOrAfter(L, hitT)
+      if (a >= L.length) continue
+      // the LTF candle that touched the POI line inside the hit candle (or the hit candle's first)
+      let h = a
+      for (let m = a; m < L.length && L[m]!.t < hitT + TF_MS[entry.timeframe]; m++)
+        if (bull ? L[m]!.l <= poi.level : L[m]!.h >= poi.level) {
+          h = m
+          break
+        }
+      const from = Math.max(0, h - 60)
+      const to = Math.min(L.length, h + Math.ceil((cfg.m10WindowMin * 60_000) / src.ms) + 1)
+      const slice = L.slice(from, to)
+      const alt = analyzeStructure(slice, findPivots(slice, cfg.m10Pivot)).alternating
+      for (const q of detectQms(slice, alt, cfg.qmRequireBodyBreak, cfg.qmRequireCloseBreak)) {
+        if (q.direction !== poi.direction || q.points.h2 < L[h]!.t) continue
+        const head = slice[indexAtOrAfter(slice, q.points.h2)]!
+        if (bull ? head.l > poi.level * (1 + near) : head.h < poi.level * (1 - near)) continue
+        const knownT = q.activeT + src.ms
+        if (knownT >= deadT || knownT > hitT + cfg.m10WindowMin * 60_000) continue
+        if (!best || knownT < best.knownT) best = { q, knownT, src }
+        break // QMs come in pattern order; the first valid one per timeframe
+      }
+    }
+    if (!best) continue
+    const { q, knownT, src } = best
+    const knownIdx = indexAtOrAfter(c, knownT - TF_MS[entry.timeframe])
+    if (knownIdx >= c.length) continue
+    const sl = bull ? q.invalidLevel * (1 - cfg.slBufferPct / 100) : q.invalidLevel * (1 + cfg.slBufferPct / 100)
+    out.push({
+      model: 'M10',
+      dir: poi.direction,
+      poi: poiRef(poi, hitT),
+      child: { kind: 'QM', timeframe: src.tf, t: q.points.h1, level: q.level, extreme: q.invalidLevel, hasFvg: false, origin: null },
+      entry: q.level,
+      sl,
+      knownIdx,
+      invalidLevel: q.invalidLevel,
+      confluence: [],
+      reasons: [`${POI_LABEL[poi.kind]} ${poi.timeframe} kena → QM ${src.name} (head di POI, break pakai close)`]
     })
   }
   return out
@@ -1304,7 +1417,7 @@ export function liquidityBehindSl(analyses: readonly SmcAnalysisFull[], bull: bo
   return false
 }
 
-const STACK_MODELS = new Set<EntryModel>(['M0', 'M1', 'M2a', 'M2b'])
+const STACK_MODELS = new Set<EntryModel>(['M0', 'M1', 'M2a', 'M2b', 'M10'])
 
 /**
  * Other timeframes (≥ 1h, not the parent's own) with an active same-direction POI whose level is within

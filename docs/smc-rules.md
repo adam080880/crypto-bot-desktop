@@ -205,11 +205,18 @@ biasanya **menembus wick** gunung pertama. Di gunung ketiga, QM kena di **titik 
 1. Swing high `H1` (gunung 1), swing low `L1`, swing high `H2 > H1` (gunung 2).
 2. **Body `H2` menembus wick `H1`:** `bodyHi[H2] > h[H1]`. Setting `qmRequireBodyBreak`, default
    **wajib**. Bisa dimatikan karena di penjelasan user disebut "biasanya".
-3. Setelah `H2`, harga turun membentuk low `L2 < L1` (struktur patah).
+3. Setelah `H2`, harga turun membentuk low `L2 < L1` (struktur patah). **Break L1 wajib pakai close body** (ada candle
+   yang close di bawah low L1 sebelum L2 terkonfirmasi), bukan wick doang (`smc.qmRequireCloseBreak`, default wajib).
 4. **Level entry sell = `bodyHi[H1]`** (body gunung 1). Kena saat harga naik kembali ke level itu (gunung 3).
 5. Invalid jika ada close di atas wick `H2`.
 
 ✅ **Q12** (`L2 < L1` wajib): ya. ✅ **Q13** dijawab user: level QM pakai **body**, bukan wick.
+
+**Cocok dengan versi internet (riset 2026-11-23, "QM/QML"):** urutan left shoulder (H1) → reaction low (L1) → head (H2 > H1)
+→ MSB (L2 < L1) → entry limit di level left shoulder (QML), SL di balik head, invalid kalau head ditembus. Mirip head and
+shoulders, tapi neckline (L1) **sudah jebol sebelum** right shoulder, jadi entry-nya limit di right shoulder (bukan breakout
+neckline). Yang disesuaikan dari internet: MSB harus konfirmasi close body (sama seperti BOS §2). Yang tetap ikut materi/user:
+level di **body** H1 (internet campur wick/body) dan body H2 wajib nembus wick H1 (lebih ketat dari internet).
 
 ---
 
@@ -300,6 +307,13 @@ Kode: `src/main/strategy/inducement.ts` (`InducementIndex`), tag ditambahkan di 
 - **M9 umpan → POI di belakangnya:** POI B (`smc.m9PoiTimeframes` 1h/4h/1d, jenis `smc.m9Kinds` OB/QM = order block, bukan RBS/SBR) belum disentuh,
   umpan di depannya sudah kena (≤ `baitDays`) → limit di garis B saat close 15m ≤ `m9NearR` × risk, SL di balik ujung B
   (+0,1 ATR, sama seperti M8), exit bertingkat + trailing tanpa TP (`m9TpR` 0). Default shadow paper.
+
+### M10: POI HTF kena → QM konfirmasi di TF kecil (user 2026-11-23: "POI 1d/4h, lalu kebentuk QM di 1m / 3m / 5m")
+POI induk sama seperti M0 (bot: 4h/1d) kena, lalu dalam `smc.m10WindowMin` (240 menit) terbentuk QM (§7, break pakai close)
+di **1m / 3m / 5m** (`smc.m10Timeframes`, 3m = resample 1m, pivot `smc.m10Pivot`) yang head-nya terbentuk setelah POI kena dan
+masuk ke POI (≤ `obValidNearPct`). Diambil QM yang paling cepat terkonfirmasi dari semua TF itu. Limit di level QM (body gunung 1),
+SL di balik head + `slBufferPct`, invalid kalau close tembus head. Bot baru melihatnya di close 15m berikutnya (screener jalan
+per 15m), jadi entry bisa telat maksimal ±15 menit dibanding kalau dipantau langsung di 1m.
 
 ### Konfirmasi setelah POI kena (user 2026-11-23: "gas implement cisd, smt, ifvg"), `strategy/confirm.ts`
 Semua berupa **tag filter** (tanpa skor). Dihitung saat setup diketahui (`known`), cuma memakai candle yang sudah close.

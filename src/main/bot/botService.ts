@@ -295,6 +295,17 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.publish()
   }
 
+  /** Refresh button (Bot page): fresh exchange equity (skips the 30 s cache), sync orders/positions now, publish. */
+  async refresh(): Promise<void> {
+    this.equityCache = null
+    try {
+      await this.tick()
+    } catch (err) {
+      this.lastError = (err as Error).message
+    }
+    await this.publish()
+  }
+
   /** For the Claude prompt. */
   positionsNote(): string {
     const act = this.repo.active()

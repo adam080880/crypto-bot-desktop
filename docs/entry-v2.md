@@ -583,3 +583,45 @@ Kombinasi OR 1–3 tag diuji di atas list wajib yang sekarang (n IS ≥ 100, n O
 Tidak dipasang: M1 (tidak ada yang kokoh), M2a/M2b (n kecil), M7 (IS-pick `pdZone` OOS turun ke +0,10R).
 Efek tag sendiri: `cisd` muncul di 73–100 % setup (hampir tidak menyaring), `smt` 7–25 % (M0 +0,48R n 41, M4 +0,42R n 480,
 tapi M9 −0,00R), `ifvg` campur. Tanpa list wajib (OR saja) selalu lebih jelek dari wajib + OR.
+
+## 25. QM versi internet + M10 QM konfirmasi (permintaan user, 2026-11-23)
+
+**QM:** bentuk di kode sudah sama dengan QM/QML internet (left shoulder → reaction → head lebih jauh → MSB → entry di level
+left shoulder, SL di balik head). Disesuaikan: MSB (break L1) wajib **close body** (`smc.qmRequireCloseBreak`, default true).
+Lab 100 koin: ±20 % QM hilang. M9 POI QM + aturan bot: +0,26R → **+0,42R** (IS +0,39 / OOS +0,47, 7/7 bulan, n 291 → 216).
+M0/M1 QM: beda kecil/campur.
+
+**M10** (POI HTF kena → QM entry TF, `modelM10`, `docs/smc-rules.md §11`): lab 100 koin, trailing:
+tanpa filter −0,03R (POI 4h/1d −0,05R, IS −0,14 / OOS +0,07). Wajib `btc4h + slLiqClear`: +0,15R (IS +0,11 / OOS +0,20,
+4/7 bulan, n 254), banyak kombinasi diuji → lemah. OR terbaik `btc4h` (IS −0,01). Default `modelConfluence.M10` = btc4h +
+slLiqClear (migrasi `migr_m10`), **tidak** masuk `bot.models`.
+
+## 26. Timeframe "aneh" 3m / 45m / 2h / 3h + M10 di 1m/3m/5m (permintaan user, 2026-11-23)
+
+User: "institusi kadang gerak di menit aneh". **Disimpan di DB** seperti TF turunan lain (migration `0008_candles_odd`, cascade
+3m←1m, 45m←15m, 2h/3h←1h; semua bucket rata UTC tengah malam). Data lama diisi sekali dari candle yang sudah ada saat worker start
+(`Backfiller.deriveAddedTimeframes`, tanpa download). Chart, forming candle live, config POI (smc/bot/M8/M9) bisa pakai TF baru.
+`rebuildDerived` sekarang mulai dari bucket masing-masing target (45m tidak rata dengan 4h).
+
+Lab 100 koin (mesin app, POI TF aneh di-resample dari 1m, avg R [IS / OOS] bulan+):
+
+| Model | TF standar | TF aneh |
+|---|---|---|
+| M0 (+ wajib bot, trailing) | 1h +0,26 [+0,53/−0,08], 4h +0,08 [+0,02/+0,13] | 45m +0,01, 2h −0,03, 3h +0,08 (n 61) → **tidak lebih bagus** |
+| M8 (TP 3R) | 4h +0,18 [+0,11/+0,27], 1d +0,09 | 45m +0,11 [+0,03/+0,22], 2h +0,11, **3h +0,16 [+0,05/+0,29]** → mirip 4h |
+| M8 + `anomaly` (config bot) | 4h+1d +0,40R n 519 | + 3h: +0,31R n 873; + 2h + 3h: +0,26R n 1.319 (total R lebih besar, per trade turun) |
+| M9 (+ cleanApproach) | 1h +0,24, 4h +0,22 | 45m +0,02, 2h +0,03, 3h −0,09 → **lebih jelek** |
+| M10 (POI → QM LTF) | QM 1m −0,15R, 3m −0,06R, 5m +0,19R (OOS −0,09) | semua TF POI negatif −0,10 s/d −0,15R |
+
+**10m** (user: "TF yang bikin TradingView berbayar", disimpan juga, dari 5m), lab 100 koin yang sama:
+
+| Pemakaian 10m | Hasil |
+|---|---|
+| Entry TF M0 (OB valid 10m, ganti 15m), POI 4h+1d + wajib bot | **−0,16R** [−0,18 / −0,14] 2/7 vs entry 15m **+0,13R** [+0,09 / +0,16] 5/7 |
+| POI M0 (+ wajib bot) | +0,04R [+0,04 / +0,04] n 251 (tanpa filter −0,11R) |
+| POI M8 (TP 3R) | +0,13R [+0,06 / +0,20] 6/7, n 8.849 (≈ 45m/2h, di bawah 4h +0,18R) |
+| POI M9 (+ cleanApproach) | −0,09R |
+| QM konfirmasi M10 | −0,17 s/d +0,10R (POI 4h + wajib bot +0,10R n 222), umumnya negatif |
+
+Kesimpulan: TF aneh tidak memberi edge tambahan, kecuali **M8**, yang tetap positif di 45m/2h/3h (nambah jumlah trade, avg R per
+trade turun). M10 versi 1m/3m/5m rugi (SL kecil → fee besar); versi QM 15m sebelumnya −0,05R. Tidak ada yang dipasang otomatis.

@@ -48,7 +48,7 @@ export function runBacktest(db: Db, params: BacktestParams, config: AppConfig, o
   const fees = { makerFeePct: params.makerFeePct, takerFeePct: params.takerFeePct, slippagePct: params.slippagePct }
 
   progress('detect')
-  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc, flow, btcDom: h.btcDom, smtRef: h.smtRef })
+  const detected = detectSetups({ symbol: params.symbol, entry: h.entry, poiAnalyses: h.poiAnalyses, cfg, exit: config.exit, btc: h.btc, flow, btcDom: h.btcDom, smtRef: h.smtRef, ltf: h.ltf })
   const plans = defaultPlans(config.exit, cfg)
   const setups: BtSetup[] = []
   // trend trades (M5) can run for weeks: follow every open trade up to 90 days

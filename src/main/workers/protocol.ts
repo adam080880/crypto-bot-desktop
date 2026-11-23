@@ -60,6 +60,7 @@ export type ToWorker =
   | { type: 'bot-cancel'; id: string }
   | { type: 'bot-retry'; id: string }
   | { type: 'bot-close'; id: string }
+  | { type: 'bot-refresh' }
   | { type: 'bot-reset-paper' }
 
 export type FromWorker =

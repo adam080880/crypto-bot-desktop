@@ -488,7 +488,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           </div>
           <Label>POI HTF yang dipakai</Label>
           <div className="flex justify-end gap-3 text-xs">
-            {(['1h', '4h', '1d'] as const).map((tf) => (
+            {(['45m', '1h', '2h', '3h', '4h', '1d'] as const).map((tf) => (
               <label key={tf} className="flex items-center gap-1">
                 <input
                   type="checkbox"

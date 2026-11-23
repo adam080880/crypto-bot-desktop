@@ -160,7 +160,20 @@ function SettingsRow() {
       </label>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={c.autoScan} onChange={(e) => void save({ autoScan: e.target.checked })} />
-        Scan otomatis tiap 15m close
+        Scan otomatis tiap
+      </label>
+      <label className="flex items-center gap-2">
+        <select
+          className="h-7 rounded-md border bg-background px-2"
+          value={c.scanEveryMin}
+          onChange={(e) => void save({ scanEveryMin: Number(e.target.value) })}
+        >
+          {[1, 3, 5, 10, 15].map((n) => (
+            <option key={n} value={n}>
+              {n} menit
+            </option>
+          ))}
+        </select>
       </label>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={c.notify} onChange={(e) => void save({ notify: e.target.checked })} />

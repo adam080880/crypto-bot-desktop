@@ -81,6 +81,19 @@ export class SmcService {
     return v
   }
 
+  /** Recent 1m / 5m candles for M10 (QM confirmation on lower timeframes); only when M10 is detected. */
+  private ltf(symbolId: number, cfg: SmcConfig): SetupInput['ltf'] {
+    if (!cfg.models.includes('M10')) return undefined
+    const need = new Set(cfg.m10Timeframes)
+    const n1 = Math.min(5000, cfg.m10WindowMin + 1500) // window + ~1 day of 1m
+    return {
+      ...(need.has('1m') ? { '1m': this.repo.latest('1m', symbolId, n1) } : {}),
+      ...(need.has('3m') ? { '3m': this.repo.latest('3m', symbolId, Math.ceil(n1 / 3) + 300) } : {}),
+      ...(need.has('5m') ? { '5m': this.repo.latest('5m', symbolId, Math.ceil(n1 / 5) + 300) } : {}),
+      ...(need.has('10m') ? { '10m': this.repo.latest('10m', symbolId, Math.ceil(n1 / 10) + 300) } : {})
+    }
+  }
+
   context(symbol: string, cfg: SmcConfig, now = Date.now(), exit?: ExitConfig) {
     const sym = symbolByName(this.db, symbol)
     if (!sym) return null
@@ -95,7 +108,7 @@ export class SmcService {
     const pois: Poi[] = collectAllPois(analyses, cfg).filter((p) => p.invalidT === null && p.activeFrom <= now)
     const liquidity = analyses.flatMap((a) => a.liquidity.filter((l) => l.kind === 'swing' && l.sweptT === null))
     const entry = analyses[0]!
-    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now), smtRef: this.smtRef(symbol, cfg, now) })
+    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now), smtRef: this.smtRef(symbol, cfg, now), ltf: this.ltf(sym.id, cfg) })
     const lastBreak = Object.fromEntries(analyses.map((a) => [a.timeframe, a.breaks.at(-1) ?? null]))
     return { price, priceT, trend, pois, liquidity, setups, lastBreak }
   }
@@ -105,7 +118,7 @@ export class SmcService {
    * don't repaint, so analysing the whole history equals replaying it candle by candle.
    * `btcDom` = BTCDOMUSDT candles of smc.btcDomTimeframe for the btcDom tag (downloaded by the caller).
    */
-  history(symbol: string, cfg: SmcConfig, btcDom?: readonly Candle[]): { entry: SmcAnalysisFull; poiAnalyses: SmcAnalysisFull[]; btc: SetupInput['btc']; btcDom?: SmcAnalysisFull; smtRef?: readonly Candle[] } | null {
+  history(symbol: string, cfg: SmcConfig, btcDom?: readonly Candle[]): { entry: SmcAnalysisFull; poiAnalyses: SmcAnalysisFull[]; btc: SetupInput['btc']; btcDom?: SmcAnalysisFull; smtRef?: readonly Candle[]; ltf?: SetupInput['ltf'] } | null {
     const sym = symbolByName(this.db, symbol)
     if (!sym) return null
     const full = (id: number, tf: Timeframe): SmcAnalysisFull => analyzeSmc(this.repo.range(tf, id, 0, Number.MAX_SAFE_INTEGER), tf, cfg)
@@ -121,7 +134,15 @@ export class SmcService {
       : undefined
     const eth = symbol === BTC ? symbolByName(this.db, ETH) : null
     const smtRef = symbol === BTC ? (eth ? this.repo.range('1h', eth.id, 0, Number.MAX_SAFE_INTEGER) : undefined) : (btc?.['1h'] as SmcAnalysisFull | undefined)?.candles
-    return { entry, poiAnalyses, btc, btcDom: btcDom?.length ? analyzeSmc(btcDom, cfg.btcDomTimeframe, cfg) : undefined, smtRef }
+    const ltf: SetupInput['ltf'] = cfg.models.includes('M10')
+      ? {
+          ...(cfg.m10Timeframes.some((x) => x === '1m' || x === '3m') ? { '1m': this.repo.range('1m', sym.id, 0, Number.MAX_SAFE_INTEGER) } : {}),
+          ...(cfg.m10Timeframes.includes('3m') ? { '3m': this.repo.range('3m', sym.id, 0, Number.MAX_SAFE_INTEGER) } : {}),
+          ...(cfg.m10Timeframes.includes('5m') ? { '5m': this.repo.range('5m', sym.id, 0, Number.MAX_SAFE_INTEGER) } : {}),
+          ...(cfg.m10Timeframes.includes('10m') ? { '10m': this.repo.range('10m', sym.id, 0, Number.MAX_SAFE_INTEGER) } : {})
+        }
+      : undefined
+    return { entry, poiAnalyses, btc, btcDom: btcDom?.length ? analyzeSmc(btcDom, cfg.btcDomTimeframe, cfg) : undefined, smtRef, ltf }
   }
 
   setups(symbol: string, cfg: SmcConfig, exit?: ExitConfig): Setup[] {
@@ -131,6 +152,6 @@ export class SmcService {
     const pois = setupTimeframes(cfg)
       .filter((tf) => tf !== cfg.entryTimeframe)
       .map((tf) => this.analyzeFull(sym.id, tf, POI_LOOKBACK, cfg))
-    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg), smtRef: this.smtRef(symbol, cfg) })
+    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg), smtRef: this.smtRef(symbol, cfg), ltf: this.ltf(sym.id, cfg) })
   }
 }

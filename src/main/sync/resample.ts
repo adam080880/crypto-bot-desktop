@@ -41,24 +41,28 @@ export function aggregate(source: readonly (Candle | DerivedCandle)[], tf: Deriv
 /** Max number of 1m candles a bucket of `tf` can hold (240 for 4h). */
 export const expectedMinutes = (tf: DerivedTimeframe): number => TF_MS[tf] / TF_MS['1m']
 
-const CHUNK_MS = 7 * TF_MS['1d'] // multiple of 4h, so chunk edges never split a bucket
+const CHUNK_MS = 7 * TF_MS['1d'] // multiple of every derived bucket (45m too), so chunk edges never split one
 
 /**
- * Recompute 5m → 15m → 1h → 4h for 1m data in [from, coveredUntil).
+ * Recompute the derived cascade (3m/5m → 15m → 45m/1h → 2h/3h/4h) for 1m data in [from, coveredUntil).
  * `coveredUntil` = exclusive end of time for which 1m data is final; only buckets that end
- * at or before it are written (forming candles stay in memory, never in the DB).
+ * at or before it are written (forming candles stay in memory, never in the DB). Each target starts at
+ * its own bucket containing `from` (every target bucket is a whole number of its source buckets).
+ * `only` = rebuild just these targets (their sources must already be stored), e.g. a newly added timeframe.
  */
 export function rebuildDerived(
   db: Db,
   repo: CandleRepo,
   symbolId: number,
   from: number,
-  coveredUntil: number
+  coveredUntil: number,
+  only?: readonly DerivedTimeframe[]
 ): Record<DerivedTimeframe, number> {
-  const start = bucketOpen(from, '4h')
-  const written = { '5m': 0, '15m': 0, '1h': 0, '4h': 0 } as Record<DerivedTimeframe, number>
+  const written = Object.fromEntries(DERIVED_CASCADE.map(([t]) => [t, 0])) as Record<DerivedTimeframe, number>
   const tx = db.$client.transaction(() => {
     for (const [target, src] of DERIVED_CASCADE) {
+      if (only && !only.includes(target)) continue
+      const start = bucketOpen(from, target)
       let first: number | null = null
       let last: number | null = null
       for (let a = start; a < coveredUntil; a += CHUNK_MS) {

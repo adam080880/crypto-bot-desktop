@@ -138,6 +138,12 @@ dites ke exchange beneran.
   BTC vs ETH, `SetupInput.smtRef`) / `ifvg`. `bot.modelConfluenceAny` = list OR per model (minimal satu, di atas list wajib), migrasi
   `migr_or_1123`: M0 `bbMomentum/ifvg/smt`, M4 `anomaly/manipulation/smt`, M5 `btc4h/smt`, M8 `anomaly`, M9 `bbMomentum/liqHtfBehind`
   (M9 dipilih pakai OOS → optimistis). Lab script `allbt.ts`: model tanpa TP (`breakerTpR`/`m9TpR` 0) = rencana `trailOF`.
+- **QM close-break + M10** (2026-11-23, `docs/entry-v2.md §25`): break L1 QM wajib close body (`smc.qmRequireCloseBreak`), M9 QM
+  +0,26R → +0,42R. **M10** = POI HTF kena → QM 15m (head di POI) → limit di level QM. Lab lemah (best btc4h+slLiqClear +0,15R),
+  tidak di bot.models. Tombol Refresh di halaman Bot (`bot:refresh`: equity tanpa cache, sinkron order/posisi).
+- **TF 3m / 45m / 2h / 3h di DB** (2026-11-23, `docs/entry-v2.md §26`, migration `0008_candles_odd`): turunan seperti 5m/15m/1h/4h,
+  diisi sekali dari data lama saat worker start (`deriveAddedTimeframes`). Lab: tidak lebih bagus dari TF standar, kecuali M8 (3h ≈ 4h).
+  **10m** juga disimpan (dari 5m, migration yang sama). M10 = QM di 1m/3m/5m/10m (`smc.m10Timeframes`): rugi di lab. `TF_RANK` = `TF_MS`.
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,
@@ -151,7 +157,7 @@ dites ke exchange beneran.
 - Kriteria per simbol+arah: setup OB valid aktif (pending/triggered), harga dekat POI aktif 1h/4h
   (≤ `nearPoiPct`, sisi yang benar), trend 4h/1h/15m searah, BOS 1h/4h ≤ `bosRecentHours`. Baris
   muncul kalau ada setup / dekat POI / BOS baru. Trend searah cuma flag/filter.
-- Pemicu: tombol manual + otomatis 1 menit setelah tiap 15m close + sekali 90 detik setelah start.
+- Pemicu: tombol manual + otomatis 1 menit setelah tiap kelipatan `screener.scanEveryMin` menit (default **5**, user 2026-11-23: "per 3-5 menit"; dulu 15) + sekali 90 detik setelah start.
   Auto-scan dilewati saat backfill manual. Hasil terakhir disimpan di setting `screener_last`.
 - Notifikasi desktop untuk setup baru dari scan otomatis (`screener.notify`).
 - Benchmark data asli (155 simbol): ±1,3 detik.
@@ -249,7 +255,7 @@ dites ke exchange beneran.
   sintetis, jadi tidak dipakai untuk analisis.
 - **1m 6 bulan** dari data.binance.vision (zip bulanan + harian, cek SHA-256) → REST klines
   (limit 1000 = weight 5) untuk gap terbaru. **1d/1w 2 tahun** via REST.
-- **5m/15m/1h/4h di-resample dari 1m** dan disimpan sebagai tabel sendiri, dihitung bertingkat
+- **3m/5m/15m/45m/1h/2h/3h/4h di-resample dari 1m** dan disimpan sebagai tabel sendiri, dihitung bertingkat
   1m→5m→15m→1h→4h. Bucket dikunci ke UTC (4h = 00/04/08/12/16/20 UTC). Kolom `n` = jumlah
   candle 1m di bucket, untuk deteksi data tidak lengkap. Candle yang belum close **tidak** disimpan.
   Alasan: scan SMC multi-simbol berulang jadi murah (+~30% storage).

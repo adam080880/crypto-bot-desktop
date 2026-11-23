@@ -57,9 +57,14 @@ export function estimateFullBackfill(db: Db, data: DataConfig, concurrency: numb
   }
   const projectedRows: Record<Timeframe, number> = {
     '1m': minutes,
+    '3m': derivedMinutes / 3,
     '5m': derivedMinutes / 5,
+    '10m': derivedMinutes / 10,
     '15m': derivedMinutes / 15,
+    '45m': derivedMinutes / 45,
     '1h': derivedMinutes / 60,
+    '2h': derivedMinutes / 120,
+    '3h': derivedMinutes / 180,
     '4h': derivedMinutes / 240,
     '1d': days,
     '1w': days / 7

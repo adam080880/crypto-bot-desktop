@@ -208,4 +208,11 @@ describe('QM (§7)', () => {
     const loose = analyzeSmc(path(weak), '15m', cfg({ qmRequireBodyBreak: false })).qms.filter((x) => x.direction === 'bearish')
     expect(loose).toHaveLength(1)
   })
+
+  it('the break of L1 needs a candle CLOSE beyond it, a wick only is no QM (configurable)', () => {
+    // L1 low 10.9 (close 11); L2 only wicks to 10.88 (closes 10.98 / 11.6), no close below 10.9
+    const wickOnly = [9, 9.5, 10, 11.5, 13, 12, 11, 12.5, 14, 12.5, 11.5, 10.98, 11.6, 11.8, 12.6, 13.1, 12.2, 11.5]
+    expect(analyzeSmc(path(wickOnly), '15m', cfg()).qms.filter((x) => x.direction === 'bearish')).toHaveLength(0)
+    expect(analyzeSmc(path(wickOnly), '15m', cfg({ qmRequireCloseBreak: false })).qms.filter((x) => x.direction === 'bearish')).toHaveLength(1)
+  })
 })

@@ -49,7 +49,7 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
     fvgs,
     srFlips: detectSrFlips(candles, pivots, fvgs),
     ocls,
-    qms: detectQms(candles, structure.alternating, cfg.qmRequireBodyBreak),
+    qms: detectQms(candles, structure.alternating, cfg.qmRequireBodyBreak, cfg.qmRequireCloseBreak),
     liquidity: detectLiquidity(candles, orderBlocks, structure.alternating, cfg.equalPct),
     wyckoff,
     candles,

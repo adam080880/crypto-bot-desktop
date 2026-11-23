@@ -58,9 +58,9 @@ export class ScreenerService extends EventEmitter<{ state: [ScreenerState] }> {
   configure(): void {
     this.job?.stop()
     this.job = null
-    // one minute after each 15m close (entry timeframe of the setups)
-    if (this.deps.getConfig().autoScan)
-      this.job = new Cron('0 1,16,31,46 * * * *', { timezone: 'UTC', protect: true }, () => void this.run('auto'))
+    // one minute after every N-minute mark (N = 15 → 1,16,31,46 = after each 15m close); a scan still running skips the tick
+    const cfg = this.deps.getConfig()
+    if (cfg.autoScan) this.job = new Cron(`0 1-59/${cfg.scanEveryMin} * * * *`, { timezone: 'UTC', protect: true }, () => void this.run('auto'))
   }
 
   /** Symbols with local 1m history that pass the data filter. */

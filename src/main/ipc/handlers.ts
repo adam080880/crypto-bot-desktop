@@ -97,6 +97,7 @@ export function registerIpcHandlers(deps: {
     const { id } = z.object({ id: z.string().regex(/^[a-z0-9]{8,40}$/) }).strict().parse(req)
     data.botClose(id)
   })
+  handle('bot:refresh', () => data.botRefresh())
   handle('bot:resetPaper', () => data.botResetPaper())
   handle('bot:testConnection', () => {
     const key = secrets.get('binance.apiKey')

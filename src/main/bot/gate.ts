@@ -46,7 +46,7 @@ export function exitFor<E extends ExitConfig>(
   return base
 }
 
-const POI_TF_MODELS = new Set<string>(['M0', 'M1', 'M2a', 'M2b'])
+const POI_TF_MODELS = new Set<string>(['M0', 'M1', 'M2a', 'M2b', 'M10'])
 
 /** When the setup became known: close of the OB valid confirmation candle. */
 export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.createdT + TF_MS[entryTf]

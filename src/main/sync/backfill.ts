@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { isSymbolAllowed, type DataConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import type { BackfillEvent, BackfillEventBody, BackfillKind, BackfillSummary } from '@shared/sync'
-import { TF_MS, weekStartUtc, type SourceTimeframe } from '@shared/timeframes'
+import { DERIVED_TIMEFRAMES, TF_MS, TIMEFRAMES, weekStartUtc, type DerivedTimeframe, type SourceTimeframe } from '@shared/timeframes'
 import { CandleRepo } from '../db/candles'
 import type { Db } from '../db/client'
 import { readSetting, writeSetting } from '../db/settingsRepo'
@@ -435,12 +435,38 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
    * rebuildDerived in weekly transactions (4h-aligned edges), so a long refill never holds the write lock
    * for long; retried when the app's writer has the DB busy.
    */
-  private async rebuildChunked(sym: SymbolRow, from: number, until: number, signal?: AbortSignal): Promise<void> {
+  private async rebuildChunked(sym: SymbolRow, from: number, until: number, signal?: AbortSignal, only?: readonly DerivedTimeframe[]): Promise<void> {
     const WEEK = 7 * DAY
     for (let a = Math.floor(from / (4 * 3600_000)) * 4 * 3600_000; a < until; a += WEEK) {
       const b = Math.min(a + WEEK, until)
-      await retryBusy(() => this.locks.run(sym.symbol, async () => void rebuildDerived(this.db, this.repo, sym.id, a, b)), signal)
+      await retryBusy(() => this.locks.run(sym.symbol, async () => void rebuildDerived(this.db, this.repo, sym.id, a, b, only)), signal)
     }
+  }
+
+  /**
+   * One-time fill of timeframes added later (2026-11-23: 3m / 10m / 45m / 2h / 3h) from the stored sources, per symbol that
+   * has 1m history and no sync_state for them yet: 3m from 1m, 10m from 5m, 45m from 15m, 2h/3h from 1h (whole stored range).
+   * Weekly transactions, yields between symbols; live ingest keeps them current afterwards.
+   */
+  async deriveAddedTimeframes(added: readonly DerivedTimeframe[] = ['3m', '10m', '45m', '2h', '3h'], signal?: AbortSignal): Promise<number> {
+    const ids = this.db.$client.prepare(`SELECT symbol_id FROM sync_state WHERE timeframe = '1m' AND last_open_time IS NOT NULL`).pluck().all() as number[]
+    const byId = new Map(activeSymbols(this.db).map((s) => [s.id, s]))
+    let done = 0
+    for (const id of ids) {
+      if (signal?.aborted) break
+      const sym = byId.get(id)
+      const m1 = getSyncState(this.db, id, '1m')
+      if (!sym || !m1?.lastOpenTime) continue
+      const missing = added.filter((tf) => !getSyncState(this.db, id, tf)?.lastOpenTime)
+      if (!missing.length) continue
+      const firsts = (['1m', '5m', '15m', '1h'] as const).map((tf) => getSyncState(this.db, id, tf)?.firstOpenTime ?? null).filter((x): x is number => x !== null)
+      if (!firsts.length) continue
+      await this.rebuildChunked(sym, Math.min(...firsts), m1.lastOpenTime + MIN, signal, missing)
+      done++
+      await new Promise((r) => setImmediate(r))
+    }
+    if (done) log.info({ symbols: done, timeframes: added }, 'added timeframes derived from stored data')
+    return done
   }
 
   /** Rolling retention: drop 1m beyond its window, derived beyond theirs. */
@@ -448,7 +474,7 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
     const removed: Record<string, number> = {}
     removed['1m'] = this.repo.pruneOlderThan('1m', oneMinuteStart(now, data))
     const derivedCutoff = Math.floor((now - data.derivedRetentionDays * DAY) / DAY) * DAY
-    for (const tf of ['5m', '15m', '1h', '4h'] as const) removed[tf] = this.repo.pruneOlderThan(tf, derivedCutoff)
+    for (const tf of DERIVED_TIMEFRAMES) removed[tf] = this.repo.pruneOlderThan(tf, derivedCutoff)
     // keep sync_state.first_open_time honest after pruning
     this.db.$client
       .prepare(
@@ -480,7 +506,7 @@ export function emptySummary(kind: 'backfill' | 'catchup'): BackfillSummary {
     finishedAt: 0,
     symbols: 0,
     completed: 0,
-    rows: { '1m': 0, '1d': 0, '1w': 0, '5m': 0, '15m': 0, '1h': 0, '4h': 0 },
+    rows: Object.fromEntries(TIMEFRAMES.map((tf) => [tf, 0])) as BackfillSummary['rows'],
     bytesDownloaded: 0,
     restRequests: 0,
     errors: [],

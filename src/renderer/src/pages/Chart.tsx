@@ -27,7 +27,7 @@ import { openBacktest, type ChartFocus } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/appStore'
 
-const TFS: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+const TFS: Timeframe[] = ['1m', '3m', '5m', '10m', '15m', '45m', '1h', '2h', '3h', '4h', '1d', '1w']
 const BULL = '#26b07e'
 const BEAR = '#ef5350'
 const LIMIT = 3000

@@ -1,13 +1,12 @@
 import { EventEmitter } from 'node:events'
 import type { DataConfig } from '@shared/config'
 import type { LiveCandleEvent, LiveState, LiveStatus } from '@shared/live'
-import { bucketOpen } from '@shared/timeframes'
 import { CandleRepo } from '../db/candles'
 import type { Db } from '../db/client'
 import { activeSymbols } from '../db/symbolsRepo'
 import { logger } from '../logger'
 import type { Backfiller } from '../sync/backfill'
-import { FormingCandles } from './formingCandles'
+import { FormingCandles, formingStart } from './formingCandles'
 import { KlineSocketPool, type KlineMessage } from './klineSocket'
 
 const log = logger('live')
@@ -97,7 +96,7 @@ export class LiveService extends EventEmitter<{
     const f = new FormingCandles()
     if (sym) {
       const now = Date.now()
-      f.seed(this.repo.range('1m', sym.id, bucketOpen(now, '4h'), now))
+      f.seed(this.repo.range('1m', sym.id, formingStart(now), now))
     }
     this.forming = f
     this.emit('synced', symbol)

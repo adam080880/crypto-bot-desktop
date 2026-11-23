@@ -220,6 +220,8 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       }
       live.setSources({ watchlist: config.watchlist })
       autoSync.start()
+      // 3m / 10m / 45m / 2h / 3h added 2026-11-23: derive them once from the stored candles (no download), in the background
+      void backfiller.deriveAddedTimeframes().catch((err) => log.warn({ err: (err as Error).message }, 'deriving added timeframes failed'))
       flowSync.start()
       // BTC dominance for the btcDom tag: warm up before the first scan, then re-check every 20 s
       // (fetches only after a new candle closed, so the scan 1 min after a close sees it)
@@ -257,6 +259,9 @@ port.on('message', async ({ data: msg }: { data: ToWorker }) => {
       break
     case 'bot-close':
       void bot.closeById(msg.id)
+      break
+    case 'bot-refresh':
+      void bot.refresh()
       break
     case 'bot-reset-paper':
       bot.resetPaper()

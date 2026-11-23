@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
+import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RefreshCw, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
 import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { MODEL_LABEL, setupPoiLabel } from '@shared/smc'
@@ -45,6 +45,31 @@ export function Bot() {
   const [testing, setTesting] = useState(false)
   const [connErr, setConnErr] = useState<string | null>(null)
   const kill = useAppStore((s) => s.status?.killSwitch.active)
+  const [refreshing, setRefreshing] = useState(false)
+  // the worker answers with a bot:state event; stop the spinner on it (or after 15 s)
+  const refresh = (): void => {
+    if (refreshing) return
+    setRefreshing(true)
+    const off = window.api.on('bot:state', () => {
+      off()
+      clearTimeout(timer)
+      setRefreshing(false)
+    })
+    const timer = setTimeout(() => {
+      off()
+      setRefreshing(false)
+    }, 15_000)
+    void window.api.invoke('bot:refresh').catch(() => {
+      off()
+      clearTimeout(timer)
+      setRefreshing(false)
+    })
+  }
+  const refreshBtn = (
+    <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing} title="Ambil ulang equity Binance, sinkron order & posisi, hitung ulang PnL hari ini">
+      <RefreshCw className={refreshing ? 'animate-spin' : ''} /> Refresh
+    </Button>
+  )
 
   useEffect(() => {
     void window.api.invoke('bot:get').then(setSt)
@@ -129,8 +154,14 @@ export function Bot() {
       <Card>
         <CardContent className="num grid gap-x-8 gap-y-2 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <div className="text-xs text-muted-foreground">Equity {live ? 'Binance' : 'paper'}</div>
-            <div className="text-lg font-semibold">{st?.equity == null ? '—' : `${st.equity.toFixed(2)} USDT`}</div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              Equity {live ? 'Binance' : 'paper'}
+              {st?.equityAt ? <span>· {new Date(st.equityAt).toLocaleTimeString('id-ID', { hour12: false })}</span> : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-lg font-semibold">{st?.equity == null ? '—' : `${st.equity.toFixed(2)} USDT`}</div>
+              {refreshBtn}
+            </div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">PnL hari ini (UTC)</div>
@@ -214,12 +245,15 @@ export function Bot() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Order & posisi aktif</CardTitle>
-          <CardDescription>
-            Limit entry dipasang bareng SL (stop-market, close position). TP limit dipasang begitu entry terisi. Limit dibatalin kalau harga sampai TP duluan
-            atau setup expired.
-          </CardDescription>
+        <CardHeader className="flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Order & posisi aktif</CardTitle>
+            <CardDescription>
+              Limit entry dipasang bareng SL (stop-market, close position). TP limit dipasang begitu entry terisi. Limit dibatalin kalau harga sampai TP duluan
+              atau setup expired.
+            </CardDescription>
+          </div>
+          {refreshBtn}
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <TradeTable trades={active} actions />
