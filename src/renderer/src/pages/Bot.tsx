@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
-import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult } from '@shared/bot'
+import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { MODEL_LABEL, setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -159,7 +159,7 @@ export function Bot() {
             )}{' '}
             · Universe {st?.universe.count ?? 0} koin crypto top {cfg.bot.topVolume} volume
             {st?.universe.updatedAt ? ` (update ${formatTime(st.universe.updatedAt)})` : ''} · model{' '}
-            {cfg.bot.models.map((m) => `${m}${cfg.bot.modelConfluence[m].length ? ` (${cfg.bot.modelConfluence[m].join('+')})` : ''}`).join(', ')}
+            {cfg.bot.models.map((m) => { const a = cfg.bot.modelConfluence[m]; const o = cfg.bot.modelConfluenceAny?.[m] ?? []; const t = [a.join('+'), o.length ? `salah satu ${o.join('/')}` : ''].filter(Boolean).join(' · '); return `${m}${t ? ` (${t})` : ''}` }).join(', ')}
             {cfg.bot.minScore ? ` · skor ≥ ${cfg.bot.minScore}` : ''} · exit {cfg.exit.tpMode === 'trail' ? 'trailing tanpa TP' : cfg.exit.tpMode === 'fixedR' ? `TP ${cfg.exit.tpR}R` : 'TP liquidity'}
             {cfg.exit.ladder.length ? ` + bertingkat (${cfg.exit.ladder.map((l) => `${l.atR}R→${l.closePct ? `tutup ${l.closePct}% + ` : ''}SL ${l.slToR ? `${l.slToR}R` : 'BE'}`).join(', ')})` : ''}
             {cfg.exit.ladder.some((l) => l.slToR === 0) && cfg.exit.tightSlPct > 0
@@ -253,34 +253,20 @@ export function Bot() {
             {!st.statsTotal ? (
               <p className="px-6 pb-4 text-sm text-muted-foreground">Belum ada trade selesai sejak tanggal ini.</p>
             ) : (
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs text-muted-foreground">
-                  <tr>
-                    {['model', 'trade', 'untung', 'BE', 'rugi', 'WR (tanpa BE)', 'BE %', 'total R', 'rata-rata R', 'DD maks', 'PnL'].map((h) => (
-                      <th key={h} className="px-3 py-1.5 font-normal whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="num">
-                  {[...st.modelStats.map((m) => ({ label: MODEL_LABEL[m.model], m, total: false })), { label: 'Total', m: st.statsTotal, total: true }].map(({ label, m, total }) => (
-                    <tr key={label} className={cn('border-t', total && 'font-medium')}>
-                      <td className="px-3 py-1.5 whitespace-nowrap">{label}</td>
-                      <td className="px-3 py-1.5">{m.trades}</td>
-                      <td className="px-3 py-1.5 text-bull">{m.wins}</td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{m.bes}</td>
-                      <td className="px-3 py-1.5 text-bear">{m.losses}</td>
-                      <td className="px-3 py-1.5">{m.wr === null ? '—' : `${Math.round(m.wr * 100)}%`}</td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{Math.round((m.bes / m.trades) * 100)}%</td>
-                      <td className={cn('px-3 py-1.5', m.totalR > 0 ? 'text-bull' : m.totalR < 0 ? 'text-bear' : '')}>{m.totalR.toFixed(2)}R</td>
-                      <td className={cn('px-3 py-1.5', (m.avgR ?? 0) > 0 ? 'text-bull' : (m.avgR ?? 0) < 0 ? 'text-bear' : '')}>{m.avgR === null ? '—' : `${m.avgR.toFixed(2)}R`}</td>
-                      <td className={cn('px-3 py-1.5', m.maxDdR > 0 && 'text-bear')}>{m.maxDdR > 0 ? `−${m.maxDdR.toFixed(2)}R` : '0R'}</td>
-                      <td className={cn('px-3 py-1.5', m.pnl > 0 ? 'text-bull' : m.pnl < 0 ? 'text-bear' : '')}>{m.pnl.toFixed(2)} USDT</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <StatsTable rows={st.modelStats} total={st.statsTotal} />
+            )}
+            {st.shadowStats && (
+              <div className="border-t pt-3">
+                <p className="px-6 pb-2 text-xs text-muted-foreground">
+                  Shadow paper ({cfg.bot.shadowModels.join(', ')}): jalan di akun paper walaupun bot live, tidak pernah kirim order. Tidak masuk statistik live di
+                  atas.
+                </p>
+                {st.shadowStats.statsTotal ? (
+                  <StatsTable rows={st.shadowStats.modelStats} total={st.shadowStats.statsTotal} />
+                ) : (
+                  <p className="px-6 pb-4 text-sm text-muted-foreground">Belum ada trade shadow yang selesai.</p>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -371,6 +357,39 @@ function CloseMarket({ t }: { t: BotTrade }) {
     >
       {armed ? 'Yakin? klik lagi' : 'Close market'}
     </Button>
+  )
+}
+
+function StatsTable({ rows, total }: { rows: ModelStat[]; total: TradeStat }) {
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-left text-xs text-muted-foreground">
+        <tr>
+          {['model', 'trade', 'untung', 'BE', 'rugi', 'WR (tanpa BE)', 'BE %', 'total R', 'rata-rata R', 'DD maks', 'PnL'].map((h) => (
+            <th key={h} className="px-3 py-1.5 font-normal whitespace-nowrap">
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody className="num">
+        {[...rows.map((m) => ({ label: MODEL_LABEL[m.model], m, total: false })), { label: 'Total', m: total, total: true }].map(({ label, m, total: isTotal }) => (
+          <tr key={label} className={cn('border-t', isTotal && 'font-medium')}>
+            <td className="px-3 py-1.5 whitespace-nowrap">{label}</td>
+            <td className="px-3 py-1.5">{m.trades}</td>
+            <td className="px-3 py-1.5 text-bull">{m.wins}</td>
+            <td className="px-3 py-1.5 text-muted-foreground">{m.bes}</td>
+            <td className="px-3 py-1.5 text-bear">{m.losses}</td>
+            <td className="px-3 py-1.5">{m.wr === null ? '—' : `${Math.round(m.wr * 100)}%`}</td>
+            <td className="px-3 py-1.5 text-muted-foreground">{Math.round((m.bes / m.trades) * 100)}%</td>
+            <td className={cn('px-3 py-1.5', m.totalR > 0 ? 'text-bull' : m.totalR < 0 ? 'text-bear' : '')}>{m.totalR.toFixed(2)}R</td>
+            <td className={cn('px-3 py-1.5', (m.avgR ?? 0) > 0 ? 'text-bull' : (m.avgR ?? 0) < 0 ? 'text-bear' : '')}>{m.avgR === null ? '—' : `${m.avgR.toFixed(2)}R`}</td>
+            <td className={cn('px-3 py-1.5', m.maxDdR > 0 && 'text-bear')}>{m.maxDdR > 0 ? `−${m.maxDdR.toFixed(2)}R` : '0R'}</td>
+            <td className={cn('px-3 py-1.5', m.pnl > 0 ? 'text-bull' : m.pnl < 0 ? 'text-bear' : '')}>{m.pnl.toFixed(2)} USDT</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 

@@ -356,6 +356,7 @@ function Results(p: {
           <Chips label="POI induk" options={poiOptions} value={filter.pois} onChange={(pois) => setFilter({ ...filter, pois })} />
           <Chips label="Entry di" options={childOptions} value={filter.childKinds} onChange={(childKinds) => setFilter({ ...filter, childKinds })} />
           <Chips label="Wajib (SMC)" options={CONF_CHIPS} value={filter.conf} onChange={(conf) => setFilter({ ...filter, conf })} />
+          <Chips label="Salah satu (OR)" options={CONF_CHIPS} value={filter.confAny ?? []} onChange={(confAny) => setFilter({ ...filter, confAny })} />
           <Chips label="Wajib (M5)" options={CONF_CHIPS} value={filter.trendConf ?? []} onChange={(trendConf) => setFilter({ ...filter, trendConf })} />
           <div className="flex flex-wrap items-center gap-2">
             <span className="w-24 shrink-0 text-muted-foreground">Skor min</span>
@@ -573,7 +574,8 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
       savedAt: Date.now(),
       models: [row.model],
       pois: [row.poi],
-      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' || row.model === 'M7' ? [] : filter.conf,
+      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' || row.model === 'M7' || row.model === 'M8' || row.model === 'M9' ? [] : filter.conf,
+      anyConfluence: filter.confAny ?? [],
       minScore: filter.minScore,
       plan: r.plans[row.plan]!,
       stats: { trades: row.all.trades, winrate: row.all.winrate, avgR: row.all.avgR, oosTrades: row.oos.trades, oosAvgR: row.oos.avgR }

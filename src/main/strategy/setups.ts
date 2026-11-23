@@ -1,5 +1,5 @@
 import type { Candle } from '@shared/candles'
-import { breakerExit, msnrExit, type ExitConfig, type SmcConfig } from '@shared/config'
+import { breakerExit, m8Exit, m9Exit, msnrExit, type ExitConfig, type SmcConfig } from '@shared/config'
 import type { Confluence, Dir, EntryModel, PoiKind, PoiOrigin, Setup, SetupStatus } from '@shared/smc'
 import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -11,6 +11,8 @@ import { atrSeries, emaSeries } from './atr'
 import { flowConfluence, type FlowData } from './flow'
 import { RADAR_BARS, volRatioSeries } from '../radar/radar'
 import { wyckoffAt } from './wyckoff'
+import { InducementIndex } from './inducement'
+import { cisdIn, ifvgIn, smtAt } from './confirm'
 import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
 
 /** A point of interest from any timeframe, normalised. */
@@ -121,7 +123,8 @@ function tappedHtf(x: Candle, tf: Timeframe, bull: boolean, higher: readonly Poi
   const known = closeTime(x.t, tf)
   for (const p of higher) {
     if ((p.direction === 'bullish') !== bull || p.activeFrom > known) continue
-    if (p.invalidT !== null && p.invalidT <= x.t) continue
+    // invalidation is only known once the invalidating candle of the POI's TF has closed (no look-ahead)
+    if (p.invalidT !== null && closeTime(p.invalidT, p.timeframe) <= x.t) continue
     if (bull ? x.l <= p.level * (1 + near) && x.c >= p.level * (1 - near) : x.h >= p.level * (1 - near) && x.c <= p.level * (1 + near)) return true
   }
   return false
@@ -175,6 +178,8 @@ export interface SetupInput {
   flow?: FlowData
   /** BTC dominance (BTCDOMUSDT) trend source for the btcDom tag (omit for none). */
   btcDom?: TrendSrc
+  /** 1h candles of the SMT reference (BTC for alts, ETH for BTC); omit → no smt tag. */
+  smtRef?: readonly Candle[]
 }
 
 interface Draft {
@@ -217,14 +222,17 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M5')) drafts.push(...modelM5(input, all))
   if (models.has('M6')) drafts.push(...modelM6(input, all))
   if (models.has('M7')) drafts.push(...modelM7(input, all))
+  if (models.has('M8')) drafts.push(...modelM8(input, all, pois))
+  const idx = new InducementIndex(entry, all, pois, { baitDays: cfg.baitDays, windowAtr: cfg.idmWindowAtr })
+  if (models.has('M9')) drafts.push(...modelM9(input, all, pois, idx))
 
   const atr = cfg.minSlAtr > 0 ? atrSeries(c, 14) : null
   const h1 = all.find((a) => a.timeframe === '1h')
   const vol1h = h1 && h1.candles.length >= RADAR_BARS ? { c: h1.candles, vr: volRatioSeries(h1.candles) } : null
   const best = new Map<string, Setup>()
   for (const d0 of drafts) {
-    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
-    const s = finalize(input, all, d, vol1h, pois)
+    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' && d0.model !== 'M8' && d0.model !== 'M9' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
+    const s = finalize(input, all, d, vol1h, pois, idx)
     if (!s) continue
     const prev = best.get(s.id)
     if (!prev || s.score > prev.score) best.set(s.id, s)
@@ -277,7 +285,7 @@ export function poiLiqIntact(c: readonly Candle[], poi: Pick<Poi, 'direction' | 
   return true
 }
 
-function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
+export function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[]): Draft[] {
   const c = entry.candles
   const raw = [...poiAnalyses.flatMap(collectPois), ...(cfg.sameTfPoi ? collectPois(entry) : [])].filter(
     (p) =>
@@ -290,7 +298,9 @@ function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[])
     const bull = poi.direction === 'bullish'
     let hitIdx = -1
     for (let m = indexAtOrAfter(c, poi.activeFrom); m < c.length; m++) {
-      if (poi.invalidT !== null && c[m]!.t >= poi.invalidT) break
+      // invalid only once the POI-TF candle that closed through it has closed (2026-11-22: comparing with its open
+      // time dropped trades whose POI broke right after the entry → backtest M0 looked better than live)
+      if (poi.invalidT !== null && c[m]!.t >= closeTime(poi.invalidT, poi.timeframe)) break
       if (bull ? c[m]!.l <= poi.level : c[m]!.h >= poi.level) {
         hitIdx = m
         break
@@ -303,7 +313,7 @@ function modelM0({ entry, poiAnalyses, cfg }: SetupInput, _pois: readonly Poi[])
         o.i >= hitIdx &&
         o.i <= hitIdx + cfg.obValidMaxCandles &&
         (bull ? o.wickEnd <= poi.level * (1 + near) && o.line >= poi.level * (1 - near) : o.wickEnd >= poi.level * (1 - near) && o.line <= poi.level * (1 + near)) &&
-        (poi.invalidT === null || o.confirmedT < poi.invalidT)
+        (poi.invalidT === null || closeTime(o.confirmedT, entry.timeframe) < closeTime(poi.invalidT, poi.timeframe))
     )
     if (!ob) continue
     const sl = bull ? ob.wickEnd * (1 - cfg.slBufferPct / 100) : ob.wickEnd * (1 + cfg.slBufferPct / 100)
@@ -793,6 +803,155 @@ function modelM7({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): D
   return out
 }
 
+// ---------- M8: HTF POI with the trend (POI lab 2026-11-22, docs/entry-v2.md §21) ----------
+
+/**
+ * M8: first touch of a cfg.m8PoiTimeframes POI of the cfg.m8Kinds, only while BTC 4h and the coin's 1d trend point
+ * the POI's way (both known at that close). Limit at the POI line, SL beyond the POI extreme + 0.1 × ATR(POI TF)
+ * (at least max(0.3 %, 0.3 × ATR) and cfg.m8MinSlPct), fixed TP (m8Exit). The order is armed at the first entry-TF
+ * close within m8NearR × risk of the line; after an unfilled limit expires the POI re-arms while it is untouched.
+ * Only the first touch counts: once a wick reaches the line the POI is done.
+ */
+export function modelM8({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[]): Draft[] {
+  const c = entry.candles
+  const d1 = all.find((a) => a.timeframe === '1d')
+  const b4 = btc?.['4h']
+  if ((cfg.m8RequireTrend1d && !d1) || (cfg.m8RequireBtc4h && !b4)) return []
+  const tfs = new Set<Timeframe>(cfg.m8PoiTimeframes)
+  const kinds = new Set<PoiKind>(cfg.m8Kinds)
+  const atrOf = new Map<Timeframe, number[]>()
+  const out: Draft[] = []
+  for (const p of pois) {
+    if (!tfs.has(p.timeframe) || !kinds.has(p.kind)) continue
+    const a = all.find((x) => x.timeframe === p.timeframe)
+    if (!a) continue
+    let atr = atrOf.get(p.timeframe)
+    if (!atr) atrOf.set(p.timeframe, (atr = atrSeries(a.candles, 14)))
+    const bull = p.direction === 'bullish'
+    const L = p.level
+    const ended = (x: Candle): boolean => p.invalidT !== null && x.t >= closeTime(p.invalidT, p.timeframe)
+    const touches = (x: Candle): boolean => (bull ? x.l <= L : x.h >= L)
+    for (let m = indexAtOrAfter(c, p.activeFrom); m < c.length; m++) {
+      const x = c[m]!
+      if (ended(x) || touches(x)) break
+      const known = closeTime(x.t, entry.timeframe)
+      const k = lastClosedBy(a.candles, p.timeframe, known)
+      const A = k >= 14 ? atr[k]! : NaN
+      if (!(A > 0)) continue
+      const ext = p.extreme !== undefined && (bull ? p.extreme < L : p.extreme > L) ? p.extreme : null
+      const sl0 = ext !== null ? (bull ? ext - 0.1 * A : ext + 0.1 * A) : bull ? L - A : L + A
+      const minD = Math.max(0.003 * L, 0.3 * A)
+      const sl = bull ? Math.min(sl0, L - minD) : Math.max(sl0, L + minD)
+      const risk = Math.abs(L - sl)
+      if ((risk / L) * 100 < cfg.m8MinSlPct) continue
+      if (Math.abs(x.c - L) > cfg.m8NearR * risk) continue
+      if (cfg.m8RequireBtc4h && trendKnownAt(b4!, known) !== p.direction) continue
+      if (cfg.m8RequireTrend1d && trendKnownAt(d1!, known) !== p.direction) continue
+      out.push({
+        model: 'M8',
+        dir: p.direction,
+        poi: poiRef(p, null),
+        child: { kind: 'LEVEL', timeframe: entry.timeframe, t: x.t, level: L, extreme: sl, hasFvg: false, origin: null },
+        entry: L,
+        sl,
+        knownIdx: m,
+        invalidLevel: sl,
+        confluence: [],
+        reasons: [
+          `${POI_LABEL[p.kind]} ${p.timeframe} belum pernah disentuh, harga mendekat (≤ ${cfg.m8NearR}R)`,
+          `searah${cfg.m8RequireBtc4h ? ' BTC 4h' : ''}${cfg.m8RequireTrend1d ? ' + trend 1d koin' : ''}, SL di balik POI (${((risk / L) * 100).toFixed(2)}%), TP ${cfg.m8TpR}R`
+        ],
+        expiry: cfg.m8ExpiryCandles
+      })
+      // this limit covers the next m8ExpiryCandles candles: a touch in there is the first (and only) touch
+      let done = false
+      const end = Math.min(c.length - 1, m + cfg.m8ExpiryCandles)
+      for (let q = m + 1; q <= end && !done; q++) if (ended(c[q]!) || touches(c[q]!)) done = true
+      if (done) break
+      m = end
+    }
+  }
+  return out
+}
+
+// ---------- M9: bait → POI behind (user 2026-11-23, docs/smc-rules.md §11) ----------
+
+/**
+ * M9: an m9PoiTimeframes POI B of the m9Kinds, still untouched, with a bait in front of it — a same-direction POI without
+ * origin, touched within cfg.baitDays (InducementIndex). Armed at the first entry-TF close after a bait touch within
+ * m9NearR × risk of B's line: limit at the line, SL beyond B's extreme + 0.1 × ATR (at least max(0.3 %, 0.3 × ATR) and
+ * m9MinSlPct), fixed TP (m9Exit). Re-armed after expiry while a bait is fresh; done once B is touched.
+ */
+export function modelM9({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[], idx: InducementIndex): Draft[] {
+  const c = entry.candles
+  const d1 = all.find((a) => a.timeframe === '1d')
+  const b4 = btc?.['4h']
+  if ((cfg.m9RequireTrend1d && !d1) || (cfg.m9RequireBtc4h && !b4)) return []
+  const tfs = new Set<Timeframe>(cfg.m9PoiTimeframes)
+  const kinds = new Set<PoiKind>(cfg.m9Kinds)
+  const days = cfg.baitDays * 86_400_000
+  const out: Draft[] = []
+  for (const p of pois) {
+    if (!tfs.has(p.timeframe) || !kinds.has(p.kind)) continue
+    const baits = idx.baitTouches(p)
+    if (!baits.length) continue
+    const touchB = idx.touch(p)
+    const bull = p.direction === 'bullish'
+    const L = p.level
+    const ended = (x: Candle): boolean => p.invalidT !== null && x.t >= closeTime(p.invalidT, p.timeframe)
+    const touches = (x: Candle): boolean => (bull ? x.l <= L : x.h >= L)
+    // a bait is "fresh" at time T if one became known in [T − baitDays, T]
+    const fresh = (T: number): boolean => {
+      for (const b of baits) if (b <= T && b >= T - days) return true
+      return false
+    }
+    const startT = baits[0]! - TF_MS[entry.timeframe] // first bait candle's open
+    const stop = touchB >= 0 ? touchB : c.length
+    for (let m = indexAtOrAfter(c, startT); m < stop; m++) {
+      const x = c[m]!
+      if (ended(x) || touches(x)) break
+      const known = closeTime(x.t, entry.timeframe)
+      if (!fresh(known)) {
+        if (known > baits[baits.length - 1]! + days) break
+        continue
+      }
+      const A = idx.atrAt(p, known)
+      if (!(A > 0)) continue
+      const ext = p.extreme !== undefined && (bull ? p.extreme < L : p.extreme > L) ? p.extreme : null
+      const sl0 = ext !== null ? (bull ? ext - 0.1 * A : ext + 0.1 * A) : bull ? L - A : L + A
+      const minD = Math.max(0.003 * L, 0.3 * A)
+      const sl = bull ? Math.min(sl0, L - minD) : Math.max(sl0, L + minD)
+      const risk = Math.abs(L - sl)
+      if ((risk / L) * 100 < cfg.m9MinSlPct) continue
+      if (Math.abs(x.c - L) > cfg.m9NearR * risk) continue
+      if (cfg.m9RequireBtc4h && trendKnownAt(b4!, known) !== p.direction) continue
+      if (cfg.m9RequireTrend1d && trendKnownAt(d1!, known) !== p.direction) continue
+      out.push({
+        model: 'M9',
+        dir: p.direction,
+        poi: poiRef(p, null),
+        child: { kind: 'LEVEL', timeframe: entry.timeframe, t: x.t, level: L, extreme: sl, hasFvg: false, origin: null },
+        entry: L,
+        sl,
+        knownIdx: m,
+        invalidLevel: sl,
+        confluence: [],
+        reasons: [
+          `umpan (POI tanpa origin) di depan ${POI_LABEL[p.kind]} ${p.timeframe} sudah diambil`,
+          `limit di ${POI_LABEL[p.kind]} ${p.timeframe}, SL di balik POI (${((risk / L) * 100).toFixed(2)}%), ${cfg.m9TpR > 0 ? `TP ${cfg.m9TpR}R` : 'exit bertingkat + trailing'}`
+        ],
+        expiry: cfg.m9ExpiryCandles
+      })
+      let done = false
+      const end = Math.min(c.length - 1, m + cfg.m9ExpiryCandles)
+      for (let q = m + 1; q <= end && !done; q++) if (ended(c[q]!) || touches(c[q]!)) done = true
+      if (done) break
+      m = end
+    }
+  }
+  return out
+}
+
 // ---------- M6: radar pump → 1h breakout (not SMC, docs/entry-v2.md §12–13) ----------
 
 /**
@@ -933,7 +1092,17 @@ const CONF_LABEL: Record<Confluence, string> = {
   btcDom: 'BTC dominance mendukung arah (alt: long saat BTCDOM turun, short saat naik)',
   poiLiq: 'liquidity wick POI belum diambil',
   slLiqClear: 'tidak ada liquidity swing di belakang SL',
-  poiStack: 'POI numpuk dengan POI TF lain'
+  poiStack: 'POI numpuk dengan POI TF lain',
+  liqHtfBehind: 'ada liquidity 4h/1d di balik SL (struktur HTF)',
+  liqInPoi: 'banyak liquidity di antara entry dan SL',
+  cleanApproach: 'harga datang ke entry tanpa nyapu liquidity',
+  baitTaken: 'umpan (POI tanpa origin di depan) sudah diambil',
+  idmSwept: 'IDM ketat sudah disapu',
+  extremePoi: 'extreme POI (tidak ada POI searah di belakangnya)',
+  decisionalPoi: 'decisional POI (terdekat di balik IDM)',
+  cisd: 'CISD searah (close tembus open run lawan)',
+  smt: 'SMT divergence dengan BTC/ETH',
+  ifvg: 'inverse FVG searah'
 }
 
 /** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
@@ -947,7 +1116,14 @@ function bbOf(c: readonly Candle[], cfg: Pick<SmcConfig, 'bbPeriod' | 'bbStdDev'
   return bb
 }
 
-function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, vol1h: { c: readonly Candle[]; vr: number[] } | null, pois: readonly Poi[] = []): Setup | null {
+function finalize(
+  input: SetupInput,
+  all: readonly SmcAnalysisFull[],
+  d: Draft,
+  vol1h: { c: readonly Candle[]; vr: number[] } | null,
+  pois: readonly Poi[] = [],
+  idx: InducementIndex | null = null
+): Setup | null {
   const { entry, cfg, symbol } = input
   const c = entry.candles
   const bull = d.dir === 'bullish'
@@ -974,6 +1150,26 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, 
   }
   // liquidity behind the stop already cleared: no unswept swing on the SL side within slLiqZoneR × risk beyond the SL
   if (!liquidityBehindSl(all, bull, d.sl, risk * cfg.slLiqZoneR, known)) conf.add('slLiqClear')
+  const la = liquidityAround(all, bull, d.entry, d.sl, known)
+  if (la.htfBehind) conf.add('liqHtfBehind')
+  if (la.inZone >= cfg.liqInPoiMin) conf.add('liqInPoi')
+  if (la.induced <= 1) conf.add('cleanApproach')
+  // inducement around the parent POI (docs/smc-rules.md §11), at the hit (or now for a limit waiting at the POI)
+  const parent = idx ? idx.find(d.poi, d.dir) : null
+  if (parent) {
+    const ind = idx!.at(parent, Math.min(known, d.poi.hitT !== null ? closeTime(d.poi.hitT, entry.timeframe) : known))
+    if (ind.baitT !== null) conf.add('baitTaken')
+    if (ind.idm) conf.add('idmSwept')
+    if (ind.extreme) conf.add('extremePoi')
+    if (ind.decisional) conf.add('decisionalPoi')
+  }
+  // confirmation after the POI reaction (§11): CISD / inverse FVG on the entry TF since the hit (at most confirmLookback
+  // candles back), SMT on 1h against the reference at that time
+  const from = Math.max(d.poi.hitT ?? -Infinity, known - cfg.confirmLookback * TF_MS[entry.timeframe])
+  if (cisdIn(c, entry.timeframe, d.dir, from, known)) conf.add('cisd')
+  if (ifvgIn(c, entry.fvgsIdx, entry.timeframe, d.dir, from, known)) conf.add('ifvg')
+  const h1 = input.smtRef && all.find((a) => a.timeframe === '1h')
+  if (h1 && input.smtRef && smtAt(h1.candles, input.smtRef, '1h', d.dir, known, cfg.smtWindowH, cfg.smtRangeH)) conf.add('smt')
   if (STACK_MODELS.has(d.model) && stackedTfs(pois, d.poi, d.dir, d.poi.hitT ?? known, cfg.poiStackPct).length) conf.add('poiStack')
   // Wyckoff: highest timeframe that has a phase at that time
   for (const a of [...all].sort((x, y) => TF_RANK[y.timeframe] - TF_RANK[x.timeframe])) {
@@ -1013,7 +1209,7 @@ function finalize(input: SetupInput, all: readonly SmcAnalysisFull[], d: Draft, 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
   const trailOnly = d.model === 'M5' || d.model === 'M6'
   const tpLiquidity = trailOnly ? null : (d.tp ?? nearestTarget(all, bull, d.entry, known))
-  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : d.model === 'M7' ? msnrExit() : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
+  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : d.model === 'M7' ? msnrExit() : d.model === 'M8' ? m8Exit(cfg) : d.model === 'M9' ? m9Exit(cfg) : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk
@@ -1070,6 +1266,33 @@ function targets(a: SmcAnalysisFull) {
  * Unswept swing liquidity (any analysed TF, known at `knownAt`) just behind the stop: for a long a swing low
  * in [sl − zone, sl], for a short a swing high in [sl, sl + zone]. Price tends to run it, taking the SL first.
  */
+/**
+ * Stop-side swing liquidity around a trade at `known` (liquidity lab 2026-11-22, docs/entry-v2.md §22), with R = |entry − SL|:
+ *  - htfBehind: an unswept 4h/1d swing between the SL and 1R beyond it
+ *  - inZone: unswept swings (any analysed TF) between the entry and the SL
+ *  - induced: swings in front of the entry (within 3R) swept during the last 24h (price took them on its way in)
+ * A sweep counts once the sweeping candle of that TF has closed.
+ */
+export function liquidityAround(analyses: readonly SmcAnalysisFull[], bull: boolean, entry: number, sl: number, known: number): { htfBehind: boolean; inZone: number; induced: number } {
+  const r = Math.abs(entry - sl)
+  const out = { htfBehind: false, inZone: 0, induced: 0 }
+  if (!(r > 0)) return out
+  for (const a of analyses) {
+    const tfMs = TF_MS[a.timeframe]
+    const htf = TF_RANK[a.timeframe] >= TF_RANK['4h']
+    for (const l of targets(a)) {
+      if (l.side !== (bull ? 'sell' : 'buy') || l.knownT > known) continue
+      const sweptAt = l.sweptT === null ? null : l.sweptT + tfMs
+      const u = bull ? (l.price - entry) / r : (entry - l.price) / r // + = in front of the entry (toward the TP)
+      if (sweptAt === null || sweptAt > known) {
+        if (u <= 0 && u >= -1) out.inZone++
+        else if (htf && u < -1 && u >= -2) out.htfBehind = true
+      } else if (sweptAt >= known - 24 * 3_600_000 && u > 0 && u <= 3) out.induced++
+    }
+  }
+  return out
+}
+
 export function liquidityBehindSl(analyses: readonly SmcAnalysisFull[], bull: boolean, sl: number, zone: number, knownAt: number): boolean {
   for (const a of analyses) {
     for (const l of targets(a)) {

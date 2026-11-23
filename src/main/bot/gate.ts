@@ -1,5 +1,5 @@
 import type { CoinProfile } from '@shared/backtest'
-import { breakerExit, m6Exit, msnrExit, trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
+import { breakerExit, m6Exit, m8Exit, m9Exit, msnrExit, trendExit, type BotConfig, type ExitConfig, type RiskConfig, type SmcConfig } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { MODEL_LABEL, poiConcept, setupPoiLabel } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -33,12 +33,14 @@ export function exitFor<E extends ExitConfig>(
   model: string,
   base: E,
   profile: CoinProfile | null | undefined,
-  smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'breakerTpR' | 'm6TrailGapR' | 'm6TrailStepR'>
+  smc: Pick<SmcConfig, 'trendTrailGapR' | 'trendTrailStepR' | 'breakerTpR' | 'm6TrailGapR' | 'm6TrailStepR' | 'm8TpR' | 'm9TpR'>
 ): E {
   if (profile) return { ...base, ...profile.plan.exit }
   if (model === 'M5') return { ...base, ...trendExit(smc) }
   if (model === 'M6') return { ...base, ...m6Exit(smc) }
   if (model === 'M7') return { ...base, ...msnrExit() }
+  if (model === 'M8') return { ...base, ...m8Exit(smc) }
+  if (model === 'M9') return { ...base, ...m9Exit(smc) }
   const bx = model === 'M4' ? breakerExit(smc) : null
   if (bx) return { ...base, ...bx }
   return base
@@ -55,13 +57,14 @@ export const knownAt = (c: Candidate, entryTf: Timeframe): number => c.setup.cre
  */
 export function setupGate(
   c: Candidate,
-  o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number; exit?: Pick<ExitConfig, 'tpMode'> & Partial<Pick<ExitConfig, 'tpR'>>; profile?: CoinProfile | null; smc?: Pick<SmcConfig, 'breakerTpR'> }
+  o: { bot: BotConfig; entryTf: Timeframe; universe: ReadonlySet<string>; now: number; exit?: Pick<ExitConfig, 'tpMode'> & Partial<Pick<ExitConfig, 'tpR'>>; profile?: CoinProfile | null; smc?: Pick<SmcConfig, 'breakerTpR' | 'm8TpR' | 'm9TpR'> }
 ): string | null {
   const s = c.setup
   const bull = c.direction === 'bullish'
   const p = o.profile ?? null
   if (!o.universe.has(c.symbol)) return `bukan top ${o.bot.topVolume} crypto by volume`
-  const models: string[] = p ? p.models : o.bot.models
+  // shadow paper models (bot.shadowModels) are always traded on paper, whatever bot.models says
+  const models: string[] = [...(p ? p.models : o.bot.models), ...(o.bot.shadowModels ?? [])]
   if (!models.includes(s.model)) return `${MODEL_LABEL[s.model]} tidak dipakai bot${p ? ` (profil ${c.symbol})` : ''}`
   const pk = `${poiConcept(s.model, s.poi.kind)}|${s.poi.timeframe}`
   // profiles saved before breakers had their own key stored M4 as "OB|tf"
@@ -74,13 +77,15 @@ export function setupGate(
   const required = p ? p.requireConfluence : (o.bot.modelConfluence[s.model] ?? [])
   const missing = required.filter((k) => !(s.confluence as string[]).includes(k))
   if (missing.length) return `belum ada konfluensi wajib: ${missing.join(', ')}`
+  const any = p ? (p.anyConfluence ?? []) : (o.bot.modelConfluenceAny?.[s.model] ?? [])
+  if (any.length && !any.some((k) => (s.confluence as string[]).includes(k))) return `belum ada salah satu konfluensi: ${any.join(' / ')}`
   const minScore = p ? p.minScore : o.bot.minScore
   if (s.score < minScore) return `skor ${s.score} < ${minScore}`
   if (s.status !== 'pending') return 'entry sudah kena sebelum bot sempat pasang limit'
   const age = o.now - knownAt(c, o.entryTf)
   if (age > o.bot.maxSetupAgeMin * 60_000) return `setup sudah ${Math.round(age / 60_000)} menit (maks ${o.bot.maxSetupAgeMin})`
   const bx = s.model === 'M4' && o.smc ? breakerExit(o.smc) : null
-  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' || s.model === 'M6' ? { tpMode: 'trail' } : s.model === 'M7' ? msnrExit() : (bx ?? o.exit ?? { tpMode: 'liquidity' }))
+  const tp = cancelLevel(s, p ? p.plan.exit : s.model === 'M5' || s.model === 'M6' ? { tpMode: 'trail' } : s.model === 'M7' ? msnrExit() : s.model === 'M8' && o.smc ? m8Exit(o.smc) : s.model === 'M9' && o.smc ? m9Exit(o.smc) : (bx ?? o.exit ?? { tpMode: 'liquidity' }))
   if (bull ? c.price >= tp : c.price <= tp) return 'harga sudah sampai TP (lewat TP)'
   if (bull ? c.price <= s.entry : c.price >= s.entry) return 'harga sudah di/lewat entry'
   return null

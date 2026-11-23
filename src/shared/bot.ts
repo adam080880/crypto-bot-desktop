@@ -92,6 +92,8 @@ export interface BotState {
   modelStats: ModelStat[]
   /** Same trades, all models together (null when there are none). */
   statsTotal: TradeStat | null
+  /** Shadow paper models (bot.shadowModels) while the bot is live: their paper trades, same filter (null otherwise). */
+  shadowStats: { modelStats: ModelStat[]; statsTotal: TradeStat | null } | null
   /** Coins with no new entries after repeated SL (bot.slBlacklistCount). */
   blacklist: { symbol: string; losses: number; until: number }[]
   events: BotEvent[]

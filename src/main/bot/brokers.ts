@@ -328,20 +328,24 @@ export class LiveBroker implements Broker {
       await this.client.cancelAll(t.symbol)
       const r = await this.client.realised(t.symbol, (t.filledAt ?? t.createdAt) - 60_000)
       const exit = r.lastPrice
-      const bull = t.direction === 'bullish'
-      // stop fills slip past the SL, so classify by which side of the entry the exit was
-      // a stop already moved to BE / into profit that fills nearer the stop than the TP is 'trail', not 'tp'
-      const stopMoved = bull ? t.sl >= t.entry : t.sl <= t.entry
-      const reason =
-        exit === null
-          ? 'external'
-          : stopMoved && (t.tp === null || Math.abs(exit - t.sl) < Math.abs(exit - t.tp))
-            ? 'trail'
-            : (bull ? exit > t.entry : exit < t.entry)
-              ? 'tp'
-              : 'sl'
-      return { status: 'closed', reason, closedAt: r.lastTime ?? Date.now(), exitPrice: exit, pnl: r.pnl }
+      return { status: 'closed', reason: exitReason(t, exit), closedAt: r.lastTime ?? Date.now(), exitPrice: exit, pnl: r.pnl }
     }
     return null
   }
+}
+
+/**
+ * Why a live position went flat, from where it was closed (the exchange only tells us it is flat).
+ * At / beyond the current stop → 'sl' ('trail' once the stop sat at break-even or better; stop fills slip
+ * past it); at / beyond the TP → 'tp'; anywhere else → 'external' (closed outside the bot, e.g. by hand
+ * on Binance). Before 2026-11-22 every profitable exit was booked as 'tp', which hid those closes:
+ * 29 % of the live trades (LINK 16 Nov: "tp" at 1R with the TP at 5.65R).
+ */
+export function exitReason(t: Pick<BotTrade, 'direction' | 'entry' | 'sl' | 'slInitial' | 'tp'>, exit: number | null): string {
+  if (exit === null) return 'external'
+  const bull = t.direction === 'bullish'
+  const tol = 0.1 * Math.abs(t.entry - t.slInitial)
+  if (bull ? exit <= t.sl + tol : exit >= t.sl - tol) return (bull ? t.sl >= t.entry : t.sl <= t.entry) ? 'trail' : 'sl'
+  if (t.tp !== null && (bull ? exit >= t.tp - tol : exit <= t.tp + tol)) return 'tp'
+  return 'external'
 }

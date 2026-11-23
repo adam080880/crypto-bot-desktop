@@ -11,7 +11,7 @@ import type { Db } from '../db/client'
 import { readSetting, writeSetting } from '../db/settingsRepo'
 import { logger } from '../logger'
 import { BinanceTradeClient, topCrypto, type ExchangeSymbol } from './binanceTrade'
-import { FEES, LiveBroker, PaperBroker, openQty, type Bar, type Broker } from './brokers'
+import { FEES, LiveBroker, PaperBroker, exitReason, openQty, type Bar, type Broker } from './brokers'
 import { slBlacklist } from './blacklist'
 import { fmtR, rAt, targetsText, tpText } from './rText'
 import { accountGate, candidatesOf, claudeGate, directionGate, exitFor, knownAt, planTpFor, setupGate, type Candidate } from './gate'
@@ -89,6 +89,16 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.repo = new BotRepo(db)
     this.market = deps.market ?? new BinanceTradeClient()
     this.paper = new PaperBroker(() => this.paperEquity())
+    // 2026-11-22: closed live trades were booked 'tp' for any profitable exit, also when the position was closed
+    // outside the bot; relabel them once with the price-based rule (reason only, PnL untouched)
+    if (!readSetting(db, 'migr_exit_reason', z.boolean())) {
+      for (const t of this.repo.closedSince('live', 0)) {
+        if (t.exitPrice === null || !['tp', 'sl', 'trail'].includes(t.reason ?? '')) continue
+        const reason = exitReason(t, t.exitPrice)
+        if (reason !== t.reason) this.repo.save({ ...t, reason })
+      }
+      writeSetting(db, 'migr_exit_reason', true)
+    }
   }
 
   // ---------- lifecycle ----------
@@ -246,7 +256,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     if (!t || t.status !== 'cancelled' || t.reason !== 'error') return
     const dir = t.direction === 'bullish' ? 'LONG' : 'SHORT'
     this.repo.save({ ...t, reason: 'retried' })
-    const mode = this.mode()
+    const mode = this.modeFor(t.model)
     const key = `${t.setupId}|${mode}`
     const stillThere = candidatesOf(this.lastRows).some((c) => c.setup.id === t.setupId)
     if (!this.deps.getBot().enabled) this.event('warn', t.symbol, `Retry ${dir}: bot lagi mati, start dulu`)
@@ -306,6 +316,17 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     return this.deps.getBot().live ? 'live' : 'paper'
   }
 
+  /** Coin profile (backtest Meta) for a setup; shadow models run exactly as defined, never through a profile. */
+  private profileFor(symbol: string, model: string): CoinProfile | null {
+    if ((this.deps.getBot().shadowModels as string[]).includes(model)) return null
+    return this.deps.getProfiles?.()[symbol] ?? null
+  }
+
+  /** Shadow paper models (bot.shadowModels) always trade on the paper account, also while the bot is live. */
+  private modeFor(model: string): 'paper' | 'live' {
+    return (this.deps.getBot().shadowModels as string[]).includes(model) ? 'paper' : this.mode()
+  }
+
   private paperEquity(): number {
     const since = readSetting(this.db, PAPER_SINCE, z.number()) ?? 0
     return this.deps.getBot().paperEquity + this.repo.pnlSince('paper', since)
@@ -315,8 +336,8 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     return mode === 'paper' ? this.paper : this.live
   }
 
-  private async equity(): Promise<number> {
-    if (this.mode() === 'paper') return this.paperEquity()
+  private async equity(mode = this.mode()): Promise<number> {
+    if (mode === 'paper') return this.paperEquity()
     if (this.equityCache && Date.now() - this.equityCache.at < 30_000) return this.equityCache.v
     const v = await this.live!.equity()
     this.equityCache = { v, at: Date.now() }
@@ -337,14 +358,14 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.event('skip', symbol, reason)
   }
 
-  private blockedReason(equityDayStart: number | null, pnlToday: number): string | null {
+  private blockedReason(equityDayStart: number | null, pnlToday: number, mode = this.mode()): string | null {
     const bot = this.deps.getBot()
     if (!bot.enabled) return 'bot mati'
     return accountGate({
       killSwitch: this.deps.isKilled(),
       newsWindow: this.deps.newsWindow(),
       newsStrategy: this.deps.getNews().newsStrategyEnabled,
-      activeTrades: this.repo.active().filter((t) => t.mode === this.mode()).length,
+      activeTrades: this.repo.active().filter((t) => t.mode === mode).length,
       risk: this.deps.getRisk(),
       pnlToday,
       equityDayStart
@@ -383,6 +404,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       trades: this.repo.recent(100),
       blacklist: [...this.blacklist(this.mode(), Date.now()).values()],
       ...this.stats(bot.statsSince),
+      shadowStats: this.shadowStats(bot.statsSince),
       events: this.repo.events(200),
       lastError: this.lastError
     }
@@ -392,6 +414,14 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   /** Per-model and total statistics of trades opened since `since`. */
   private stats(since: number): Pick<BotState, 'modelStats' | 'statsTotal'> {
     const ts = this.repo.closedSince(this.mode(), 0).filter((t) => t.createdAt >= since)
+    return { modelStats: modelStats(ts), statsTotal: tradeStats(ts) }
+  }
+
+  /** Shadow paper models while the bot is live (their trades are not in the live statistics). */
+  private shadowStats(since: number): BotState['shadowStats'] {
+    const shadow = this.deps.getBot().shadowModels as string[]
+    if (this.mode() !== 'live' || !shadow.length) return null
+    const ts = this.repo.closedSince('paper', 0).filter((t) => t.createdAt >= since && shadow.includes(t.model))
     return { modelStats: modelStats(ts), statsTotal: tradeStats(ts) }
   }
 
@@ -446,27 +476,25 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     const bot = this.deps.getBot()
     if (!bot.enabled) return
     if (!this.universeAt || Date.now() - this.universeAt > UNIVERSE_MS) await this.refreshUniverse()
-    const mode = this.mode()
-    if (mode === 'live') {
-      const notReady = await this.liveReady()
-      if (notReady) {
-        this.lastError = notReady
-        return
-      }
-    }
+    // live checks only block live entries; shadow paper models keep running
+    const notReady = this.mode() === 'live' ? await this.liveReady() : null
+    if (notReady) this.lastError = notReady
     const smc = this.deps.getSmc()
     const now = Date.now()
     const exit = this.deps.getExit()
     const candidates = candidatesOf(this.lastRows)
     const wantClaude: string[] = []
-    const black = this.blacklist(mode, now)
+    const blackBy = new Map<string, ReturnType<BotService['blacklist']>>()
 
     for (const c of candidates) {
+      const mode = this.modeFor(c.setup.model)
+      if (mode === 'live' && notReady) continue
+      const black = blackBy.get(mode) ?? blackBy.set(mode, this.blacklist(mode, now)).get(mode)!
       const key = `${c.setup.id}|${mode}`
       if (this.repo.hasSetup(c.setup.id, mode)) continue
       const live = this.bars.get(c.symbol)
       const row = live ? { ...c, price: live.last } : c
-      const profile = this.deps.getProfiles?.()[c.symbol] ?? null
+      const profile = this.profileFor(c.symbol, c.setup.model)
       const sg = setupGate(row, { bot, entryTf: smc.entryTimeframe, universe: this.universe, now, exit, profile, smc })
       if (sg) {
         // only log setups that were plausible for the bot (in universe, a model it trades)
@@ -478,14 +506,14 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         this.skip(key, c.symbol, `koin di-blacklist: ${bl.losses}× SL dalam ${bot.slBlacklistHours} jam (buka lagi ${new Date(bl.until).toISOString().slice(0, 16).replace('T', ' ')} UTC)`)
         continue
       }
-      const equity = await this.equity()
+      const equity = await this.equity(mode)
       const pnlToday = this.repo.pnlSince(mode, this.dayStart())
-      const blocked = this.blockedReason(equity - pnlToday, pnlToday)
+      const blocked = this.blockedReason(equity - pnlToday, pnlToday, mode)
       if (blocked) {
         this.skip(key, c.symbol, `setup ${c.direction === 'bullish' ? 'LONG' : 'SHORT'} dilewati: ${blocked}`)
         continue
       }
-      if (this.repo.active().some((t) => t.symbol === c.symbol)) {
+      if (this.repo.active().some((t) => t.symbol === c.symbol && t.mode === mode)) {
         this.skip(key, c.symbol, 'sudah ada order/posisi bot di koin ini')
         continue
       }
@@ -495,7 +523,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         continue
       }
       if (!bot.requireClaude) {
-        await this.enter(row, null, equity)
+        await this.enter(row, null, equity, mode)
         continue
       }
       const a = this.repo.latestAnalysis(c.symbol)
@@ -507,7 +535,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         } else this.skip(key, c.symbol, cg.reason)
         continue
       }
-      await this.enter(row, a!, equity)
+      await this.enter(row, a!, equity, mode)
     }
 
     if (wantClaude.length) {
@@ -527,13 +555,12 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     }
   }
 
-  private async enter(c: Candidate, a: { id: string; confidence: number } | null, equity: number): Promise<void> {
+  private async enter(c: Candidate, a: { id: string; confidence: number } | null, equity: number, mode: 'paper' | 'live'): Promise<void> {
     const bot = this.deps.getBot()
-    const profile = this.deps.getProfiles?.()[c.symbol] ?? null
+    const profile = this.profileFor(c.symbol, c.setup.model)
     const smc = this.deps.getSmc()
     const exit = exitFor(c.setup.model, this.deps.getExit(), profile, smc)
     const risk = this.deps.getRisk()
-    const mode = this.mode()
     const rules = this.rules.get(c.symbol)
     const dirLabel = c.direction === 'bullish' ? 'LONG' : 'SHORT'
     if (!rules) return this.skip(`${c.setup.id}|${mode}`, c.symbol, 'aturan order simbol belum dimuat')
@@ -630,7 +657,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     this.event(
       'order',
       c.symbol,
-      `${mode.toUpperCase()} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} (−1R) · ${tpText(trade)}${targetsText(trade) ? ` · ${targetsText(trade)}` : ''} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}× · margin ${lev.marginUsd.toFixed(2)} · likuidasi ±${lev.liqDistPct.toFixed(1)}%) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${setupPath(c.setup.model, c.setup.poi.kind, c.setup.poi.timeframe, c.setup.child.kind, c.setup.child.timeframe)} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
+      `${mode.toUpperCase()}${mode === 'paper' && this.mode() === 'live' ? ' (shadow)' : ''} ${dirLabel} limit ${plan.entry} · SL ${plan.sl} (−1R) · ${tpText(trade)}${targetsText(trade) ? ` · ${targetsText(trade)}` : ''} · qty ${plan.qty} (${plan.notional.toFixed(2)} USDT, ${plan.leverage}× · margin ${lev.marginUsd.toFixed(2)} · likuidasi ±${lev.liqDistPct.toFixed(1)}%) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[c.setup.model]} · ${setupPath(c.setup.model, c.setup.poi.kind, c.setup.poi.timeframe, c.setup.child.kind, c.setup.child.timeframe)} · skor ${c.setup.score}${profile ? ` · profil ${profile.plan.label}` : ''}${a ? ` · Claude ${a.confidence}` : ''}`
     )
     this.updateStreams()
   }

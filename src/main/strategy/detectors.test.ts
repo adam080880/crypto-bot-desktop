@@ -151,6 +151,34 @@ describe('OCL (§6)', () => {
     expect(analyzeSmc(c, '1d', cfg()).ocls.filter((o) => o.kind === 'OCL').length).toBeGreaterThan(0)
   })
 
+  it('an OCL that breaks keeps its plain phase until the break (1d: both are emitted)', () => {
+    const c = bars([
+      [105, 106, 99, 100], // 0 red OCL @100
+      [100, 101, 97, 99], // 1 red
+      [99, 100.5, 98, 99.5], // 2 touches the plain bearish OCL
+      [99.5, 106, 99.2, 105.5], // 3 green closes above 105 → OCL Break Buy @100
+      [105.5, 108.2, 105.3, 108]
+    ])
+    const ocls = analyzeSmc(c, '1d', cfg()).ocls.filter((x) => x.t === at(0))
+    expect(ocls).toHaveLength(2)
+    expect(ocls.find((o) => o.kind === 'OCL')).toMatchObject({ direction: 'bearish', level: 100, hitT: at(2), invalidT: at(3), breakT: null })
+    expect(ocls.find((o) => o.kind === 'OCL_BREAK')).toMatchObject({ direction: 'bullish', level: 100, breakT: at(3), hitT: null, invalidT: null })
+  })
+
+  it('does not repaint: a plain OCL seen on a prefix is still there (same direction) on the full history', () => {
+    const c = bars([
+      [105, 106, 99, 100],
+      [100, 101, 97, 99],
+      [99, 100.5, 98, 99.5],
+      [99.5, 106, 99.2, 105.5], // later break
+      [105.5, 108.2, 105.3, 108]
+    ])
+    const before = analyzeSmc(c.slice(0, 3), '1d', cfg()).ocls.find((x) => x.t === at(0) && x.kind === 'OCL')!
+    const after = analyzeSmc(c, '1d', cfg()).ocls.find((x) => x.t === at(0) && x.kind === 'OCL')!
+    expect(before).toMatchObject({ direction: 'bearish', invalidT: null })
+    expect(after).toMatchObject({ direction: before.direction, level: before.level, hitT: before.hitT })
+  })
+
   it('needs the second candle to have the same colour (no body-size rule)', () => {
     const c = bars([
       [105, 106, 99, 100],

@@ -185,6 +185,52 @@ export const smcConfigSchema = z.object({
   msnrMaxAgeDays: z.number().min(1).max(90).default(20),
   /** Pending limit expires after N entry-TF candles (96 × 15m = 24h). */
   msnrExpiryCandles: z.number().int().min(1).max(1000).default(96),
+  /**
+   * M8 HTF POI with the trend (POI lab 2026-11-22, docs/entry-v2.md §21; 2.25M first touches, 300 coins):
+   * first touch of an m8PoiTimeframes POI of the m8Kinds, only when BTC 4h and the coin's 1d trend point the
+   * same way → limit at the POI line, SL beyond the POI extreme (+0.1 × ATR of the POI TF), at least m8MinSlPct,
+   * fixed TP m8TpR. Armed once an entry-TF close is within m8NearR × risk of the line (re-armed after expiry while
+   * the POI is untouched). Lab: +0,08R (IS +0,05 / OOS +0,12), 5/7 months positive; many combos tested → paper first.
+   */
+  m8PoiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['4h', '1d']),
+  m8Kinds: z.array(z.enum(['OB', 'RBS', 'SBR', 'QM', 'OCL', 'OCL_BREAK'])).min(1).default(['RBS', 'SBR', 'OCL_BREAK']),
+  m8MinSlPct: z.number().min(0).max(20).default(1),
+  m8TpR: z.number().min(0.5).max(10).default(3), // lab 2026-11-23: 3R +0,16R (IS +0,10 / OOS +0,24) vs 2R +0,12R
+  m8NearR: z.number().min(0.1).max(10).default(1),
+  m8ExpiryCandles: z.number().int().min(1).max(1000).default(32),
+  m8RequireBtc4h: z.boolean().default(true),
+  m8RequireTrend1d: z.boolean().default(true),
+  /**
+   * Inducement (docs/smc-rules.md §11, own research 2026-11-23): bait = same-direction POI without origin in front of a
+   * POI, touched within baitDays; strict IDM, extreme and decisional POI windows in ATR of the POI's timeframe.
+   */
+  baitDays: z.number().min(0.5).max(60).default(7),
+  idmWindowAtr: z.number().min(0.5).max(50).default(6),
+  /**
+   * M9 bait → POI behind (user 2026-11-23): once a bait in front of an m9PoiTimeframes POI of the m9Kinds was touched
+   * (≤ baitDays ago) and the POI is still untouched → limit at its line, SL like M8 (beyond the POI extreme), fixed TP
+   * m9TpR (0 = no TP: the tiered exit + order flow + trailing of `exit`, as the bot's SMC models without a TP). Armed at
+   * an entry-TF close within m9NearR × risk of the line, re-armed after expiry while the bait is fresh.
+   * Lab 2026-11-23 (100 coins): TP 2R ±0R (OOS −0,10); trailing +0,09R; + cleanApproach + trailing +0,23R (IS +0,26 / OOS +0,19).
+   * B is an order block (user 2026-11-23: "bukan RBS/SBR, kayak order block"): OB + QM; with cleanApproach + trailing
+   * OB +0,17R (IS +0,35 / OOS −0,03), QM +0,32R (+0,31/+0,33), RBS (dropped) +0,24R.
+   */
+  /**
+   * Confirmation tags (docs/smc-rules.md §11, user 2026-11-23): CISD / inverse FVG on the entry TF since the POI hit,
+   * at most confirmLookback entry candles before the setup is known; SMT on 1h: one of coin / reference (BTC, or ETH
+   * for BTC) took the smtRangeH-hour extreme in the last smtWindowH hours, the other did not.
+   */
+  confirmLookback: z.number().int().min(1).max(200).default(16),
+  smtWindowH: z.number().int().min(1).max(48).default(6),
+  smtRangeH: z.number().int().min(4).max(240).default(24),
+  m9PoiTimeframes: z.array(z.enum(['1h', '4h', '1d'])).min(1).default(['1h', '4h', '1d']),
+  m9Kinds: z.array(z.enum(['OB', 'RBS', 'SBR', 'QM', 'OCL', 'OCL_BREAK'])).min(1).default(['OB', 'QM']),
+  m9MinSlPct: z.number().min(0).max(20).default(0),
+  m9TpR: z.number().min(0).max(10).default(0),
+  m9NearR: z.number().min(0.1).max(10).default(1),
+  m9ExpiryCandles: z.number().int().min(1).max(1000).default(32),
+  m9RequireBtc4h: z.boolean().default(false),
+  m9RequireTrend1d: z.boolean().default(false),
 
   // ---- order flow from futures positioning (open interest / funding), docs/entry-v2.md §10 ----
   /** oiFlush: open interest down at least this % over the last 4h. */
@@ -210,6 +256,8 @@ export const smcConfigSchema = z.object({
   btcDomTimeframe: z.enum(['1h', '4h']).default('4h'),
   /** slLiqClear: look for unswept swing liquidity up to this many R beyond the SL. */
   slLiqZoneR: z.number().min(0.1).max(5).default(1),
+  /** liqInPoi: at least this many unswept stop-side swings (any TF) between entry and SL. */
+  liqInPoiMin: z.number().int().min(1).max(50).default(5),
   /** poiStack: another timeframe's POI counts when its level is within this % of the parent POI's level. */
   poiStackPct: z.number().min(0.01).max(5).default(0.3),
   /** Timeframes on which M0 may use an OCL Break as its POI. 2026-11-18 only 1w; user 2026-11-20: the HTF
@@ -393,14 +441,40 @@ export type ModelConfluence = z.infer<typeof modelConfluenceSchema>
  * docs/entry-v2.md §18). M1/M2b: nothing positive, kept at the old SMC list. M6: radar = the signal.
  */
 export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
-  M0: ['prevOpposite', 'slLiqClear'], // +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
-  M1: ['fvg', 'trendParent', 'pdZone'],
+  // + liquidity lab 2026-11-22 (docs/entry-v2.md §22, 100 coins, app engine, bot exits): M0 POI 4h/1d + cleanApproach +0,32R
+  // (IS +0,26 / OOS +0,40) vs +0,24R; M1 + liqHtfBehind +0,07R vs −0,07R; M7 + liqHtfBehind +0,13R vs +0,04R (IS and OOS)
+  // inducement lab 2026-11-23 (after the M0 look-ahead fix, bot exit without TP): M0 POI 4h/1d + baitTaken +0,10R (6/7 months)
+  // vs +0,07R; M4 fvg + slLiqClear + cleanApproach on the trailing exit +0,44R (IS +0,42 / OOS +0,47, 7/7 months)
+  M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken'], // 2026-11-19: +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
+  M1: ['fvg', 'trendParent', 'pdZone', 'liqHtfBehind'],
   M2a: ['trendParent'], // n 39 only; pdZone hurts M2a
   M2b: ['fvg', 'trendParent', 'pdZone'],
-  M4: ['fvg', 'oiConfirm', 'slLiqClear'], // 300 koin: +0,27R (IS +0,27 / OOS +0,28) vs −0,04R; fvg+btc1h+slLiqClear +0,17R
+  M4: ['fvg', 'slLiqClear', 'cleanApproach'], // 2026-11-19 (TP 1R): fvg+oiConfirm+slLiqClear +0,27R; 2026-11-23 trailing exit, see above
   M5: ['btc1h', 'anomaly'], // +0,23R (IS +0,24 / OOS +0,22); old oiConfirm+oiHold: OOS −0,23R
   M6: [],
-  M7: [] // MSNR: the level + storyline is the signal
+  M7: ['liqHtfBehind'], // MSNR: the level + storyline is the signal
+  M8: [], // the BTC 4h / 1d trend filters are part of the model; shadow forward test logs the liquidity tags without requiring them
+  M9: ['cleanApproach'] // lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
+}
+
+/**
+ * OR lists per model (at least one tag, on top of the required list); empty = no OR condition. OR lab 2026-11-23
+ * (100 coins, app engine, bot exits, docs/entry-v2.md §24), avg R [IS / OOS] vs the required list alone:
+ * M0 +0,21R [+0,12 / +0,31] vs +0,10R; M4 +0,39R [+0,43 / +0,36] 7/7 months vs +0,29R; M5 +0,22R [+0,24 / +0,19] vs +0,15R;
+ * M8 anomaly +0,40R [+0,43 / +0,37] vs +0,16R; M9 +0,27R [+0,32 / +0,19] vs +0,19R [+0,36 / −0,02] (picked with OOS → optimistic).
+ * M1/M2a/M2b/M7: nothing held up out of sample.
+ */
+export const RECOMMENDED_MODEL_CONFLUENCE_ANY: ModelConfluence = {
+  M0: ['bbMomentum', 'ifvg', 'smt'],
+  M1: [],
+  M2a: [],
+  M2b: [],
+  M4: ['anomaly', 'manipulation', 'smt'],
+  M5: ['btc4h', 'smt'],
+  M6: [],
+  M7: [],
+  M8: ['anomaly'],
+  M9: ['bbMomentum', 'liqHtfBehind']
 }
 
 export const botConfigSchema = z.object({
@@ -416,6 +490,16 @@ export const botConfigSchema = z.object({
    * cannot serve all. Replaces `requireConfluence` (M0–M4) + `trendRequireConfluence` (M5), migrated in AppState.
    */
   modelConfluence: modelConfluenceSchema.default(RECOMMENDED_MODEL_CONFLUENCE),
+  /**
+   * OR list per model (user 2026-11-23: "jangan wajib semua, tambahin konsep or"): when not empty the setup needs at
+   * least ONE of these tags, on top of every tag of modelConfluence.
+   */
+  modelConfluenceAny: modelConfluenceSchema.default(RECOMMENDED_MODEL_CONFLUENCE_ANY),
+  /**
+   * Shadow paper (user 2026-11-22): setups of these models are always traded on the PAPER account, also while the
+   * bot is live (never a live order), and do not use live slots / the live daily loss stop. Forward test of M8.
+   */
+  shadowModels: z.array(z.enum(ENTRY_MODELS)).default(['M8', 'M9']),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),
@@ -516,6 +600,16 @@ export const defaultAppConfig: AppConfig = appConfigSchema.parse({})
 /** Exit of M6 (radar pump): no TP (the user takes profit by hand), no break-even, trailing stop only. */
 export function m6Exit(smc: Pick<SmcConfig, 'm6TrailGapR' | 'm6TrailStepR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'trailGapR' | 'orderFlowHold'> {
   return { tpMode: 'trail', tpR: 50, ladder: [], trailStepR: smc.m6TrailStepR, trailGapR: smc.m6TrailGapR, orderFlowHold: false }
+}
+
+/** Exit of M8 (HTF POI with the trend): fixed TP, no ladder / break-even / trailing — as in the POI lab. */
+export function m8Exit(smc: Pick<SmcConfig, 'm8TpR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold' | 'tightSlPct'> {
+  return { tpMode: 'fixedR', tpR: smc.m8TpR, ladder: [], trailStepR: 0, orderFlowHold: false, tightSlPct: 0 }
+}
+
+/** Exit of M9 (bait → POI behind): m9TpR > 0 = fixed TP without ladder/BE/trailing; 0 = the global tiered exit without a TP. */
+export function m9Exit(smc: Pick<SmcConfig, 'm9TpR'>): Pick<ExitConfig, 'tpMode' | 'tpR'> & Partial<Pick<ExitConfig, 'ladder' | 'trailStepR' | 'orderFlowHold' | 'tightSlPct'>> {
+  return smc.m9TpR > 0 ? { tpMode: 'fixedR', tpR: smc.m9TpR, ladder: [], trailStepR: 0, orderFlowHold: false, tightSlPct: 0 } : { tpMode: 'trail', tpR: 20 }
 }
 
 /** Exit of M7 (MSNR): TP at the next fresh level (setup.tpLiquidity), no ladder, no trailing — as in the lab. */

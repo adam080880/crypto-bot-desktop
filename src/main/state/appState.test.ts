@@ -27,10 +27,52 @@ describe('per-model confluence migration', () => {
     const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
     writeSetting(db, 'app_config', { bot: { requireConfluence: ['fvg', 'trendParent', 'pdZone'], trendRequireConfluence: ['oiConfirm'] } })
     writeSetting(db, 'migr_bot_pdzone', true)
+    writeSetting(db, 'migr_liq_tags', true)
+    writeSetting(db, 'migr_lab_1123', true)
     const state = new AppState(db, { dbPath: ':memory:', version: 't' })
     expect(state.getConfig().bot.modelConfluence).toMatchObject({ M0: ['fvg', 'trendParent', 'pdZone'], M5: ['oiConfirm'], M6: [] })
     state.updateConfig(parseConfigPatch({ bot: { modelConfluence: { ...state.getConfig().bot.modelConfluence, M0: ['prevOpposite'] } } }))
     expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().bot.modelConfluence.M0).toEqual(['prevOpposite'])
+  })
+})
+
+describe('liquidity tag migration (2026-11-22)', () => {
+  it('adds cleanApproach to M0 and liqHtfBehind to M1/M7 once, keeping the rest', () => {
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    writeSetting(db, 'migr_bot_model_conf', true)
+    writeSetting(db, 'migr_lab_1123', true)
+    writeSetting(db, 'app_config', { bot: { modelConfluence: { M0: ['prevOpposite', 'slLiqClear'], M1: ['fvg'], M4: ['fvg'], M7: [] } } })
+    const state = new AppState(db, { dbPath: ':memory:', version: 't' })
+    expect(state.getConfig().bot.modelConfluence).toMatchObject({ M0: ['prevOpposite', 'slLiqClear', 'cleanApproach'], M1: ['fvg', 'liqHtfBehind'], M4: ['fvg'], M7: ['liqHtfBehind'] })
+    state.updateConfig(parseConfigPatch({ bot: { modelConfluence: { ...state.getConfig().bot.modelConfluence, M0: ['prevOpposite'] } } }))
+    expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().bot.modelConfluence.M0).toEqual(['prevOpposite'])
+  })
+})
+
+describe('inducement/exit lab migration (2026-11-23)', () => {
+  it('switches the SMC exit to trailing, M4 to that exit, M8 TP 3R, adds the lab tags and M9 shadow — once', () => {
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    writeSetting(db, 'migr_bot_model_conf', true)
+    writeSetting(db, 'migr_liq_tags', true)
+    writeSetting(db, 'app_config', {
+      exit: { tpMode: 'liquidity' },
+      smc: { breakerTpR: 1, m8TpR: 2 },
+      bot: { shadowModels: ['M8'], modelConfluence: { M0: ['prevOpposite', 'slLiqClear', 'cleanApproach'], M4: ['fvg', 'oiConfirm', 'slLiqClear'], M2a: ['trendParent'] } }
+    })
+    const state = new AppState(db, { dbPath: ':memory:', version: 't' })
+    const c = state.getConfig()
+    expect(c.exit.tpMode).toBe('trail')
+    expect(c.smc).toMatchObject({ breakerTpR: 0, m8TpR: 3 })
+    expect(c.bot.shadowModels).toEqual(['M8', 'M9'])
+    expect(c.bot.modelConfluence).toMatchObject({
+      M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken'],
+      M2a: ['trendParent'],
+      M4: ['fvg', 'slLiqClear', 'cleanApproach'],
+      M9: ['cleanApproach']
+    })
+    // a later change in Settings sticks
+    state.updateConfig(parseConfigPatch({ exit: { tpMode: 'liquidity' } }))
+    expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().exit.tpMode).toBe('liquidity')
   })
 })
 

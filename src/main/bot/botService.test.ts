@@ -15,7 +15,7 @@ const SETUP = (now: number): ScreenerSetup => ({
   tpLiquidity: 1.05,
   rr: 5,
   score: 5,
-  confluence: ['fvg', 'trendParent', 'pdZone'],
+  confluence: ['fvg', 'trendParent', 'pdZone', 'liqHtfBehind'],
   status: 'pending',
   createdT: now - 20 * 60_000,
   poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },
@@ -28,7 +28,7 @@ function setup(overrides: Partial<BotDeps> = {}, botCfg: object = { requireClaud
   const claudeCalls: string[][] = []
   let killed = false
   const deps: BotDeps = {
-    getBot: () => botConfigSchema.parse({ enabled: true, paperEquity: 100, ...botCfg }),
+    getBot: () => botConfigSchema.parse({ enabled: true, paperEquity: 100, modelConfluenceAny: {}, ...botCfg }),
     getExit: () => exitConfigSchema.parse({ orderFlowHold: false }),
     getRisk: () => riskConfigSchema.parse({}),
     getSmc: () => smcConfigSchema.parse({}),
@@ -187,6 +187,24 @@ describe('BotService (paper, end to end)', () => {
     // retrying a non-error row does nothing
     await bot.retryById(first)
     expect(db.$client.prepare(`SELECT count(*) FROM bot_trades`).pluck().get()).toBe(2)
+  })
+
+  it('shadow paper: an M8 setup goes to the paper account while the bot is live (never a live order)', async () => {
+    const { bot, row } = setup({}, { requireClaude: false, live: true })
+    const m8: ScreenerSetup = { ...SETUP(Date.now()), id: 'set-m8', model: 'M8', sl: 0.98, tp: 1.04, tpLiquidity: null, rr: 2, confluence: [], poi: { kind: 'RBS', timeframe: '4h', origin: null }, child: { kind: 'LEVEL', timeframe: '15m' } }
+    const states: import('@shared/bot').BotState[] = []
+    bot.on('state', (s) => states.push(s))
+    // live has no API key → live setups (the M1 on BBB) are not placed, the shadow M8 still is
+    await bot.onScreener([
+      { ...row, setup: m8, setups: [m8] },
+      { ...row, symbol: 'BBBUSDT', setup: { ...row.setup!, id: 'set-live' }, setups: [{ ...row.setup!, id: 'set-live' }] }
+    ])
+    await bot.publish()
+    const st = states.at(-1)!
+    expect(st.trades).toHaveLength(1)
+    expect(st.trades[0]).toMatchObject({ mode: 'paper', model: 'M8', symbol: 'AAAUSDT', status: 'pending', tp: 1.06 }) // M8 TP 3R (smc.m8TpR)
+    expect(st.shadowStats).not.toBeNull()
+    expect(st.events.map((e) => e.message).join('\n')).toMatch(/PAPER \(shadow\) LONG/)
   })
 
   it('tiered exit: 1R → BE incl. fee, 3R → half off + SL to 1R, rest stopped in profit', async () => {

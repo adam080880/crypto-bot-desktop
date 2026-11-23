@@ -185,8 +185,13 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *      24h box → limit at that close, SL k × ATR, no TP (user takes profit by hand), trailing stop.
  *  M7  MSNR (Malaysian SnR, not from the course): fresh A/V level of the 4h closes in the daily storyline direction →
  *      limit at the level when price comes near, SL k × ATR beyond it, TP at the next fresh opposite level.
+ *  M8  HTF POI with the trend (POI lab 2026-11-22): first touch of a 4h/1d RBS / SBR / OCL Break POI, only with
+ *      BTC 4h and the coin's 1d trend on its side → limit at the POI line, SL beyond the POI, fixed TP 2R.
+ *      Shadow paper by default (bot.shadowModels): never sends a live order.
+ *  M9  bait → POI behind (user 2026-11-23, docs/smc-rules.md §11): a same-direction POI without origin in front of a
+ *      1h/4h/1d POI got touched (the bait) → limit at the POI behind it, SL beyond it, fixed TP. Shadow paper by default.
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
@@ -196,7 +201,9 @@ export const MODEL_LABEL: Record<EntryModel, string> = {
   M4: 'M4 breaker',
   M5: 'M5 trend breakout 4h',
   M6: 'M6 radar pump (TP manual)',
-  M7: 'M7 MSNR level A/V fresh'
+  M7: 'M7 MSNR level A/V fresh',
+  M8: 'M8 POI HTF searah trend',
+  M9: 'M9 umpan → POI di belakangnya'
 }
 
 export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT' | 'LEVEL'
@@ -249,6 +256,30 @@ export type Confluence =
   /** The parent POI lines up with an active same-direction POI of another timeframe (≥ 1h) within
    *  smc.poiStackPct at the hit (user 2026-11-18: "pastiin POI ada di berbagai TF"). Filter tag, no score. */
   | 'poiStack'
+  /** Liquidity lab 2026-11-22 (docs/entry-v2.md §22): an unswept 4h/1d swing on the stop side within 1R beyond the SL
+   *  (price sits on HTF structure). Filter tag, no score. */
+  | 'liqHtfBehind'
+  /** At least smc.liqInPoiMin unswept swings (any TF) on the stop side between entry and SL. Filter tag, no score. */
+  | 'liqInPoi'
+  /** Price reached the entry taking at most one swing on the way (last 24h, within 3R in front). Filter tag, no score. */
+  | 'cleanApproach'
+  /** Inducement (docs/smc-rules.md §11): a same-direction POI without origin in front of the parent POI was touched
+   *  on the way (≤ smc.baitDays). Filter tag, no score. */
+  | 'baitTaken'
+  /** Strict IDM: the first internal pullback (ltfPivot) of the leg that left the parent POI was swept. Filter tag. */
+  | 'idmSwept'
+  /** No other active same-direction POI (≥ 1h) behind the parent POI within smc.idmWindowAtr ATR. Filter tag. */
+  | 'extremePoi'
+  /** Strict IDM swept and no active same-direction POI (≥ 1h) between the parent POI and the IDM. Filter tag. */
+  | 'decisionalPoi'
+  /** CISD (docs/smc-rules.md §11): an entry-TF close beyond the open of the last opposite run, after the POI hit
+   *  (≤ smc.confirmLookback candles before the setup is known). Filter tag. */
+  | 'cisd'
+  /** SMT divergence on 1h vs BTC (BTC vs ETH): in the last smc.smtWindowH hours only one of the two took the
+   *  smc.smtRangeH-hour low (long) / high (short). Filter tag. */
+  | 'smt'
+  /** Inverse FVG: an opposite entry-TF FVG closed through in the setup direction, after the POI hit. Filter tag. */
+  | 'ifvg'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -275,7 +306,17 @@ export const REQUIRABLE_CONFLUENCES = [
   'btcDom',
   'poiLiq',
   'slLiqClear',
-  'poiStack'
+  'poiStack',
+  'liqHtfBehind',
+  'liqInPoi',
+  'cleanApproach',
+  'baitTaken',
+  'idmSwept',
+  'extremePoi',
+  'decisionalPoi',
+  'cisd',
+  'smt',
+  'ifvg'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -303,7 +344,17 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'btcDom', label: 'BTC dominance mendukung (alt long saat BTCDOM turun)' },
   { key: 'poiLiq', label: 'M0: liquidity wick POI belum diambil' },
   { key: 'slLiqClear', label: 'tidak ada liquidity di belakang SL' },
-  { key: 'poiStack', label: 'POI numpuk dengan POI TF lain (≥ 1h)' }
+  { key: 'poiStack', label: 'POI numpuk dengan POI TF lain (≥ 1h)' },
+  { key: 'liqHtfBehind', label: 'liquidity 4h/1d ≤ 1R di balik SL' },
+  { key: 'liqInPoi', label: 'banyak liquidity di antara entry dan SL' },
+  { key: 'cleanApproach', label: 'harga datang tanpa nyapu liquidity (≤ 1)' },
+  { key: 'baitTaken', label: 'umpan diambil: POI tanpa origin di depan POI sudah kena' },
+  { key: 'idmSwept', label: 'IDM ketat (pullback internal pertama) sudah disapu' },
+  { key: 'extremePoi', label: 'extreme POI (tidak ada POI searah di belakangnya)' },
+  { key: 'decisionalPoi', label: 'decisional POI (POI terdekat di bawah/atas IDM)' },
+  { key: 'cisd', label: 'CISD: close tembus open run lawan setelah POI kena' },
+  { key: 'smt', label: 'SMT divergence 1h vs BTC (BTC vs ETH)' },
+  { key: 'ifvg', label: 'inverse FVG searah setelah POI kena' }
 ]
 
 /** A candidate entry (never an order by itself). */

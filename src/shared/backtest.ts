@@ -120,6 +120,8 @@ export interface CoinProfile {
   /** Parent POIs allowed ("OB|4h"); empty = any. */
   pois: string[]
   requireConfluence: Confluence[]
+  /** At least one of these (OR); empty/missing = no OR condition. */
+  anyConfluence?: Confluence[]
   minScore: number
   plan: BtPlan
   /** Stats at the time it was saved (for display). */
@@ -135,6 +137,7 @@ export const coinProfileSchema = z
     models: z.array(z.enum(ENTRY_MODELS)).min(1),
     pois: z.array(z.string().regex(/^[A-Z_]{2,10}\|(1m|5m|15m|1h|4h|1d|1w)$/)).max(50),
     requireConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).max(REQUIRABLE_CONFLUENCES.length),
+    anyConfluence: z.array(z.enum(REQUIRABLE_CONFLUENCES)).max(REQUIRABLE_CONFLUENCES.length).optional(),
     minScore: z.number().int().min(0).max(30),
     plan: z.object({
       key: z.string().max(30),

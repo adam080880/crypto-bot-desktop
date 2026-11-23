@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, ShieldCheck, Trash2 } from 'lucide-react'
-import { RECOMMENDED_MODEL_CONFLUENCE, type AppConfig, type DataConfig, type NotifyConfig, type RadarConfig, type RiskConfig } from '@shared/config'
+import { RECOMMENDED_MODEL_CONFLUENCE, RECOMMENDED_MODEL_CONFLUENCE_ANY, type AppConfig, type DataConfig, type NotifyConfig, type RadarConfig, type RiskConfig } from '@shared/config'
 import type { SecretName, SecretStatus } from '@shared/ipc'
 import { CONFLUENCE_CHOICES, ENTRY_MODELS, MODEL_LABEL } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -437,43 +437,51 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
           </div>
           <div className="col-span-2 space-y-1">
             <div className="flex items-center justify-between gap-2">
-              <Label>Konfluensi wajib per model (semua yang dicentang harus ada; kosong = bebas). Profil koin punya list sendiri</Label>
+              <Label>Konfluensi per model: "wajib" = semua harus ada, "salah satu" = minimal satu ada (OR); kosong = bebas. Profil koin punya list sendiri</Label>
               <Button
                 size="sm"
                 variant="outline"
-                title="Hasil lab 19 Nov 2026 (60 koin, 6 bulan, positif di IS dan OOS): M0 prevOpposite+slLiqClear, M4 FVG+BTC 1h+slLiqClear, M5 BTC 1h+anomaly"
-                onClick={() => setB({ ...b, modelConfluence: structuredClone(RECOMMENDED_MODEL_CONFLUENCE) })}
+                title="Hasil lab 19, 22 & 23 Nov 2026 (positif di IS dan OOS): M0 prevOpposite+slLiqClear+cleanApproach+baitTaken, M1 +liqHtfBehind, M4 FVG+slLiqClear+cleanApproach (exit trailing), M5 BTC 1h+anomaly, M7 liqHtfBehind, M8 tanpa syarat (shadow), M9 cleanApproach (shadow)"
+                onClick={() => setB({ ...b, modelConfluence: structuredClone(RECOMMENDED_MODEL_CONFLUENCE), modelConfluenceAny: structuredClone(RECOMMENDED_MODEL_CONFLUENCE_ANY) })}
               >
                 Isi rekomendasi lab
               </Button>
             </div>
             {ENTRY_MODELS.map((m) => {
               const list = b.modelConfluence[m]
+              const anyList = b.modelConfluenceAny[m]
               const name = (k: string): string => CONFLUENCE_CHOICES.find((c) => c.key === k)?.label ?? k
+              const summary = [list.length ? list.map(name).join(' + ') : '', anyList.length ? `salah satu: ${anyList.map(name).join(' / ')}` : ''].filter(Boolean).join(' · ')
               return (
                 <details key={m} className={`rounded border px-2 py-1 text-xs ${b.models.includes(m) ? '' : 'opacity-50'}`}>
                   <summary className="cursor-pointer">
                     <span className="font-medium">{MODEL_LABEL[m]}</span>
-                    <span className="text-muted-foreground"> · {list.length ? list.map(name).join(' + ') : 'bebas'}</span>
+                    <span className="text-muted-foreground"> · {summary || 'bebas'}</span>
                     {b.models.includes(m) ? '' : <span className="text-muted-foreground"> (model mati)</span>}
                   </summary>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
-                    {CONFLUENCE_CHOICES.map(({ key, label }) => {
-                      const k = key as (typeof list)[number]
-                      return (
-                        <label key={key} className="flex items-center gap-1">
-                          <input
-                            type="checkbox"
-                            checked={list.includes(k)}
-                            onChange={(e) =>
-                              setB({ ...b, modelConfluence: { ...b.modelConfluence, [m]: e.target.checked ? [...list, k] : list.filter((x) => x !== k) } })
-                            }
-                          />
-                          {label}
-                        </label>
-                      )
-                    })}
-                  </div>
+                  {(['modelConfluence', 'modelConfluenceAny'] as const).map((field) => {
+                    const cur = b[field][m]
+                    return (
+                      <div key={field} className="pt-1">
+                        <div className="font-medium text-muted-foreground">{field === 'modelConfluence' ? 'Wajib (semua harus ada)' : 'Salah satu (OR, minimal satu ada)'}</div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {CONFLUENCE_CHOICES.map(({ key, label }) => {
+                            const k = key as (typeof cur)[number]
+                            return (
+                              <label key={key} className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={cur.includes(k)}
+                                  onChange={(e) => setB({ ...b, [field]: { ...b[field], [m]: e.target.checked ? [...cur, k] : cur.filter((x) => x !== k) } })}
+                                />
+                                {label}
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </details>
               )
             })}

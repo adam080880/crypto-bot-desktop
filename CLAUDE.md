@@ -100,7 +100,44 @@ dites ke exchange beneran.
   Lab pertama (513 koin, 6 bln, micin 0,3–50 jt/hari, pump ≥ 15%/4j): volume/jumlah trade naikkan peluang gerak besar ±5×, tapi pump
   dan dump sama-sama (rasio tetap ±2:1). Taker buy/CVD tinggi tidak menaikkan peluang pump, cuma sedikit menurunkan dump. Koin sepi: pump
   0,16%/jam, dengan filter terbaik 0,28%. Belum ada prekursor yang bisa dipakai.
+- **Fix look-ahead OCL** (2026-11-22, `strategy/ocl.ts`): OCL yang nanti jebol dulu diganti label jadi OCL Break di seluruh
+  histori, jadi di backtest "OCL biasa" cuma berisi yang tidak pernah jebol. Sekarang keluar 2 entri: OCL biasa (invalid di
+  candle break) + OCL Break. Live tidak kena. Di lab, OCL biasa 1d turun dari +0,15R jadi −0,05R setelah fix. Lab lama yang
+  memakai OCL biasa sebagai POI (mis. "POI 1d +0,31R" 2026-11-18) kemungkinan ikut kegelembungkan.
+- **Lab 2026-11-21/22 (semua di scratchpad, bukan repo):** (1) sweep equal low/high 1m → reclaim: ±0R sebelum fee, yang
+  ngaruh cuma kedalaman sweep (SL lebar = fee kecil). (2) "M8" sweep LTF di dalam POI 1d/1w fresh (100 koin, 431 rb event):
+  sama persis dengan sweep di luar POI, tidak ada edge. (3) ML LightGBM dari fitur mentah (15m market dan 1h limit,
+  100–300 koin, walk-forward): model menghafal arah pasar per bulan (fitur BTC), tidak konsisten positif. (4) Dataset POI
+  (2,25 jt sentuhan pertama, 300 koin, limit di garis POI, SL ujung POI, TP 2R): 15m rugi semua, QM dan OB paling jelek,
+  makin besar TF makin bagus. Yang konsisten: searah BTC 4h, trend 1d searah, origin tap POI HTF. Kombinasi terbaik
+  (POI 4h/1d RBS/SBR/OCL Break + BTC 4h + trend 1d searah + SL ≥ 1%): +0,08R, IS +0,05 / OOS +0,12, 5/7 bulan positif,
+  tapi puluhan kombinasi dites dan holdout ikut terpakai → perlu forward test paper.
+- **M8 POI HTF searah trend + shadow paper** (2026-11-22, `docs/entry-v2.md §21`): `modelM8` (POI 4h/1d RBS/SBR/OCL Break
+  pertama kali disentuh, BTC 4h + trend 1d searah, SL ≥ 1 %, TP 2R). `bot.shadowModels` (default M8) = selalu paper walaupun bot
+  live, tidak pernah order live, cek 1 posisi/koin dan slot dipisah per mode, profil koin tidak dipakai. App 100 koin: +0,09R.
+- **Tag liquidity** (2026-11-22, `docs/entry-v2.md §22`): `liqHtfBehind` / `liqInPoi` / `cleanApproach` (`liquidityAround`). ML
+  sebagai gerbang entry tidak stabil, jadi dibuat tag biasa. Wajib (migrasi sekali `migr_liq_tags`): M0 + `cleanApproach`,
+  M1/M7 + `liqHtfBehind`. Efeknya beda per model (`cleanApproach` merusak M1/M2). M0 POI 4h/1d di backtest +0,24R (7/7 bulan),
+  padahal live −0,06R/trade (lihat poin berikut).
+- **Live vs backtest M0 (2026-11-22):** (1) **Look-ahead di backtest:** M0 dan `tappedHtf` membandingkan `poi.invalidT` (waktu
+  BUKA candle pembatal) dengan waktu OB/candle, jadi setup yang POI-nya jebol oleh candle HTF yang masih berjalan dibuang (padahal
+  live tidak tahu). Fix: pakai `closeTime(invalidT)`, test `m0.test.ts`. Efek: **M0 POI 4h/1d +0,25R → +0,02R** (7/7 → 3/7 bulan),
+  M0 + filter bot +0,01R, + `cleanApproach` +0,03R. Semua angka M0 lama (lab 11-18 "4h+1d +0,12R", "POI 1d +0,37R") kegelembungkan.
+  M7/M8/M4 tidak kena. (2) **Label exit:** posisi yang flat di harga selain SL/TP dulu dicatat 'tp'/'sl'; sekarang `exitReason`
+  (`brokers.ts`) → `external`, data lama di-relabel sekali (`migr_exit_reason`): 25 trade live `external`. (3) Live memakai jendela
+  1000 candle (`POI_LOOKBACK`), backtest semua candle: beberapa setup hanya muncul di salah satu (efek kecil, belum di-fix).
+- **Inducement + M9 + kombinasi terbaik** (2026-11-23, `docs/smc-rules.md §11`, `docs/entry-v2.md §23`): user minta konsep di luar
+  materi dimasukkan ("materi masih basic"). Tag `baitTaken` (umpan = POI searah tanpa origin di depan POI, sudah kena), `idmSwept`
+  (IDM ketat), `extremePoi`, `decisionalPoi` (`strategy/inducement.ts`). **M9** umpan → POI di belakangnya (shadow paper, exit
+  tanpa TP, wajib `cleanApproach`). Migrasi sekali `migr_lab_1123` (user: "yang bagus langsung jalanin"): `exit.tpMode` trail,
+  `smc.breakerTpR` 0 (M4 ikut exit global), `m8TpR` 3, M0 + `baitTaken`, M4 `fvg+slLiqClear+cleanApproach`, M9 `cleanApproach`,
+  `shadowModels` + M9. Pilihan kombinasi dari IS saja banyak yang gagal di OOS → yang dipakai hanya n besar + IS dan OOS positif.
+  POI B M9 = **order block** (OB/QM, bukan RBS/SBR; koreksi user, migrasi `migr_m9_ob`). Lab: OB +0,17R (OOS −0,03), QM +0,32R, RBS +0,24R.
 - **Statistik sejak tanggal** (2026-11-18): `bot.statsSince` (ms, 0 = semua) memfilter statistik per model di halaman Bot
+- **CISD / SMT / IFVG + konfluensi OR** (2026-11-23, `docs/entry-v2.md §24`, `strategy/confirm.ts`): tag `cisd` / `smt` (1h vs BTC,
+  BTC vs ETH, `SetupInput.smtRef`) / `ifvg`. `bot.modelConfluenceAny` = list OR per model (minimal satu, di atas list wajib), migrasi
+  `migr_or_1123`: M0 `bbMomentum/ifvg/smt`, M4 `anomaly/manipulation/smt`, M5 `btc4h/smt`, M8 `anomaly`, M9 `bbMomentum/liqHtfBehind`
+  (M9 dipilih pakai OOS → optimistis). Lab script `allbt.ts`: model tanpa TP (`breakerTpR`/`m9TpR` 0) = rencana `trailOF`.
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,

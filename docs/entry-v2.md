@@ -493,3 +493,93 @@ config `smc.msnr*`, exit `msnrExit` (TP di level, tanpa ladder/trailing).
 - Strategi lain di lab yang sama (150 koin, 15m, fee): breakout range Asia → London −0,05 s/d −0,09R; reversal harian cross-section
   (long 5 terburuk / short 5 terbaik 24 jam) −0,05R; ikut lonjakan volume 1h −0,04 s/d −0,15R (OOS −0,3 s/d −0,4); mean reversion
   Bollinger 1h ±0 s/d −0,04R. Semua tidak dibuat.
+
+## 21. Lab POI (ML + statistik) dan M8 POI HTF searah trend (permintaan user, 2026-11-22)
+- **Dataset POI** (script scratchpad, bukan repo): setiap POI app (OB, RBS/SBR, QM, OCL, OCL Break) 15m/1h/4h/1d di 300 koin,
+  **sentuhan pertama** saja (2,25 jt). Trade: limit di garis POI, SL di ujung POI + 0,1 × ATR (min max(0,3 %, 0,3 × ATR)), TP 2R,
+  fill/exit 1m, fee. Dua look-ahead ketemu dan dibuang: (1) sentuhan setelah candle pembatal *dibuka* dibuang padahal batalnya
+  baru diketahui saat candle itu close; (2) `detectOcls` mengganti label OCL yang nanti jebol jadi OCL Break di seluruh histori
+  (sudah di-fix di app, lihat CLAUDE.md). Setelah fix, OCL biasa 1d turun dari +0,15R jadi −0,05R.
+- **ML (LightGBM, walk-forward bulanan):** model selalu lari ke fitur kondisi pasar (`btc24`), tidak konsisten positif per bulan.
+- **Statistik per sifat POI:** 15m rugi semua jenis; QM dan OB paling jelek di semua TF; TF makin besar makin bagus.
+  Yang konsisten IS dan OOS: searah BTC 4h (+0,01 vs −0,09R), trend 1d koin searah (+0,01 vs −0,08R), origin tap POI HTF
+  (+0,01 vs −0,05R). Volume/taker buy/kecepatan balik/POI numpuk hampir tidak berpengaruh.
+- **M8** (`modelM8`, config `smc.m8*`, exit `m8Exit`): POI 4h/1d RBS/SBR/OCL Break belum pernah disentuh, BTC 4h + trend 1d koin
+  searah, SL ≥ 1 %. Limit dipasang saat close 15m ≤ 1R dari garis, expired 32 candle (8 jam); selama POI belum disentuh dipasang
+  lagi. TP tetap 2R tanpa BE/trailing. Lab statistik: +0,08R (IS +0,05 / OOS +0,12), 5/7 bulan positif. **Lewat detektor app**,
+  100 koin (status 15m + fee): n 6.514, WR 37 %, +0,09R (IS +0,03 / OOS +0,17); RBS +0,25R, SBR ±0, OCL Break +0,07R; per bulan
+  Mei +0,26, Jun −0,05, Jul −0,14, Agu +0,15, Sep +0,01, Okt +0,02, Nov +0,63. Puluhan kombinasi dites dan holdout ikut terpakai.
+- **Shadow paper** (`bot.shadowModels`, default `['M8']`): setup model ini selalu masuk akun paper walaupun bot live, tidak pernah
+  kirim order, tidak memakai slot/rem harian live, tanpa profil koin. Statistiknya tampil terpisah di halaman Bot.
+
+## 22. Tag liquidity per model (permintaan user, 2026-11-22)
+Dari dataset POI (§21), ML sebagai gerbang entry **tidak stabil**. Model dilatih untuk membandingkan POI di hari yang sama, dan
+"top 30 %" pilihannya hanya lebih bagus di 3 dari 5 bulan. Jadi temuannya dibuat **tag konfluensi biasa** (`liquidityAround` di
+`setups.ts`, filter, tanpa skor):
+- `liqHtfBehind`: ada swing 4h/1d yang belum disapu di antara SL dan 1R di balik SL.
+- `liqInPoi`: ≥ `smc.liqInPoiMin` (5) swing yang belum disapu (semua TF) di antara entry dan SL.
+- `cleanApproach`: dalam 24 jam terakhir, maksimal 1 swing dalam 3R di depan entry yang disapu (harga datang langsung).
+Sapuan baru dihitung setelah candle penyapunya close.
+
+Backtest mesin app (100 koin, ±6 bulan, fill/exit 1m, fee, exit sama dengan bot, maks 1 trade/koin/model/hari):
+| Model | Dasar (konfluensi bot) | Tag yang membantu (IS dan OOS) |
+|---|---|---|
+| M0 (POI 4h/1d) | +0,24R, 7/7 bulan | `cleanApproach` +0,32R (IS +0,26 / OOS +0,40); `liqHtfBehind` tidak (OOS turun) |
+| M1 | −0,07R | `liqHtfBehind` +0,07R (IS +0,11 / OOS +0,02); `cleanApproach` lebih jelek |
+| M2a / M2b | −0,12 / −0,02R | tidak ada; `cleanApproach` jauh lebih jelek (model ini butuh sweep) |
+| M4 | +0,16R, 6/7 bulan | tidak relevan (`slLiqClear` sudah wajib, kebalikan `liqHtfBehind`) |
+| M7 | +0,09R | `liqHtfBehind` +0,13R (IS +0,09 / OOS +0,19) |
+| M8 | +0,12R | `liqHtfBehind` +0,15R, `liqInPoi` +0,17R, `liqHtfBehind + cleanApproach` +0,19R (6/7 bulan) |
+
+Teori "liquidity di belakang SL = magnet ke SL" tidak terbukti untuk POI HTF. Rekomendasi (`RECOMMENDED_MODEL_CONFLUENCE`,
+migrasi sekali `migr_liq_tags`): M0 + `cleanApproach`, M1 + `liqHtfBehind`, M7 `liqHtfBehind`. M8 tanpa syarat, karena forward
+test shadow mencatat tag-nya untuk dibandingkan.
+
+## 23. Inducement, M9, dan kombinasi terbaik semua model (permintaan user, 2026-11-23)
+Definisi di `docs/smc-rules.md §11`. Dua lab:
+
+**Lab statistik** (100 koin, 191 rb sentuhan pertama POI 1h/4h/1d, limit di garis, SL ujung POI, TP 2R, fee; "vs pasar" = R
+dikurangi rata-rata hari itu): umpan (`baitTaken`) dan IDM ketat konsisten **lebih bagus dari POI lain di hari yang sama**
+(+0,05 s/d +0,15R), paling jelas di POI **OB dan QM** (QM tanpa umpan −0,22R → dengan umpan +0,01R; OB −0,17 → −0,07R).
+Di SBR/OCL Break dan di filter M8 tidak membantu. Extreme POI 4h +0,13R (n 260), kecil.
+
+**Backtest mesin app** (100 koin, ±6,5 bulan, fill/exit 1m, fee, semua model × 8 exit × 0–2 tag, ±30 rb kombinasi).
+Kombinasi yang dipilih dari IS saja kebanyakan anjlok di OOS (M1: IS +0,60 → OOS −0,26), jadi yang dipakai cuma yang
+n besar, positif di IS dan OOS, dan banyak bulan positif. Dalam kondisi bot (POI 4h/1d untuk M0–M2):
+
+| Model | Sebelum | Dipasang (migrasi `migr_lab_1123`) |
+|---|---|---|
+| Exit SMC (M0/M1/M2) | bertingkat + TP liquidity | **tanpa TP** (`exit.tpMode` trail): M0 +0,02 → +0,07R, M2a +0,27 → +0,49R (n 85) |
+| M0 | +0,02R | + `baitTaken`: +0,10R (IS +0,01 / OOS +0,20, 6/7 bulan, n 271) |
+| M4 | TP 1R +0,17R | `breakerTpR` 0 (exit global) + `fvg`+`slLiqClear`+`cleanApproach`: **+0,44R** (IS +0,42 / OOS +0,47, 7/7 bulan, n 450). `oiConfirm` dilepas (tidak bisa dites dengan exit ini) |
+| M8 (shadow) | TP 2R +0,12R | TP 3R +0,16R (IS +0,10 / OOS +0,24) |
+| M9 (shadow, baru) | TP 2R ±0R (OOS −0,10) | exit tanpa TP + `cleanApproach`: +0,23R (IS +0,26 / OOS +0,19, 6/7 bulan, n 6.202) |
+
+Lainnya (tidak diubah): M7 + `btc4h` +0,20R; M5 `btc1h`+`anomaly` TP liquidity +0,32R; M8 + `anomaly` TP 3R +0,41R (n 536);
+M1 tetap negatif/tidak stabil. Semua hasil masih backtest dengan banyak kombinasi → tetap pantau live/shadow.
+
+**Koreksi user (2026-11-23): POI B M9 = order block, bukan RBS/SBR.** `smc.m9Kinds` jadi OB + QM (migrasi `migr_m9_ob`).
+Per jenis (`cleanApproach` + trailing, 100 koin): OB +0,17R (IS +0,35 / OOS −0,03, n 1.246), QM +0,32R (+0,31/+0,33, 7/7 bulan,
+n 281), RBS (dibuang) +0,24R (+0,24/+0,26, n 4.675, 75 % trade M9 lama). OB+QM gabungan +0,20R (OOS +0,02).
+
+
+## 24. CISD / SMT / IFVG + konfluensi OR (permintaan user, 2026-11-23)
+
+Tag baru (definisi di `docs/smc-rules.md §11`, kode `strategy/confirm.ts`): `cisd`, `smt` (1h vs BTC; BTC vs ETH), `ifvg`.
+Konfluensi **OR** per model: `bot.modelConfluenceAny` (minimal satu tag ada, di atas list wajib), profil koin `anyConfluence`,
+filter Backtest "Salah satu (OR)". Migrasi sekali `migr_or_1123` mengisi list OR dari lab ini.
+
+Lab 100 koin (mesin app, exit bot, scope POI bot, Mei–Nov; IS = Mei–Agu, OOS = Sep–Nov, dedup per koin/model/hari/arah/TF).
+Kombinasi OR 1–3 tag diuji di atas list wajib yang sekarang (n IS ≥ 100, n OOS ≥ 60):
+
+| Model | Wajib sekarang | + OR yang dipasang | Catatan |
+|---|---|---|---|
+| M0 | +0,10R [+0,01 / +0,20] n 271 | `bbMomentum / ifvg / smt`: +0,21R [+0,12 / +0,31] n 197, 6/7 bln | top-3 dipilih dari IS |
+| M4 | +0,29R [+0,39 / +0,17] n 2.434 | `anomaly / manipulation / smt`: +0,39R [+0,43 / +0,36] n 1.037, 7/7 | IS-pick `manipulation` [+0,51 / +0,29] |
+| M5 | +0,15R [+0,12 / +0,18] | `btc4h / smt`: +0,22R [+0,24 / +0,19] | M5 tidak di bot.models |
+| M8 | +0,16R [+0,10 / +0,25] n 5.319 | `anomaly`: +0,40R [+0,43 / +0,37] n 527, 6/6 | IS-pick #1 |
+| M9 (OB+QM) | +0,19R [+0,36 / −0,02] n 1.859 | `bbMomentum / liqHtfBehind`: +0,27R [+0,32 / +0,19] n 806 | **IS-pick gagal di OOS**, ini dipilih pakai OOS → optimistis |
+
+Tidak dipasang: M1 (tidak ada yang kokoh), M2a/M2b (n kecil), M7 (IS-pick `pdZone` OOS turun ke +0,10R).
+Efek tag sendiri: `cisd` muncul di 73–100 % setup (hampir tidak menyaring), `smt` 7–25 % (M0 +0,48R n 41, M4 +0,42R n 480,
+tapi M9 −0,00R), `ifvg` campur. Tanpa list wajib (OR saja) selalu lebih jelek dari wajib + OR.

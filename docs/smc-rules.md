@@ -282,6 +282,46 @@ Materi tidak punya bab khusus liquidity.
 
 ---
 
+## 11. Inducement — riset sendiri, DI LUAR materi (user 2026-11-23: "materi masih basic, kita improve sendiri")
+**Sumber:** pengalaman user + konsep SMC/ICT umum dari internet (LuxAlgo, TradingView education, innercircletrader.net).
+Semua di bawah ini **tag konfluensi (filter, tanpa skor)** + satu model (M9). Hasil lab di `docs/entry-v2.md §23`.
+Kode: `src/main/strategy/inducement.ts` (`InducementIndex`), tag ditambahkan di `finalize` (`setups.ts`).
+
+- **Umpan / bait (definisi user):** POI searah yang terbentuk **tanpa origin** (tidak menyapu liquidity, tidak menyentuh POI
+  TF lebih besar), terletak **di depan** POI B (harga ketemu duluan, ≤ `smc.idmWindowAtr` × ATR TF B), dan sudah **disentuh**
+  setelah B aktif, ≤ `smc.baitDays` hari sebelumnya. Menurut user, POI B di belakang umpan = POI high probability.
+  Tag `baitTaken`. Catatan: harga yang datang ke B dari atas pasti melewati semua POI di antaranya, jadi saat B kena,
+  `baitTaken` = "ada POI tanpa origin di depan B dalam jendela itu".
+- **IDM ketat (strict inducement):** pullback internal pertama (pivot `ltfPivot` di TF B) dari leg yang meninggalkan B, di depan
+  garis B, sudah dikonfirmasi lalu **disapu** sebelum keputusan. POI yang kena tanpa pullback seperti itu = dia sendiri
+  pullback pertama (= inducement-nya). Tag `idmSwept`.
+- **Extreme POI:** tidak ada POI searah aktif lain (TF ≥ 1h) di **belakang** B dalam `idmWindowAtr` ATR. Tag `extremePoi`.
+- **Decisional POI:** IDM ketat sudah disapu dan tidak ada POI searah aktif (≥ 1h) di antara B dan IDM. Tag `decisionalPoi`.
+- **M9 umpan → POI di belakangnya:** POI B (`smc.m9PoiTimeframes` 1h/4h/1d, jenis `smc.m9Kinds` OB/QM = order block, bukan RBS/SBR) belum disentuh,
+  umpan di depannya sudah kena (≤ `baitDays`) → limit di garis B saat close 15m ≤ `m9NearR` × risk, SL di balik ujung B
+  (+0,1 ATR, sama seperti M8), exit bertingkat + trailing tanpa TP (`m9TpR` 0). Default shadow paper.
+
+### Konfirmasi setelah POI kena (user 2026-11-23: "gas implement cisd, smt, ifvg"), `strategy/confirm.ts`
+Semua berupa **tag filter** (tanpa skor). Dihitung saat setup diketahui (`known`), cuma memakai candle yang sudah close.
+- **CISD** (`cisd`, change in state of delivery): di TF entry (15m), close menembus **open candle pertama dari run candle
+  lawan terakhir**. Long: ada run candle merah, lalu candle yang close di atas open candle merah pertama run itu. Short dibalik.
+  Tiap run cuma dihitung sekali. Harus terjadi **setelah POI kena** dan maksimal `smc.confirmLookback` (16) candle sebelum `known`.
+- **SMT divergence** (`smt`): di 1h, koin dibandingkan dengan BTC (BTC dibandingkan dengan ETH). Dalam `smc.smtWindowH` (6) jam
+  terakhir, **cuma salah satu** yang menembus low (long) / high (short) `smc.smtRangeH` (24) jam sebelumnya. Arahnya bebas
+  (koin sweep & BTC tahan, atau sebaliknya). Data bolong → tidak dinilai.
+- **Inverse FVG** (`ifvg`): FVG di TF entry yang **di-close tembus** (body close lewat sisi jauhnya) berbalik fungsi. FVG bearish
+  yang di-close di atas = IFVG bullish (dan sebaliknya), dicek sampai 96 candle setelah FVG terbentuk. Jendelanya sama dengan CISD.
+- Model yang limit-nya dipasang **sebelum** POI kena (M8/M9) hampir tidak pernah dapat CISD/IFVG, karena konfirmasinya belum ada
+  saat order dipasang.
+
+### Konfluensi OR (user 2026-11-23: "jangan wajib semua, tambahin konsep or")
+Tiap model punya dua list: `bot.modelConfluence` (**wajib**, semua harus ada) dan `bot.modelConfluenceAny` (**salah satu**,
+minimal satu ada; kosong = tidak ada syarat). Profil koin punya `anyConfluence`. Backtest punya filter chip "Salah satu (OR)".
+
+Kandidat berikutnya (belum dibuat): BPR, mitigation/rejection block, OTE.
+
+---
+
 ## Ditampilkan di chart (setelah implementasi)
 - Label swing HH/HL/LH/LL dan marker BOS (§1–2)
 - Kotak OB & **OB valid** (garis entry di ujung body) + zona wick **liquidity** (§3, §8, §10)

@@ -3,7 +3,7 @@ import type { BotTrade } from '@shared/bot'
 import { botConfigSchema, exitConfigSchema, riskConfigSchema } from '@shared/config'
 import type { ScreenerRow, ScreenerSetup } from '@shared/screener'
 import { BinanceApiError, isCryptoPerp, topCrypto, type ExchangeSymbol } from './binanceTrade'
-import { LiveBroker, PaperBroker, paperPnl } from './brokers'
+import { exitReason, LiveBroker, PaperBroker, paperPnl } from './brokers'
 import { accountGate, claudeGate, directionGate, setupGate, type Candidate } from './gate'
 import { pickLeverage, planOrder, roundStep } from './sizing'
 
@@ -58,7 +58,7 @@ describe('planOrder (risk-based sizing)', () => {
 })
 
 const NOW = Date.UTC(2026, 10, 12, 10)
-const bot = botConfigSchema.parse({})
+const bot = botConfigSchema.parse({ modelConfluenceAny: {} }) // OR lists off; the OR test sets its own
 const cand = (p: Partial<ScreenerSetup> = {}, row: Partial<ScreenerRow> = {}): Candidate =>
   ({
     symbol: 'SOLUSDT',
@@ -79,7 +79,7 @@ const cand = (p: Partial<ScreenerSetup> = {}, row: Partial<ScreenerRow> = {}): C
       tpLiquidity: 104,
       rr: 4,
       score: 5,
-      confluence: ['fvg', 'trendParent', 'pdZone'],
+      confluence: ['fvg', 'trendParent', 'pdZone', 'liqHtfBehind'],
       status: 'pending',
       createdT: NOW - 30 * 60_000,
       poi: { kind: 'OB', timeframe: '4h', origin: 'sweep' },
@@ -119,7 +119,7 @@ describe('setupGate', () => {
   it('rejects models the bot does not trade and missing required confluences', () => {
     expect(setupGate(cand({ model: 'M0' }), o)).toMatch(/tidak dipakai bot/)
     expect(setupGate(cand({ confluence: ['fvg', 'pdZone'] }), o)).toMatch(/konfluensi wajib: trendParent/)
-    expect(setupGate(cand({ model: 'M4', confluence: ['fvg', 'oiConfirm', 'slLiqClear'], poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
+    expect(setupGate(cand({ model: 'M4', confluence: ['fvg', 'oiConfirm', 'slLiqClear', 'cleanApproach'], poi: { kind: 'OB', timeframe: '15m', origin: 'sweep' } }), o)).toBeNull() // breakers: any TF
   })
   it('each model has its own required confluence list', () => {
     const b = { ...bot, models: ['M0' as const, 'M4' as const], modelConfluence: { ...bot.modelConfluence, M0: ['prevOpposite' as const], M4: ['fvg' as const] } }
@@ -128,6 +128,13 @@ describe('setupGate', () => {
     expect(setupGate(cand({ model: 'M0', confluence: ['fvg'] }), ob)).toMatch(/konfluensi wajib: prevOpposite/)
     expect(setupGate(cand({ model: 'M4', confluence: ['fvg'] }), ob)).toBeNull()
     expect(setupGate(cand({ model: 'M4', confluence: ['prevOpposite'] }), ob)).toMatch(/konfluensi wajib: fvg/)
+  })
+  it('OR list: at least one of the tags, on top of the required ones', () => {
+    const b = { ...bot, models: ['M0' as const], modelConfluence: { ...bot.modelConfluence, M0: ['prevOpposite' as const] }, modelConfluenceAny: { ...bot.modelConfluenceAny, M0: ['cisd' as const, 'smt' as const] } }
+    const ob = { ...o, bot: b }
+    expect(setupGate(cand({ model: 'M0', confluence: ['prevOpposite', 'smt'] }), ob)).toBeNull()
+    expect(setupGate(cand({ model: 'M0', confluence: ['prevOpposite'] }), ob)).toMatch(/salah satu konfluensi: cisd \/ smt/)
+    expect(setupGate(cand({ model: 'M0', confluence: ['cisd'] }), ob)).toMatch(/konfluensi wajib: prevOpposite/)
   })
   it('rejects stale setups and price past TP / entry', () => {
     expect(setupGate(cand({ createdT: NOW - 3 * 3_600_000 }), o)).toMatch(/menit/)
@@ -407,5 +414,27 @@ describe('LiveBroker.closeNow (manual)', () => {
     const { broker, calls } = mk(false)
     expect(await broker.closeNow({ ...t, status: 'pending' } as BotTrade)).toMatchObject({ status: 'cancelled', reason: 'manual' })
     expect(calls).toEqual(['cancelEntry', 'cancelAll'])
+  })
+})
+
+describe('exitReason (live position went flat)', () => {
+  // LINK 16 Nov: short 9.289, SL 9.343, TP 8.984 (5.65R); flat at 9.235 (1R) without any bot order there
+  const link = { direction: 'bearish' as const, entry: 9.289, sl: 9.343, slInitial: 9.343, tp: 8.984 }
+  it('a close between the stop and the TP is external, not tp', () => expect(exitReason(link, 9.235)).toBe('external'))
+  it('at or beyond the TP is tp', () => {
+    expect(exitReason(link, 8.984)).toBe('tp')
+    expect(exitReason(link, 8.989)).toBe('tp') // within 0.1R (0.0054)
+    expect(exitReason(link, 8.995)).toBe('external')
+  })
+  it('at or slipped past the stop is sl; once the stop sat at BE or better it is trail', () => {
+    // RESOLV 22 Nov: short 0.01362, SL 0.01372, filled at 0.01386 (2.4R of slippage) → still the stop
+    expect(exitReason({ direction: 'bearish', entry: 0.01362, sl: 0.01372, slInitial: 0.01372, tp: 0.01328 }, 0.01386)).toBe('sl')
+    expect(exitReason({ ...link, sl: 9.28 }, 9.281)).toBe('trail')
+  })
+  it('mirrors for a long; no TP (trailing plan) and no price → external', () => {
+    const long = { direction: 'bullish' as const, entry: 100, sl: 98, slInitial: 98, tp: null }
+    expect(exitReason(long, 97.5)).toBe('sl')
+    expect(exitReason(long, 103)).toBe('external')
+    expect(exitReason(long, null)).toBe('external')
   })
 })

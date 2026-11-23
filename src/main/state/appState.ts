@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { z } from 'zod'
-import { appConfigSchema, defaultAppConfig, modelConfluenceSchema, RECOMMENDED_MODEL_CONFLUENCE, type AppConfig, type ConfigPatch, type ModelConfluence } from '@shared/config'
+import { appConfigSchema, defaultAppConfig, modelConfluenceSchema, RECOMMENDED_MODEL_CONFLUENCE, RECOMMENDED_MODEL_CONFLUENCE_ANY, type AppConfig, type ConfigPatch, type ModelConfluence } from '@shared/config'
 import { REQUIRABLE_CONFLUENCES } from '@shared/smc'
 import type { AppStatus } from '@shared/ipc'
 import type { Db } from '../db/client'
@@ -44,8 +44,14 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
     this.config = readSetting(db, 'app_config', appConfigSchema) ?? defaultAppConfig
     // smc.models has no UI: configs saved before M5 existed get the new model detected (the bot still
     // only trades what bot.models allows)
-    for (const m of ['M5', 'M6', 'M7'] as const)
+    for (const m of ['M5', 'M6', 'M7', 'M8', 'M9'] as const)
       if (!this.config.smc.models.includes(m)) this.config = { ...this.config, smc: { ...this.config.smc, models: [...this.config.smc.models, m] } }
+    // M9 (user, 2026-11-23) is forward-tested as shadow paper next to M8, once; removing it later sticks
+    if (!readSetting(db, 'migr_shadow_m9', z.boolean())) {
+      if (!this.config.bot.shadowModels.includes('M9')) this.config = { ...this.config, bot: { ...this.config.bot, shadowModels: [...this.config.bot.shadowModels, 'M9'] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_shadow_m9', true)
+    }
     // M6 (user, 2026-11-15) joins the bot's models once; removing it later in Settings sticks
     if (!readSetting(db, 'migr_bot_m6', z.boolean())) {
       if (!this.config.bot.models.includes('M6')) this.config = { ...this.config, bot: { ...this.config.bot, models: [...this.config.bot.models, 'M6'] } }
@@ -65,6 +71,45 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       this.config = { ...this.config, smc: { ...this.config.smc, oclParentTimeframes: [], m0OclBreakTimeframes: ['4h', '1d', '1w'] } }
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_ocl_break_htf', true)
+    }
+    // user 2026-11-22: liquidity tags from the lab join the per-model required lists once (later Settings changes stick)
+    if (!readSetting(db, 'migr_liq_tags', z.boolean())) {
+      const add: Partial<Record<keyof ModelConfluence, ModelConfluence[keyof ModelConfluence]>> = { M0: ['cleanApproach'], M1: ['liqHtfBehind'], M7: ['liqHtfBehind'] }
+      const mc = { ...this.config.bot.modelConfluence }
+      for (const [m, tags] of Object.entries(add) as [keyof ModelConfluence, ModelConfluence[keyof ModelConfluence]][])
+        mc[m] = [...new Set([...(mc[m] ?? []), ...tags])]
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: mc } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_liq_tags', true)
+    }
+    // user 2026-11-23 ("yang bagus langsung jalanin"): inducement/exit lab (100 coins, IS and OOS positive), once:
+    // SMC exit without a TP (tiered + order flow + trailing), M4 on that exit too (breakerTpR 0), M8 TP 3R,
+    // M0 + baitTaken, M4 fvg + slLiqClear + cleanApproach, M9 + cleanApproach (shadow). Later Settings changes stick.
+    if (!readSetting(db, 'migr_lab_1123', z.boolean())) {
+      const mc = { ...this.config.bot.modelConfluence }
+      mc.M0 = [...new Set([...(mc.M0 ?? []), 'baitTaken' as const])]
+      mc.M4 = ['fvg', 'slLiqClear', 'cleanApproach']
+      mc.M9 = [...new Set([...(mc.M9 ?? []), 'cleanApproach' as const])]
+      this.config = {
+        ...this.config,
+        exit: { ...this.config.exit, tpMode: 'trail' },
+        smc: { ...this.config.smc, breakerTpR: 0, m8TpR: 3 },
+        bot: { ...this.config.bot, modelConfluence: mc }
+      }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_lab_1123', true)
+    }
+    // user 2026-11-23: M9's POI behind the bait is an order block (OB/QM), not RBS/SBR; once, later Settings changes stick
+    if (!readSetting(db, 'migr_m9_ob', z.boolean())) {
+      this.config = { ...this.config, smc: { ...this.config.smc, m9Kinds: ['OB', 'QM'] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_m9_ob', true)
+    }
+    // user 2026-11-23 ("cari kombinasi terbaik mode or"): OR lists from the OR lab, once (later Settings changes stick)
+    if (!readSetting(db, 'migr_or_1123', z.boolean())) {
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluenceAny: structuredClone(RECOMMENDED_MODEL_CONFLUENCE_ANY) } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_or_1123', true)
     }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }

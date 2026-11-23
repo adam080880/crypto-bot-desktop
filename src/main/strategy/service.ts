@@ -18,16 +18,18 @@ const POI_LOOKBACK = 1000 // ≈ 166 days of 4h / 41 days of 1h
 
 /** Thin DB adapter around the pure detectors (same functions the backtester will use). */
 const BTC = 'BTCUSDT'
+const ETH = 'ETHUSDT'
 const BTC_CACHE_MS = 30_000
 
 /** Timeframes analysed for setups: entry + POI timeframes (+1d for origin checks, + the M5 trend TF). */
 export function setupTimeframes(cfg: SmcConfig): Timeframe[] {
-  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe, ...(cfg.models.includes('M6') ? (['1h'] as const) : []), ...(cfg.models.includes('M7') ? [cfg.msnrTimeframe] : [])])]
+  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe, ...(cfg.models.includes('M6') ? (['1h'] as const) : []), ...(cfg.models.includes('M7') ? [cfg.msnrTimeframe] : []), ...(cfg.models.includes('M8') ? cfg.m8PoiTimeframes : []), ...(cfg.models.includes('M9') ? cfg.m9PoiTimeframes : [])])]
 }
 
 export class SmcService {
   private readonly repo: CandleRepo
   private btcCache: { at: number; v: SetupInput['btc'] } | null = null
+  private ethCache: { at: number; v: readonly Candle[] | undefined } | null = null
   private readonly flowRepo: FlowRepo
 
   constructor(private readonly db: Db) {
@@ -69,6 +71,16 @@ export class SmcService {
     return v
   }
 
+  /** 1h candles of the SMT reference: BTC for alts (shares the BTC trend cache), ETH for BTC. */
+  smtRef(symbol: string, cfg: SmcConfig, now = Date.now()): readonly Candle[] | undefined {
+    if (symbol !== BTC) return (this.btcTrend(cfg, now)?.['1h'] as SmcAnalysisFull | undefined)?.candles
+    if (this.ethCache && now - this.ethCache.at < BTC_CACHE_MS) return this.ethCache.v
+    const eth = symbolByName(this.db, ETH)
+    const v = eth ? this.repo.latest('1h', eth.id, POI_LOOKBACK) : undefined
+    this.ethCache = { at: now, v }
+    return v
+  }
+
   context(symbol: string, cfg: SmcConfig, now = Date.now(), exit?: ExitConfig) {
     const sym = symbolByName(this.db, symbol)
     if (!sym) return null
@@ -83,7 +95,7 @@ export class SmcService {
     const pois: Poi[] = collectAllPois(analyses, cfg).filter((p) => p.invalidT === null && p.activeFrom <= now)
     const liquidity = analyses.flatMap((a) => a.liquidity.filter((l) => l.kind === 'swing' && l.sweptT === null))
     const entry = analyses[0]!
-    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now) })
+    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now), smtRef: this.smtRef(symbol, cfg, now) })
     const lastBreak = Object.fromEntries(analyses.map((a) => [a.timeframe, a.breaks.at(-1) ?? null]))
     return { price, priceT, trend, pois, liquidity, setups, lastBreak }
   }
@@ -93,7 +105,7 @@ export class SmcService {
    * don't repaint, so analysing the whole history equals replaying it candle by candle.
    * `btcDom` = BTCDOMUSDT candles of smc.btcDomTimeframe for the btcDom tag (downloaded by the caller).
    */
-  history(symbol: string, cfg: SmcConfig, btcDom?: readonly Candle[]): { entry: SmcAnalysisFull; poiAnalyses: SmcAnalysisFull[]; btc: SetupInput['btc']; btcDom?: SmcAnalysisFull } | null {
+  history(symbol: string, cfg: SmcConfig, btcDom?: readonly Candle[]): { entry: SmcAnalysisFull; poiAnalyses: SmcAnalysisFull[]; btc: SetupInput['btc']; btcDom?: SmcAnalysisFull; smtRef?: readonly Candle[] } | null {
     const sym = symbolByName(this.db, symbol)
     if (!sym) return null
     const full = (id: number, tf: Timeframe): SmcAnalysisFull => analyzeSmc(this.repo.range(tf, id, 0, Number.MAX_SAFE_INTEGER), tf, cfg)
@@ -107,7 +119,9 @@ export class SmcService {
         ? { '4h': poiAnalyses.find((a) => a.timeframe === '4h') ?? full(btcSym.id, '4h'), '1h': poiAnalyses.find((a) => a.timeframe === '1h') ?? full(btcSym.id, '1h') }
         : { '4h': full(btcSym.id, '4h'), '1h': full(btcSym.id, '1h') }
       : undefined
-    return { entry, poiAnalyses, btc, btcDom: btcDom?.length ? analyzeSmc(btcDom, cfg.btcDomTimeframe, cfg) : undefined }
+    const eth = symbol === BTC ? symbolByName(this.db, ETH) : null
+    const smtRef = symbol === BTC ? (eth ? this.repo.range('1h', eth.id, 0, Number.MAX_SAFE_INTEGER) : undefined) : (btc?.['1h'] as SmcAnalysisFull | undefined)?.candles
+    return { entry, poiAnalyses, btc, btcDom: btcDom?.length ? analyzeSmc(btcDom, cfg.btcDomTimeframe, cfg) : undefined, smtRef }
   }
 
   setups(symbol: string, cfg: SmcConfig, exit?: ExitConfig): Setup[] {
@@ -117,6 +131,6 @@ export class SmcService {
     const pois = setupTimeframes(cfg)
       .filter((tf) => tf !== cfg.entryTimeframe)
       .map((tf) => this.analyzeFull(sym.id, tf, POI_LOOKBACK, cfg))
-    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg) })
+    return detectSetups({ symbol, entry, poiAnalyses: pois, cfg, exit, btc: this.btcTrend(cfg), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg), smtRef: this.smtRef(symbol, cfg) })
   }
 }
