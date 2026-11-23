@@ -6,6 +6,10 @@ import type { Db } from '../db/client'
 import { symbolByName } from '../db/symbolsRepo'
 import { analyzeSmc, toPublic, type SmcAnalysisFull } from './analyze'
 import { collectAllPois, detectSetups, type Poi, type SetupInput } from './setups'
+import { liquidityPools, poiStory } from './story'
+import { InducementIndex } from './inducement'
+import type { StoryResult } from '@shared/story'
+import { TF_MS } from '@shared/timeframes'
 import { FlowRepo } from '../flow/flowRepo'
 import type { FlowData } from './flow'
 import type { ExitConfig } from '@shared/config'
@@ -92,6 +96,42 @@ export class SmcService {
       ...(need.has('5m') ? { '5m': this.repo.latest('5m', symbolId, Math.ceil(n1 / 5) + 300) } : {}),
       ...(need.has('10m') ? { '10m': this.repo.latest('10m', symbolId, Math.ceil(n1 / 10) + 300) } : {})
     }
+  }
+
+  /**
+   * POI anatomy + liquidity draw (docs/smc-rules.md §12) for the chart: active POIs (≥ 1h, not plain OCL) nearest to the
+   * price on each side (bullish below, bearish above, within 15 %), plus the parents of pending setups.
+   */
+  stories(symbol: string, cfg: SmcConfig, now = Date.now()): StoryResult | null {
+    const sym = symbolByName(this.db, symbol)
+    if (!sym) return null
+    const tfs: Timeframe[] = ['15m', '1h', '4h', '1d']
+    const all = tfs.map((tf) => this.analyzeFull(sym.id, tf, tf === '15m' ? ENTRY_LOOKBACK : POI_LOOKBACK, cfg))
+    const last = this.repo.latest('1m', sym.id, 1)[0] ?? all[0]!.candles.at(-1)
+    if (!last) return null
+    const price = last.c
+    const at = Math.min(now, last.t + 60_000)
+    const pois = collectAllPois(all, cfg)
+    const active = pois.filter((p) => p.activeFrom <= at && (p.invalidT === null || p.invalidT + TF_MS[p.timeframe] > at))
+    const pick = (dir: 'bullish' | 'bearish'): Poi[] =>
+      active
+        .filter((p) => p.direction === dir && p.kind !== 'OCL' && TF_MS[p.timeframe] >= TF_MS['1h'] && (dir === 'bullish' ? p.level <= price : p.level >= price) && Math.abs(p.level / price - 1) <= 0.15)
+        .sort((x, y) => Math.abs(x.level - price) - Math.abs(y.level - price))
+        .slice(0, 5)
+    const pools = liquidityPools(all, at)
+    const idx = new InducementIndex(all[0]!, all, pois, { baitDays: cfg.baitDays, windowAtr: cfg.idmWindowAtr })
+    const btc = symbol === BTC ? undefined : this.btcTrend(cfg, now)?.['4h']
+    const ctx = { at, price, pois: active, allPois: pois, originNearPct: cfg.originNearPct, pools, btc4h: btc, idx, pdTimeframe: cfg.pdTimeframe, pdLookback: cfg.pdLookback }
+    const stories = [...pick('bullish'), ...pick('bearish')]
+      .map((p) => poiStory(p, all, ctx))
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .sort((x, y) => Math.abs(x.distPct) - Math.abs(y.distPct))
+    const strongest = (side: 'buy' | 'sell') =>
+      pools
+        .filter((p) => p.side === side && (side === 'buy' ? p.price > price : p.price < price))
+        .sort((x, y) => y.weight / (Math.abs(y.price / price - 1) + 0.002) - x.weight / (Math.abs(x.price / price - 1) + 0.002))
+        .slice(0, 5)
+    return { symbol, price, at, stories, pools: { buy: strongest('buy'), sell: strongest('sell') } }
   }
 
   context(symbol: string, cfg: SmcConfig, now = Date.now(), exit?: ExitConfig) {

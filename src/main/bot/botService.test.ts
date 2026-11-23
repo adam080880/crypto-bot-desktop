@@ -191,7 +191,7 @@ describe('BotService (paper, end to end)', () => {
 
   it('shadow paper: an M8 setup goes to the paper account while the bot is live (never a live order)', async () => {
     const { bot, row } = setup({}, { requireClaude: false, live: true })
-    const m8: ScreenerSetup = { ...SETUP(Date.now()), id: 'set-m8', model: 'M8', sl: 0.98, tp: 1.04, tpLiquidity: null, rr: 2, confluence: [], poi: { kind: 'RBS', timeframe: '4h', origin: null }, child: { kind: 'LEVEL', timeframe: '15m' } }
+    const m8: ScreenerSetup = { ...SETUP(Date.now()), id: 'set-m8', model: 'M8', sl: 0.98, tp: 1.04, tpLiquidity: null, rr: 2, confluence: ['liqTarget', 'dispStrong'], poi: { kind: 'RBS', timeframe: '4h', origin: null }, child: { kind: 'LEVEL', timeframe: '15m' } }
     const states: import('@shared/bot').BotState[] = []
     bot.on('state', (s) => states.push(s))
     // live has no API key → live setups (the M1 on BBB) are not placed, the shadow M8 still is

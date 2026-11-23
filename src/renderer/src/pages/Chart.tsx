@@ -16,6 +16,8 @@ import {
 import type { Setup, SmcAnalysis } from '@shared/smc'
 import { COLORS, DEFAULT_LAYERS, LAYERS, LAYER_LABEL, SmcOverlay, type Layers } from '@/chart/smcOverlay'
 import { SetupList } from '@/components/SetupList'
+import { PoiStories } from '@/components/PoiStories'
+import type { StoryResult } from '@shared/story'
 import type { Candle } from '@shared/candles'
 import type { SymbolListItem } from '@shared/ipc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
@@ -107,6 +109,7 @@ export function Chart() {
   })
   const [analysis, setAnalysis] = useState<SmcAnalysis | null>(null)
   const [setups, setSetups] = useState<Setup[]>([])
+  const [stories, setStories] = useState<StoryResult | null>(null)
   const [smcTick, setSmcTick] = useState(0)
   const [focus, setFocus] = useState<Focus | null>(() => {
     const f = takeFocus()
@@ -264,13 +267,15 @@ export function Chart() {
   useEffect(() => {
     let cancelled = false
     const timer = setTimeout(async () => {
-      const [a, st] = await Promise.all([
+      const [a, st, sr] = await Promise.all([
         window.api.invoke('smc:analyze', { symbol, timeframe: tf, limit: LIMIT }),
-        window.api.invoke('smc:setups', { symbol })
+        window.api.invoke('smc:setups', { symbol }),
+        window.api.invoke('smc:stories', { symbol }).catch(() => null)
       ])
       if (cancelled) return
       setAnalysis(a)
       setSetups(st)
+      setStories(sr)
     }, smcTick ? 1500 : 0)
     return () => {
       cancelled = true
@@ -425,6 +430,7 @@ export function Chart() {
         )}
       </div>
       <SetupList setups={setups} />
+      <PoiStories data={stories} />
     </div>
   )
 }

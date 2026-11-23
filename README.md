@@ -19,13 +19,90 @@ SMC/ICT, screener, backtest, bot (paper/live), radar pump, kalender news USD, da
 | Halaman | Isi |
 |---|---|
 | **Chart** | Candle 1m–1w (lightweight-charts), overlay SMC (structure, BOS, OB, FVG, RBS/SBR, OCL, QM, liquidity), setup aktif, posisi bot live dengan R berjalan, tombol close/cancel, buka trade lama dari Bot/Backtest |
-| **Screener** | Scan semua koin yang punya histori: setup aktif, harga dekat POI 1h/4h, BOS baru, trend searah. Otomatis tiap 15 menit |
+| **Screener** | Scan semua koin yang punya histori: setup aktif, harga dekat POI 1h/4h, BOS baru, trend searah. Otomatis tiap 5 menit (bisa 1–15) |
 | **Backtest** | Satu koin, semua model × semua rencana exit sekaligus, fill/exit di candle 1m, fee + slippage, split in-sample / out-of-sample, tab Meta untuk menyimpan profil per koin |
 | **Bot** | Paper atau live. Risk per trade dalam % dari saldo atau dari modal tetap, SL wajib, leverage aman di bawah likuidasi, exit bertingkat + order flow, statistik per model (win / BE / loss, DD maks) sejak tanggal tertentu |
 | **Rotasi** | Forward test rotasi momentum long/short. **Paper saja**, tidak pernah kirim order |
 | **Kalender** | Event USD (jadwal + forecast + actual dari BLS/FRED), bias USD → crypto, news window |
 | **Claude Analyses** | Analisis berkala koin watchlist lewat Claude Agent SDK (opsional, read-only tools) |
 | **Radar pump** | Koin dengan volume 24 jam ≥ 8× median atau funding negatif + volume tinggi → notifikasi Discord/desktop |
+
+## Cara kerja bot
+
+Gambaran besar: data harga Binance disimpan lokal, tiap timeframe dianalisis dengan detektor SMC/ICT, model entry
+mengubah POI jadi *setup* (limit + SL + rencana exit), lalu setup disaring berlapis sebelum jadi order.
+
+```mermaid
+flowchart TD
+    subgraph DATA["1 · Data (lokal, SQLite)"]
+        A1["Binance publik<br/>zip harian/bulanan + REST + WebSocket"] --> A2["Candle 1m (6 bulan)<br/>1d / 1w (2 tahun)"]
+        A2 --> A3["Resample bertingkat<br/>3m · 5m · 10m · 15m · 45m · 1h · 2h · 3h · 4h"]
+        A4["Open interest, funding,<br/>BTC dominance"]
+    end
+
+    subgraph SMC["2 · Detektor SMC (fungsi murni, tanpa repaint)"]
+        B1["Struktur: swing, BOS"] --> B2["POI: OB, QM, RBS/SBR, OCL Break, breaker"]
+        B3["FVG, liquidity BSL/SSL,<br/>equal high/low"] --> B2
+        B2 --> B4{"POI punya penyebab?<br/>sweep liquidity / tap POI HTF"}
+        B4 -- tidak --> B5["Dibuang"]
+    end
+
+    subgraph MODEL["3 · Model entry → setup"]
+        C1["M0 POI → OB valid · M1/M2 refinement<br/>M4 breaker · M5 trend · M6 radar pump<br/>M7 MSNR · M8 POI HTF searah trend<br/>M9 umpan → POI · M10 POI → QM"]
+        C1 --> C2["Setup: arah, entry limit, SL, TP/exit<br/>+ tag konfluensi"]
+    end
+
+    subgraph GATE["4 · Saringan (screener tiap 5 menit)"]
+        D1["Top 300 crypto by volume<br/>TF POI yang diizinkan"]
+        D1 --> D2["Konfluensi per model<br/>WAJIB (semua) + OR (salah satu)"]
+        D2 --> D3["Risk guard: kill switch, rugi harian,<br/>news window USD, blacklist SL,<br/>1 posisi / koin, maks posisi"]
+        D3 --> D4["Setup masih segar,<br/>harga belum lewat entry / TP"]
+    end
+
+    subgraph EXEC["5 · Eksekusi"]
+        E1["Sizing: risk % × modal ÷ jarak SL<br/>leverage aman (likuidasi jauh di balik SL)"]
+        E1 --> E2{"Mode"}
+        E2 -- paper / shadow --> E3["Paper broker"]
+        E2 -- live --> E4["Binance: limit post-only<br/>SL stop-market (algo) saat fill<br/>TP limit reduce-only"]
+    end
+
+    subgraph EXIT["6 · Exit & evaluasi"]
+        F1["1R → BE · 3R → tutup 50%<br/>trailing · tahan saat order flow"]
+        F1 --> F2["Statistik per model<br/>WR, avg R, DD"]
+    end
+
+    A3 --> B1
+    A3 --> B3
+    B4 -- ya --> C1
+    A4 --> C2
+    C2 --> D1
+    D4 --> E1
+    E3 --> F1
+    E4 --> F1
+    F2 -.->|"lab backtest 100+ koin, IS / OOS"| D2
+```
+
+Siklus hidup satu order:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: setup lolos saringan<br/>limit dipasang
+    Pending --> Batal: lewat TP duluan / expired /<br/>setup invalid / kill switch
+    Pending --> Open: limit terisi<br/>SL langsung dipasang
+    Open --> BreakEven: harga capai 1R<br/>SL ke entry + fee
+    BreakEven --> Partial: 3R<br/>tutup 50%, SL ke +1R
+    Partial --> Trailing: SL ikut harga (best − 2R)
+    Partial --> Untung: kena SL di +1R
+    Open --> Rugi: kena SL (−1R)
+    BreakEven --> Impas: kena SL di BE
+    Trailing --> Untung: kena trailing / TP
+    Open --> Tahan: order flow searah<br/>(FVG diretest + mantul)
+    Tahan --> Open: order flow patah
+    Batal --> [*]
+    Rugi --> [*]
+    Impas --> [*]
+    Untung --> [*]
+```
 
 ## Apa itu SMC (versi app ini)
 
@@ -67,6 +144,9 @@ satu per satu di **Settings → Bot entry**, dan dibandingkan di halaman **Backt
 | **M5** trend 4h (bukan SMC) | Close 4h tembus high/low 20 candle dan di sisi benar EMA200 → limit di close itu | 3× ATR | Trailing saja, tanpa BE/TP |
 | **M6** radar pump (bukan SMC) | Radar bunyi (volume 24j ≥ 8× median, atau funding ≤ −0,05% + volume ≥ 3×) → close 1h tembus box 24 jam → limit di close itu. Long saja | 3× ATR 1h | **Tanpa TP: ambil profit manual**, SL trailing |
 | **M7** MSNR (bukan dari materi) | Level A/V fresh dari close 4h (line chart) searah storyline harian (EMA20) → limit di level saat harga mendekat | 1× ATR 4h di balik level | **TP di level fresh berikutnya** |
+| **M8** POI HTF searah trend | POI 4h/1d (RBS/SBR/OCL Break) pertama kali disentuh, BTC 4h + trend 1d searah → limit di garis POI | Di balik ujung POI (+0,1 ATR, min 1%) | **TP 3R** |
+| **M9** umpan → POI di belakangnya | POI searah tanpa penyebab (umpan) di depan OB/QM 1h–1d sudah kena → limit di OB/QM di belakangnya | Di balik ujung POI | Bertingkat tanpa TP (trailing) |
+| **M10** POI HTF → QM konfirmasi | POI HTF kena → QM terbentuk di TF kecil (1m/3m/5m/10m) dengan head di dalam POI → limit di level QM | Di balik head | Bertingkat (lab: rugi, tidak dipakai bot) |
 
 SL semua model SMC (M0–M4) minimal 1× ATR(14) TF entry; kalau lebih sempit, SL dilebarkan dan ukuran posisi
 otomatis mengecil (risk per trade tetap).

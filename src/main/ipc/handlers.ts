@@ -174,6 +174,10 @@ export function registerIpcHandlers(deps: {
     const { symbol } = z.object({ symbol: symbolSchema }).strict().parse(req)
     return smc.setups(symbol, state.getConfig().smc, state.getConfig().exit)
   })
+  handle('smc:stories', (req) => {
+    const { symbol } = z.object({ symbol: symbolSchema }).strict().parse(req)
+    return smc.stories(symbol, state.getConfig().smc)
+  })
   handle('backtest:run', async (req, event) => {
     const params = backtestParamsSchema.parse(req)
     const result = await data.runBacktest(params, (p) => !event.sender.isDestroyed() && event.sender.send('backtest:progress', p))

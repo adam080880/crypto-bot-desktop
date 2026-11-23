@@ -227,6 +227,8 @@ export const smcConfigSchema = z.object({
   m10Timeframes: z.array(z.enum(['1m', '3m', '5m', '10m'])).min(1).default(['1m', '3m', '5m']),
   m10WindowMin: z.number().int().min(15).max(1440).default(240),
   m10Pivot: z.number().int().min(1).max(10).default(3),
+  /** dispStrong tag: body ÷ ATR of the parent POI's leg (lab 2026-11-23: M8 median 0,95). */
+  storyDispAtr: z.number().min(0).max(10).default(0.95),
   confirmLookback: z.number().int().min(1).max(200).default(16),
   smtWindowH: z.number().int().min(1).max(48).default(6),
   smtRangeH: z.number().int().min(4).max(240).default(24),
@@ -462,7 +464,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M5: ['btc1h', 'anomaly'], // +0,23R (IS +0,24 / OOS +0,22); old oiConfirm+oiHold: OOS −0,23R
   M6: [],
   M7: ['liqHtfBehind'], // MSNR: the level + storyline is the signal
-  M8: [], // the BTC 4h / 1d trend filters are part of the model; shadow forward test logs the liquidity tags without requiring them
+  M8: ['liqTarget', 'dispStrong'], // POI story lab 2026-11-23: with OR anomaly +0,40R → +0,58R [IS +0,54 / OOS +0,64] 6/6, n 527 → 353
   M10: ['btc4h', 'slLiqClear'], // lab 2026-11-23 (POI 4h/1d, trailing): +0,15R [IS +0,11 / OOS +0,20] n 254, 4/7; without −0,05R
   M9: ['cleanApproach'] // lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
 }

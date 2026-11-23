@@ -15,6 +15,8 @@ import { InducementIndex } from './inducement'
 import { analyzeStructure, findPivots } from './swings'
 import { detectQms } from './qm'
 import { cisdIn, ifvgIn, smtAt } from './confirm'
+import { drawTarget, legDisplacement, liquidityPools } from './story'
+import type { LiqPool } from '@shared/story'
 import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
 
 /** A point of interest from any timeframe, normalised. */
@@ -32,6 +34,8 @@ export interface Poi {
   origin: PoiOrigin | null
   /** End of the POI's own liquidity (OB: wick end; others: extreme of the origin candle), for poiLiq. */
   extreme?: number
+  /** Open time of the candle (own TF) whose reaction created the POI (the one checked for sweep / HTF tap). */
+  originT?: number
 }
 
 const closeTime = (t: number, tf: Timeframe): number => t + TF_MS[tf]
@@ -150,7 +154,7 @@ export function collectAllPois(analyses: readonly SmcAnalysisFull[], cfg: Pick<S
       const sweep = r.inherentSweep || sweptSwing(a.candles, a.pivots, r.originIdx, bull, cfg.originSwings) !== null
       const htf = !!x && tappedHtf(x, a.timeframe, bull, higher, cfg.originNearPct)
       const { originIdx: _i, inherentSweep: _s, ...poi } = r
-      done.push({ ...poi, origin: joinOrigin(sweep, htf) })
+      done.push({ ...poi, origin: joinOrigin(sweep, htf), ...(x ? { originT: x.t } : {}) })
     }
   }
   return done
@@ -236,9 +240,10 @@ export function detectSetups(input: SetupInput): Setup[] {
   const h1 = all.find((a) => a.timeframe === '1h')
   const vol1h = h1 && h1.candles.length >= RADAR_BARS ? { c: h1.candles, vr: volRatioSeries(h1.candles) } : null
   const best = new Map<string, Setup>()
+  const poolCache = new Map<number, LiqPool[]>()
   for (const d0 of drafts) {
     const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' && d0.model !== 'M8' && d0.model !== 'M9' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
-    const s = finalize(input, all, d, vol1h, pois, idx)
+    const s = finalize(input, all, d, vol1h, pois, idx, poolCache)
     if (!s) continue
     const prev = best.get(s.id)
     if (!prev || s.score > prev.score) best.set(s.id, s)
@@ -1215,7 +1220,9 @@ const CONF_LABEL: Record<Confluence, string> = {
   decisionalPoi: 'decisional POI (terdekat di balik IDM)',
   cisd: 'CISD searah (close tembus open run lawan)',
   smt: 'SMT divergence dengan BTC/ETH',
-  ifvg: 'inverse FVG searah'
+  ifvg: 'inverse FVG searah',
+  dispStrong: 'POI lahir dengan displacement kuat',
+  liqTarget: 'ada liquidity B ≥ 1R di depan POI'
 }
 
 /** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
@@ -1235,7 +1242,8 @@ function finalize(
   d: Draft,
   vol1h: { c: readonly Candle[]; vr: number[] } | null,
   pois: readonly Poi[] = [],
-  idx: InducementIndex | null = null
+  idx: InducementIndex | null = null,
+  poolCache: Map<number, LiqPool[]> | null = null
 ): Setup | null {
   const { entry, cfg, symbol } = input
   const c = entry.candles
@@ -1275,6 +1283,18 @@ function finalize(
     if (ind.idm) conf.add('idmSwept')
     if (ind.extreme) conf.add('extremePoi')
     if (ind.decisional) conf.add('decisionalPoi')
+  }
+  // POI story tags (layer 3 lab 2026-11-23): leg displacement of the parent POI, liquidity B in front of it
+  const storyA = parent ? all.find((x) => x.timeframe === parent.timeframe) : undefined
+  if (parent && storyA) {
+    const leg = legDisplacement(parent, storyA)
+    if (leg && leg.disp >= cfg.storyDispAtr) conf.add('dispStrong')
+    let pools = poolCache?.get(known)
+    if (!pools) {
+      pools = liquidityPools(all, known)
+      poolCache?.set(known, pools)
+    }
+    if (drawTarget(parent, storyA, pools, known).target) conf.add('liqTarget')
   }
   // confirmation after the POI reaction (§11): CISD / inverse FVG on the entry TF since the hit (at most confirmLookback
   // candles back), SMT on 1h against the reference at that time

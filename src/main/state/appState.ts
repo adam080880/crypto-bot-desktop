@@ -117,6 +117,21 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_m10', true)
     }
+    // user 2026-11-23: M8 also on 3h POIs (lab: 3h +0,16R ≈ 4h +0,18R; with anomaly 4h+1d+3h +0,31R n 873 vs +0,40R n 519),
+    // once; unticking it later in Settings sticks
+    if (!readSetting(db, 'migr_m8_3h', z.boolean())) {
+      if (!this.config.smc.m8PoiTimeframes.includes('3h')) this.config = { ...this.config, smc: { ...this.config.smc, m8PoiTimeframes: [...this.config.smc.m8PoiTimeframes, '3h'] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_m8_3h', true)
+    }
+    // user 2026-11-23 (POI story layer 3): M8 requires a liquidity target B and a strong leg displacement, once
+    if (!readSetting(db, 'migr_m8_story', z.boolean())) {
+      const mc = { ...this.config.bot.modelConfluence }
+      mc.M8 = [...new Set([...(mc.M8 ?? []), 'liqTarget' as const, 'dispStrong' as const])]
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: mc } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_m8_story', true)
+    }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {

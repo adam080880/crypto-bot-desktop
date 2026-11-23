@@ -440,28 +440,36 @@ export class Backfiller extends EventEmitter<{ event: [BackfillEvent] }> {
     for (let a = Math.floor(from / (4 * 3600_000)) * 4 * 3600_000; a < until; a += WEEK) {
       const b = Math.min(a + WEEK, until)
       await retryBusy(() => this.locks.run(sym.symbol, async () => void rebuildDerived(this.db, this.repo, sym.id, a, b, only)), signal)
+      // give timers / WebSocket / REST a turn between weekly chunks (a symbol has ~26–100 of them; without this the
+      // worker stalled 3–4 s per symbol during the 2026-11-23 added-timeframe fill and REST calls timed out)
+      await new Promise((r) => setImmediate(r))
     }
   }
 
   /**
-   * One-time fill of timeframes added later (2026-11-23: 3m / 10m / 45m / 2h / 3h) from the stored sources, per symbol that
-   * has 1m history and no sync_state for them yet: 3m from 1m, 10m from 5m, 45m from 15m, 2h/3h from 1h (whole stored range).
-   * Weekly transactions, yields between symbols; live ingest keeps them current afterwards.
+   * One-time fill of timeframes added later (2026-11-23: 3m / 10m / 45m / 2h / 3h) from the stored sources, per symbol with
+   * 1m history: 3m from 1m, 10m from 5m, 45m from 15m, 2h/3h from 1h (whole stored range, idempotent upserts).
+   * Completion is remembered per symbol in the setting `derive_added_done` — not via sync_state, which live ingest
+   * already writes for the newest buckets. Weekly transactions, yields between symbols; resumes after a restart.
    */
   async deriveAddedTimeframes(added: readonly DerivedTimeframe[] = ['3m', '10m', '45m', '2h', '3h'], signal?: AbortSignal): Promise<number> {
+    const KEY = 'derive_added_done'
+    const doneIds = new Set(readSetting(this.db, KEY, z.array(z.number())) ?? [])
     const ids = this.db.$client.prepare(`SELECT symbol_id FROM sync_state WHERE timeframe = '1m' AND last_open_time IS NOT NULL`).pluck().all() as number[]
     const byId = new Map(activeSymbols(this.db).map((s) => [s.id, s]))
     let done = 0
     for (const id of ids) {
       if (signal?.aborted) break
+      if (doneIds.has(id)) continue
       const sym = byId.get(id)
       const m1 = getSyncState(this.db, id, '1m')
       if (!sym || !m1?.lastOpenTime) continue
-      const missing = added.filter((tf) => !getSyncState(this.db, id, tf)?.lastOpenTime)
-      if (!missing.length) continue
       const firsts = (['1m', '5m', '15m', '1h'] as const).map((tf) => getSyncState(this.db, id, tf)?.firstOpenTime ?? null).filter((x): x is number => x !== null)
       if (!firsts.length) continue
-      await this.rebuildChunked(sym, Math.min(...firsts), m1.lastOpenTime + MIN, signal, missing)
+      await this.rebuildChunked(sym, Math.min(...firsts), m1.lastOpenTime + MIN, signal, added)
+      if (signal?.aborted) break
+      doneIds.add(id)
+      writeSetting(this.db, KEY, [...doneIds])
       done++
       await new Promise((r) => setImmediate(r))
     }

@@ -336,6 +336,24 @@ Kandidat berikutnya (belum dibuat): BPR, mitigation/rejection block, OTE.
 
 ---
 
+## 12. Cerita POI: anatomi + liquidity A → B (riset sendiri, user 2026-11-23: "bangun insting dengan rumus matematis")
+Kode `strategy/story.ts`, panel **Cerita POI** di Chart (`smc:stories`). Deterministik, tanpa ML, cuma pakai data yang sudah
+diketahui saat itu. Untuk POI aktif ≥ 1h terdekat dari harga (5 di bawah buat long, 5 di atas buat short):
+- **Kenapa terbentuk (A):** liquidity yang diambil candle asal POI (`Poi.originT`): pool swing semua TF yang disapu candle itu
+  (TF ≥ TF POI = penyebab ✓, TF lebih kecil = catatan), QM = gunung 2 nyapu gunung 1, atau reaksi dari POI TF lebih besar
+  (`originNearPct`). Tanpa penyebab → ✗ "POI lemah".
+- **Dorongan:** body terbesar ÷ ATR di leg yang bikin POI diketahui (≥ 1,5 kuat, < 0,8 lemah), FVG yang ditinggal (masih terbuka?),
+  BOS yang dihasilkan.
+- **Bahan bakar:** fresh / sudah dimitigasi n×, umpan di depan sudah diambil, IDM disapu, extreme POI (§11).
+- **Konteks:** searah/melawan trend TF POI, 1d, BTC 4h; premium/discount range `pdTimeframe`.
+- **Liquidity A → B:** peta pool (swing semua TF, equal ×2, high/low kemarin, high/low minggu lalu; bobot = bobot TF × equal ×
+  umur, pool berjarak ≤ 0,15 % digabung). **B** = pool searah dengan tarikan terbesar (bobot ÷ jarak dalam R, ≥ 1R), POI lawan
+  (punya penyebab, TF ≥ TF POI) di jalan, IRL = FVG lawan terbuka terdekat, liquidity ≤ 1R di balik SL (bisa diburu dulu).
+- Ringkasan +n / −n = jumlah fakta pendukung / penentang (**bukan** probabilitas).
+- **Lapis 3 (lab 2026-11-23, `docs/entry-v2.md §27`):** skor peluang gabungan (logistic dari 24 fitur) **tidak** lolos OOS, jadi
+  tidak dipakai. Dua fakta tunggal yang lolos dijadikan tag: `dispStrong` (body leg POI induk ≥ `smc.storyDispAtr` × ATR) dan
+  `liqTarget` (ada pool B ≥ 1R di depan POI induk), sekarang wajib untuk M8.
+
 ## Ditampilkan di chart (setelah implementasi)
 - Label swing HH/HL/LH/LL dan marker BOS (§1–2)
 - Kotak OB & **OB valid** (garis entry di ujung body) + zona wick **liquidity** (§3, §8, §10)

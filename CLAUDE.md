@@ -144,6 +144,10 @@ dites ke exchange beneran.
 - **TF 3m / 45m / 2h / 3h di DB** (2026-11-23, `docs/entry-v2.md §26`, migration `0008_candles_odd`): turunan seperti 5m/15m/1h/4h,
   diisi sekali dari data lama saat worker start (`deriveAddedTimeframes`). Lab: tidak lebih bagus dari TF standar, kecuali M8 (3h ≈ 4h).
   **10m** juga disimpan (dari 5m, migration yang sama). M10 = QM di 1m/3m/5m/10m (`smc.m10Timeframes`): rugi di lab. `TF_RANK` = `TF_MS`.
+- **Cerita POI** (2026-11-23, `docs/smc-rules.md §12`, `strategy/story.ts`, panel di Chart, IPC `smc:stories`): lapis 1 anatomi
+  (kenapa terbentuk, dorongan, fresh/umpan, konteks) + lapis 2 peta liquidity & draw A → B. Deterministik. Lapis 3 (probabilitas
+  dari data): skor gabungan gagal OOS; tag `dispStrong` + `liqTarget` wajib M8 (+0,40 → +0,58R, `docs/entry-v2.md §27`). M8 juga POI 3h
+  (`migr_m8_3h`). Job isi TF baru kasih jeda event loop per chunk (dulu worker macet 3–4 dtk/koin → REST timeout).
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,

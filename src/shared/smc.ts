@@ -282,6 +282,10 @@ export type Confluence =
   | 'smt'
   /** Inverse FVG: an opposite entry-TF FVG closed through in the setup direction, after the POI hit. Filter tag. */
   | 'ifvg'
+  /** POI story (docs/smc-rules.md §12): the leg that created the parent POI had a body ≥ smc.storyDispAtr × ATR. Filter tag. */
+  | 'dispStrong'
+  /** POI story: a liquidity pool (B) ≥ 1R in front of the parent POI (strongest weight ÷ distance). Filter tag. */
+  | 'liqTarget'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -318,7 +322,9 @@ export const REQUIRABLE_CONFLUENCES = [
   'decisionalPoi',
   'cisd',
   'smt',
-  'ifvg'
+  'ifvg',
+  'dispStrong',
+  'liqTarget'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -356,7 +362,9 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'decisionalPoi', label: 'decisional POI (POI terdekat di bawah/atas IDM)' },
   { key: 'cisd', label: 'CISD: close tembus open run lawan setelah POI kena' },
   { key: 'smt', label: 'SMT divergence 1h vs BTC (BTC vs ETH)' },
-  { key: 'ifvg', label: 'inverse FVG searah setelah POI kena' }
+  { key: 'ifvg', label: 'inverse FVG searah setelah POI kena' },
+  { key: 'dispStrong', label: 'cerita POI: displacement kuat saat POI lahir' },
+  { key: 'liqTarget', label: 'cerita POI: ada liquidity B ≥ 1R di depan' }
 ]
 
 /** A candidate entry (never an order by itself). */

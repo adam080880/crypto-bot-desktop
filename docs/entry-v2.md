@@ -625,3 +625,19 @@ Lab 100 koin (mesin app, POI TF aneh di-resample dari 1m, avg R [IS / OOS] bulan
 
 Kesimpulan: TF aneh tidak memberi edge tambahan, kecuali **M8**, yang tetap positif di 45m/2h/3h (nambah jumlah trade, avg R per
 trade turun). M10 versi 1m/3m/5m rugi (SL kecil → fee besar); versi QM 15m sebelumnya −0,05R. Tidak ada yang dipasang otomatis.
+
+## 27. Cerita POI lapis 3: fakta mana yang benar-benar menaikkan peluang (2026-11-23)
+
+Lab 100 koin (mesin app, `lab3.ts` di scratchpad): tiap setup M0/M2a/M8/M9 dicatat bersama 24 fitur angka dari cerita POI induknya
+(`StoryFeatures`, dihitung saat setup diketahui). Label = kena 2R sebelum SL; exit = exit bot.
+
+- **Skor peluang gabungan gagal:** logistic dilatih di IS, setup OOS dibagi 5 menurut peluang → tidak naik konsisten (M0, M8, M9).
+  Filter "peluang ≥ P60" tidak lebih bagus dari tanpa filter di OOS. Tidak dipasang.
+- **Fakta tunggal yang konsisten IS dan OOS:**
+  - M0 (semua setup): nggak ada liquidity di balik SL +0,35 / +0,26R, ada BOS +0,15 / +0,39R. Tapi **di atas filter bot M0 tidak
+    menambah** (OOS negatif / n kecil) → tidak dipasang.
+  - **M8:** tanpa target B −0,68 / −0,83R; displacement ≥ median (0,95× ATR) +0,26 / +0,13R. Di atas OR `anomaly` (config bot):
+    +0,40R → **+0,58R** [IS +0,54 / OOS +0,64] 6/6 bulan, n 527 → 353. Tanpa `anomaly` +0,16R → +0,35R (n 2.379).
+  - M9: semua efek kecil.
+- Dipasang: tag `dispStrong` + `liqTarget` (`strategy/story.ts legDisplacement` / `drawTarget`, sama persis dengan lab: 124/124 cocok),
+  wajib M8 (migrasi `migr_m8_story`). M4 belum punya cerita (POI induknya OB lawan yang jebol).

@@ -11,6 +11,7 @@ import type { RadarState } from './radar'
 import type { EconomicEvent, EventReaction, NewsCandidate, NewsState, ReactionStat } from './news'
 import type { AutoSyncState, BackfillEstimate, BackfillEvent, BackfillSummary } from './sync'
 import type { Timeframe } from './timeframes'
+import type { StoryResult } from './story'
 
 /** Names of secrets that may be stored via safeStorage. */
 export const SECRET_NAMES = ['binance.apiKey', 'binance.apiSecret', 'anthropic.apiKey', 'bls.apiKey', 'discord.webhookUrl'] as const
@@ -91,6 +92,7 @@ export interface IpcInvokeMap {
   'live:setChart': { req: { symbol: string | null }; res: void }
   'smc:analyze': { req: { symbol: string; timeframe: Timeframe; limit: number }; res: SmcAnalysis | null }
   'smc:setups': { req: { symbol: string }; res: Setup[] }
+  'smc:stories': { req: { symbol: string }; res: StoryResult | null }
   'backtest:run': { req: BacktestParams; res: BacktestResult | null }
   'backtest:profiles': { req: void; res: Record<string, CoinProfile> }
   'backtest:saveProfile': { req: CoinProfile; res: Record<string, CoinProfile> }
@@ -186,6 +188,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'live:setChart',
   'smc:analyze',
   'smc:setups',
+  'smc:stories',
   'backtest:run',
   'backtest:profiles',
   'backtest:saveProfile',
