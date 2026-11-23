@@ -347,7 +347,7 @@ export function Chart() {
   }
 
   return (
-    <div className="flex h-full min-h-[480px] flex-col gap-3">
+    <div className="flex min-h-full flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="num h-8 w-44"
@@ -423,7 +423,8 @@ export function Chart() {
           </button>
         ))}
       </div>
-      <div className="relative min-h-0 flex-1 rounded-xl border">
+      {/* min height: the setup list + POI story panel below must never squeeze the chart to 0 px */}
+      <div className="relative h-[62vh] min-h-[420px] shrink-0 rounded-xl border">
         <div ref={box} className="absolute inset-0" />
         {info && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted-foreground">{info}</div>
