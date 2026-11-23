@@ -144,6 +144,19 @@ export function drawTarget(poi: Poi, a: SmcAnalysisFull, pools: readonly LiqPool
   return { sl, risk, target }
 }
 
+/** Nearest unswept pool on the stop side within 1R beyond the POI's own stop (null = clean). */
+export function poolBehindSl(poi: Poi, pools: readonly LiqPool[], sl: number, risk: number): (LiqPool & { distR: number }) | null {
+  const bull = poi.direction === 'bullish'
+  let best: (LiqPool & { distR: number }) | null = null
+  if (!(risk > 0)) return null
+  for (const p of pools) {
+    if (p.side !== (bull ? 'sell' : 'buy') || (bull ? p.price >= sl : p.price <= sl)) continue
+    const distR = Math.abs(p.price - sl) / risk
+    if (distR <= 1 && (!best || distR < best.distR)) best = { ...p, distR }
+  }
+  return best
+}
+
 // ---------------------------------------------------------------------------------------------
 // Layer 1: anatomy
 // ---------------------------------------------------------------------------------------------
@@ -360,11 +373,7 @@ export function poiStory(poi: Poi, all: readonly SmcAnalysisFull[], ctx: StoryCt
     }
     fx.irlR = irl ? Math.min(irl.distR, 20) : 20
     if (irl) add('draw', 0, `IRL terdekat: FVG ${irl.tf} terbuka di ${fmtR(irl.distR)}`)
-    for (const p of ctx.pools) {
-      if (p.side !== (bull ? 'sell' : 'buy') || (bull ? p.price >= sl : p.price <= sl)) continue
-      const distR = Math.abs(p.price - sl) / risk
-      if (distR <= 1 && (!behindSl || distR < behindSl.distR)) behindSl = { ...p, distR }
-    }
+    behindSl = poolBehindSl(poi, ctx.pools, sl, risk)
     fx.behindSlR = behindSl ? behindSl.distR : 2
     if (behindSl) add('draw', -1, `${poolLabel(behindSl)} ${fmtR(behindSl.distR)} di balik SL, bisa diburu dulu`)
     else add('draw', 1, 'Di balik SL (1R) nggak ada liquidity yang belum diambil')

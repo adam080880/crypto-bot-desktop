@@ -456,7 +456,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   // (IS +0,26 / OOS +0,40) vs +0,24R; M1 + liqHtfBehind +0,07R vs −0,07R; M7 + liqHtfBehind +0,13R vs +0,04R (IS and OOS)
   // inducement lab 2026-11-23 (after the M0 look-ahead fix, bot exit without TP): M0 POI 4h/1d + baitTaken +0,10R (6/7 months)
   // vs +0,07R; M4 fvg + slLiqClear + cleanApproach on the trailing exit +0,44R (IS +0,42 / OOS +0,47, 7/7 months)
-  M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken'], // 2026-11-19: +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
+  M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken', 'slPoolClear'], // 300 coins 2026-11-23: + slPoolClear +0,83R vs +0,12R (n 97); 2026-11-19: +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
   M1: ['fvg', 'trendParent', 'pdZone', 'liqHtfBehind'],
   M2a: ['trendParent'], // n 39 only; pdZone hurts M2a
   M2b: ['fvg', 'trendParent', 'pdZone'],
@@ -466,7 +466,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M7: ['liqHtfBehind'], // MSNR: the level + storyline is the signal
   M8: ['liqTarget', 'dispStrong'], // POI story lab 2026-11-23: with OR anomaly +0,40R → +0,58R [IS +0,54 / OOS +0,64] 6/6, n 527 → 353
   M10: ['btc4h', 'slLiqClear'], // lab 2026-11-23 (POI 4h/1d, trailing): +0,15R [IS +0,11 / OOS +0,20] n 254, 4/7; without −0,05R
-  M9: ['cleanApproach'] // lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
+  M9: ['cleanApproach', 'pdPremium', 'dayOpenCheap'], // 300 coins: + pdPremium +0,33R [IS +0,37 / OOS +0,45 / new +0,29] vs −0,05R; + dayOpenCheap +0,54R [+0,78 / +0,72 / new +0,42] vs +0,12R; lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
 }
 
 /**
@@ -485,7 +485,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE_ANY: ModelConfluence = {
   M5: ['btc4h', 'smt'],
   M6: [],
   M7: [],
-  M8: ['anomaly'],
+  M8: [], // 300 coins: anomaly adds nothing on new coins (+0,34R n 1.594 vs +0,30R n 11.417 without)
   M9: ['bbMomentum', 'liqHtfBehind'],
   M10: []
 }

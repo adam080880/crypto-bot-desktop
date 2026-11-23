@@ -641,3 +641,37 @@ Lab 100 koin (mesin app, `lab3.ts` di scratchpad): tiap setup M0/M2a/M8/M9 dicat
   - M9: semua efek kecil.
 - Dipasang: tag `dispStrong` + `liqTarget` (`strategy/story.ts legDisplacement` / `drawTarget`, sama persis dengan lab: 124/124 cocok),
   wajib M8 (migrasi `migr_m8_story`). M4 belum punya cerita (POI induknya OB lawan yang jebol).
+
+## 28. Lab 300 koin: exit di target B, M8 di 200 koin baru, tag cerita baru (2026-11-23)
+
+300 koin top volume (100 koin lama + **200 koin baru** yang belum pernah dipakai memilih aturan), mesin app, exit bot.
+
+- **Exit di target B** (TP di pool dengan tarikan terbesar dari cerita POI, polos atau bertingkat): **tidak lebih bagus**.
+  Filter bot: M0 exit bot +0,25R vs B +0,21R; M8 TP 3R +0,23R vs B +0,14R; M9 B negatif; M2a B +0,35R vs +0,30R (n 257,
+  terlalu kecil untuk ganti exit). Tidak dipasang.
+- **M8 `liqTarget + dispStrong` lolos di koin baru:** 200 koin baru +0,21R → +0,29R (7/7 bulan). OR `anomaly` tidak menambah di
+  koin baru (dengan +0,34R n 1.594 vs tanpa +0,30R n 11.417) → **dilepas** (trade ±7× lebih banyak, avg R sama).
+- **Tag baru** (`slPoolClear`, `pdPremium`, rumus sama dengan cerita POI, cocok 664/664 dan 656/664 dengan lab):
+  - M0 (filter bot) + `slPoolClear` (tidak ada pool ≤ 1R di balik SL POI): **+0,83R** [lama +0,70 / baru +1,08] vs +0,12R, n 97.
+  - M9 (filter bot) + `pdPremium` (POI di sisi mahal: long di premium / short di discount): **+0,33R** [+0,37 / +0,45 / baru
+    +0,29] 6/7 bulan vs −0,05R, n 1.060. Kebalikan aturan ICT klasik (beli di discount): di data ini ikut momentum lebih bagus.
+    (M2a juga +0,69R vs −0,07R tapi n 120 dan IS kosong → belum dipasang.)
+- Dipasang lewat migrasi `migr_story300`: M0 + `slPoolClear`, M9 + `pdPremium`, M8 OR kosong.
+
+## 29. Konsep dari internet: OTE, Power of 3 / Judas, harga open, CVD (2026-11-23)
+
+Riset internet (sumber kebanyakan blog broker / penjual indikator tanpa bukti; satu-satunya uji kuantitatif, Judas swing di 18
+tahun emas, = 50 %). Dibuat sebagai fitur (`strategy/extra.ts`, test `extra.test.ts`) lalu dites di 300 koin (IS / OOS 100 koin
+lama + 200 koin baru), di atas filter bot baru (§28):
+
+| Konsep | Hasil |
+|---|---|
+| **Entry di sisi murah open harian UTC** (long di bawah open) | **M9 + pdPremium: +0,33R → +0,54R** [+0,78 / +0,72 / baru +0,42], 6/7 bulan, n 537 vs sisanya +0,12R → tag `dayOpenCheap`, wajib M9 |
+| OTE 62–79 % | M9 +0,54R tapi IS lama sama dengan tanpa filter; lainnya campur → tidak |
+| Power of 3 / Judas (lawan range Asia 00–07 UTC disapu dulu) | tidak konsisten di model mana pun (sesuai uji emas di internet) → tidak |
+| Open mingguan | M4 sisi mahal +0,39R vs +0,34R tapi IS lama turun → tidak |
+| CVD divergence di POI | **jelek** di M0/M4/M9 (bukan sinyal reversal); M9 tanpa divergence +0,39R (kecil) → tidak ditumpuk |
+| NWOG/NDOG, kluster likuidasi | tidak berlaku (crypto 24/7) / tidak ada data histori → tidak dites |
+
+Filosofi M9 sekarang: POI di sisi mahal range 4h (ikut momentum) **dan** entry di "diskon" harian (pullback intraday).
+`dayOpenCheap` cocok 296/296 dengan lab. Migrasi `migr_story300` (§28) juga memasang ini.

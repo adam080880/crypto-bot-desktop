@@ -29,6 +29,7 @@ describe('per-model confluence migration', () => {
     writeSetting(db, 'migr_bot_pdzone', true)
     writeSetting(db, 'migr_liq_tags', true)
     writeSetting(db, 'migr_lab_1123', true)
+    writeSetting(db, 'migr_story300', true)
     const state = new AppState(db, { dbPath: ':memory:', version: 't' })
     expect(state.getConfig().bot.modelConfluence).toMatchObject({ M0: ['fvg', 'trendParent', 'pdZone'], M5: ['oiConfirm'], M6: [] })
     state.updateConfig(parseConfigPatch({ bot: { modelConfluence: { ...state.getConfig().bot.modelConfluence, M0: ['prevOpposite'] } } }))
@@ -41,6 +42,7 @@ describe('liquidity tag migration (2026-11-22)', () => {
     const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
     writeSetting(db, 'migr_bot_model_conf', true)
     writeSetting(db, 'migr_lab_1123', true)
+    writeSetting(db, 'migr_story300', true)
     writeSetting(db, 'app_config', { bot: { modelConfluence: { M0: ['prevOpposite', 'slLiqClear'], M1: ['fvg'], M4: ['fvg'], M7: [] } } })
     const state = new AppState(db, { dbPath: ':memory:', version: 't' })
     expect(state.getConfig().bot.modelConfluence).toMatchObject({ M0: ['prevOpposite', 'slLiqClear', 'cleanApproach'], M1: ['fvg', 'liqHtfBehind'], M4: ['fvg'], M7: ['liqHtfBehind'] })
@@ -54,6 +56,7 @@ describe('inducement/exit lab migration (2026-11-23)', () => {
     const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
     writeSetting(db, 'migr_bot_model_conf', true)
     writeSetting(db, 'migr_liq_tags', true)
+    writeSetting(db, 'migr_story300', true)
     writeSetting(db, 'app_config', {
       exit: { tpMode: 'liquidity' },
       smc: { breakerTpR: 1, m8TpR: 2 },

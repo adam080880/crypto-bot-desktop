@@ -15,7 +15,7 @@ import { InducementIndex } from './inducement'
 import { analyzeStructure, findPivots } from './swings'
 import { detectQms } from './qm'
 import { cisdIn, ifvgIn, smtAt } from './confirm'
-import { drawTarget, legDisplacement, liquidityPools } from './story'
+import { drawTarget, legDisplacement, liquidityPools, poolBehindSl } from './story'
 import type { LiqPool } from '@shared/story'
 import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
 
@@ -1222,7 +1222,10 @@ const CONF_LABEL: Record<Confluence, string> = {
   smt: 'SMT divergence dengan BTC/ETH',
   ifvg: 'inverse FVG searah',
   dispStrong: 'POI lahir dengan displacement kuat',
-  liqTarget: 'ada liquidity B ≥ 1R di depan POI'
+  liqTarget: 'ada liquidity B ≥ 1R di depan POI',
+  slPoolClear: 'di balik SL POI (1R) nggak ada liquidity',
+  pdPremium: 'POI di sisi mahal range (ikut momentum)',
+  dayOpenCheap: 'entry di sisi murah open harian'
 }
 
 /** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
@@ -1294,7 +1297,15 @@ function finalize(
       pools = liquidityPools(all, known)
       poolCache?.set(known, pools)
     }
-    if (drawTarget(parent, storyA, pools, known).target) conf.add('liqTarget')
+    const dt = drawTarget(parent, storyA, pools, known)
+    if (dt.target) conf.add('liqTarget')
+    if (dt.risk > 0 && !poolBehindSl(parent, pools, dt.sl, dt.risk)) conf.add('slPoolClear')
+    // same measure as the story's pdBad: the parent POI's line in the pdTimeframe range
+    const pdS = all.find((x) => x.timeframe === cfg.pdTimeframe)
+    if (pdS) {
+      const pos = rangePosition(pdS.candles, lastClosedBy(pdS.candles, pdS.timeframe, known), cfg.pdLookback, parent.level)
+      if (pos !== null && (d.dir === 'bullish' ? pos >= 0.5 : pos <= 0.5)) conf.add('pdPremium')
+    }
   }
   // confirmation after the POI reaction (§11): CISD / inverse FVG on the entry TF since the hit (at most confirmLookback
   // candles back), SMT on 1h against the reference at that time
@@ -1316,6 +1327,14 @@ function finalize(
     break
   }
 
+  // Power of 3 / intraday discount: entry vs the UTC daily open of the day the setup became known (same as extra.ts
+  // dayOpenPos > 0); when that day's first candle is not closed yet (known at 00:00), its open = the previous close
+  {
+    const day0 = Math.floor(known / 86_400_000) * 86_400_000
+    const di = indexAtOrAfter(c, day0)
+    const dOpen = c[di]?.t === day0 ? c[di]!.o : known === day0 && di > 0 ? c[di - 1]!.c : null
+    if (dOpen !== null && (bull ? dOpen > d.entry : dOpen < d.entry)) conf.add('dayOpenCheap')
+  }
   // killzone = when the setup became known (the order goes in then); filter only, no score
   if (inKillzone(known - 1, cfg.killzonesUtc)) conf.add('killzone')
   // futures positioning (filter tags, no score)

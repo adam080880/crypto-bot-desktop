@@ -148,6 +148,10 @@ dites ke exchange beneran.
   (kenapa terbentuk, dorongan, fresh/umpan, konteks) + lapis 2 peta liquidity & draw A → B. Deterministik. Lapis 3 (probabilitas
   dari data): skor gabungan gagal OOS; tag `dispStrong` + `liqTarget` wajib M8 (+0,40 → +0,58R, `docs/entry-v2.md §27`). M8 juga POI 3h
   (`migr_m8_3h`). Job isi TF baru kasih jeda event loop per chunk (dulu worker macet 3–4 dtk/koin → REST timeout).
+- **Lab 300 koin + konsep internet** (2026-11-23, `docs/entry-v2.md §28–29`, 200 koin baru sebagai holdout): exit di target B tidak
+  lebih bagus; M8 tag lolos di koin baru, OR `anomaly` dilepas; tag baru `slPoolClear` (wajib M0), `pdPremium` + `dayOpenCheap`
+  (wajib M9; ikut momentum range 4h + entry di bawah open harian). OTE / Judas / open mingguan / CVD tidak konsisten (CVD divergence
+  malah jelek). Migrasi `migr_story300`.
   berdasarkan waktu trade dibuka. Ada baris Total + DD maks (`tradeStats` di `@shared/bot`). User testing pakai risk 6,5%
   (SL M5/M6 lebar tidak lolos min notional 5 USDT dengan modal ±17 USDT) dan rem harian `risk.maxDailyLossPct` 25%.
 - **Rotasi momentum = PAPER SAJA** (`docs/entry-v2.md §11`, halaman Rotasi, `src/main/rotation/`). Long/short top 60 volume,

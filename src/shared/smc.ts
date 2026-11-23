@@ -286,6 +286,14 @@ export type Confluence =
   | 'dispStrong'
   /** POI story: a liquidity pool (B) ≥ 1R in front of the parent POI (strongest weight ÷ distance). Filter tag. */
   | 'liqTarget'
+  /** POI story: no unswept pool within 1R beyond the parent POI's own stop (lab 300 coins: M0 +0,83R vs +0,12R). Filter tag. */
+  | 'slPoolClear'
+  /** Parent POI in the "expensive" half of the pdTimeframe range (long in premium / short in discount): momentum, the
+   *  opposite of pdZone (lab 300 coins: M9 +0,33R vs −0,05R). Filter tag. */
+  | 'pdPremium'
+  /** Entry on the cheap side of the UTC daily open (long below it, short above): Power of 3 / intraday discount
+   *  (lab 300 coins: M9 + pdPremium +0,54R vs +0,12R). Filter tag. */
+  | 'dayOpenCheap'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -324,7 +332,10 @@ export const REQUIRABLE_CONFLUENCES = [
   'smt',
   'ifvg',
   'dispStrong',
-  'liqTarget'
+  'liqTarget',
+  'slPoolClear',
+  'pdPremium',
+  'dayOpenCheap'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -364,7 +375,10 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'smt', label: 'SMT divergence 1h vs BTC (BTC vs ETH)' },
   { key: 'ifvg', label: 'inverse FVG searah setelah POI kena' },
   { key: 'dispStrong', label: 'cerita POI: displacement kuat saat POI lahir' },
-  { key: 'liqTarget', label: 'cerita POI: ada liquidity B ≥ 1R di depan' }
+  { key: 'liqTarget', label: 'cerita POI: ada liquidity B ≥ 1R di depan' },
+  { key: 'slPoolClear', label: 'cerita POI: nggak ada liquidity ≤ 1R di balik SL POI' },
+  { key: 'pdPremium', label: 'POI di sisi mahal (long di premium / short di discount)' },
+  { key: 'dayOpenCheap', label: 'entry di sisi murah open harian (long di bawah open UTC)' }
 ]
 
 /** A candidate entry (never an order by itself). */

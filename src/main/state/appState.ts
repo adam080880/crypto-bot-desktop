@@ -132,6 +132,16 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_m8_story', true)
     }
+    // user 2026-11-23 (lab 300 coins incl. 200 new ones): M0 + slPoolClear, M9 + pdPremium + dayOpenCheap, M8 without the anomaly OR, once
+    if (!readSetting(db, 'migr_story300', z.boolean())) {
+      const mc = { ...this.config.bot.modelConfluence }
+      mc.M0 = [...new Set([...(mc.M0 ?? []), 'slPoolClear' as const])]
+      mc.M9 = [...new Set([...(mc.M9 ?? []), 'pdPremium' as const, 'dayOpenCheap' as const])]
+      const any = { ...this.config.bot.modelConfluenceAny, M8: (this.config.bot.modelConfluenceAny.M8 ?? []).filter((k) => k !== 'anomaly') }
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: mc, modelConfluenceAny: any } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_story300', true)
+    }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {
