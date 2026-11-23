@@ -32,6 +32,10 @@ SMC/ICT, screener, backtest, bot (paper/live), radar pump, kalender news USD, da
 Gambaran besar: data harga Binance disimpan lokal, tiap timeframe dianalisis dengan detektor SMC/ICT, model entry
 mengubah POI jadi *setup* (limit + SL + rencana exit), lalu setup disaring berlapis sebelum jadi order.
 
+![Cara kerja bot](docs/media/cara-kerja.gif)
+
+<sub>Versi kualitas penuh: [cara-kerja.webm](docs/media/cara-kerja.webm)</sub>
+
 ```mermaid
 flowchart TD
     subgraph DATA["1 · Data (lokal, SQLite)"]
@@ -84,6 +88,10 @@ flowchart TD
 
 Siklus hidup satu order:
 
+![Siklus hidup order](docs/media/siklus-order.gif)
+
+<sub>Ilustrasi (bukan trade asli). Versi kualitas penuh: [siklus-order.webm](docs/media/siklus-order.webm)</sub>
+
 ```mermaid
 stateDiagram-v2
     [*] --> Pending: setup lolos saringan<br/>limit dipasang
@@ -103,6 +111,19 @@ stateDiagram-v2
     Impas --> [*]
     Untung --> [*]
 ```
+
+### Studi kasus (trade live asli)
+
+Tiga trade asli bot di akun live, dengan candle 15m asli dan **cerita POI** induknya seperti yang dihitung app saat setup
+muncul (tanpa look-ahead): kenapa POI terbentuk, liquidity di sekitar, dan fakta yang mendukung (✓) / menentang (✗).
+Dipilih satu untung, satu impas, satu rugi, apa adanya.
+
+| Untung: SEI SHORT +2,36R | Impas: LAB LONG −0,01R | Rugi: AERO SHORT −1,15R |
+|---|---|---|
+| ![SEI](docs/media/kasus-untung.gif) | ![LAB](docs/media/kasus-impas.gif) | ![AERO](docs/media/kasus-rugi.gif) |
+| Cerita campur, tapi searah trend 4h, 1d dan BTC. 50% ditutup di 3R, sisanya kena TP. [webm](docs/media/kasus-untung.webm) | POI kuat (sweep SSL 1d + displacement) tapi melawan trend 1d dan BTC. Order flow nahan posisi, SL dikunci di atas entry. [webm](docs/media/kasus-impas.webm) | Tanpa penyebab ≥ 1d, tanpa target B, BSL 1d tepat di balik SL → diburu. Fakta "tanpa target B" sekarang jadi syarat M8 (`liqTarget`). [webm](docs/media/kasus-rugi.webm) |
+
+Video dibuat ulang dengan `scripts/videos/` (lihat README di folder itu).
 
 ## Apa itu SMC (versi app ini)
 

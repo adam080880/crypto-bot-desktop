@@ -1,0 +1,451 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>html,body{margin:0;background:#0f1115}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+window.onerror = (m, src, l, c, e) => require('electron').ipcRenderer.send(`done:${new URLSearchParams(location.search).get('scene')}`, 'ERROR ' + (e?.stack ?? m))
+const fs = require('fs')
+const path = require('path')
+const { ipcRenderer } = require('electron')
+const q = new URLSearchParams(location.search)
+const SCENE = q.get('scene')
+const OUT = q.get('out')
+const CASES = JSON.parse(fs.readFileSync(q.get('cases'), 'utf8'))
+const W = 960, H = 540
+const cv = document.getElementById('c')
+const g = cv.getContext('2d')
+
+// ---------------------------------------------------------------- palette / drawing helpers
+const C = {
+  bg: '#0f1115', panel: '#171a21', panel2: '#1f232c', line: '#2b303b', text: '#e8eaed', dim: '#9aa0a6', faint: '#5f6672',
+  bull: '#26a69a', bear: '#ef5350', amber: '#f5b041', blue: '#4f8cff', purple: '#b07cff', cyan: '#3fc1d9', white: '#ffffff'
+}
+const FONT = '"Segoe UI", Arial, sans-serif'
+function text(s, x, y, { size = 16, color = C.text, weight = 400, align = 'left', base = 'alphabetic' } = {}) {
+  g.font = `${weight} ${size}px ${FONT}`
+  g.fillStyle = color
+  g.textAlign = align
+  g.textBaseline = base
+  g.fillText(s, x, y)
+}
+function rr(x, y, w, h, r, fill, stroke) {
+  g.beginPath()
+  g.roundRect(x, y, w, h, r)
+  if (fill) { g.fillStyle = fill; g.fill() }
+  if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.5; g.stroke() }
+}
+function wrap(s, x, y, maxW, opt = {}) {
+  const size = opt.size ?? 15
+  g.font = `${opt.weight ?? 400} ${size}px ${FONT}`
+  const words = s.split(' ')
+  let line = ''
+  let yy = y
+  for (const w of words) {
+    const t = line ? line + ' ' + w : w
+    if (g.measureText(t).width > maxW && line) {
+      text(line, x, yy, opt)
+      line = w
+      yy += size * 1.35
+    } else line = t
+  }
+  if (line) text(line, x, yy, opt)
+  return yy + size * 1.35
+}
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.pow(1 - x, 3))
+const clamp01 = (x) => Math.max(0, Math.min(1, x))
+const fmtPx = (n) => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(4))
+function header(title, sub) {
+  g.fillStyle = C.bg
+  g.fillRect(0, 0, W, H)
+  text(title, 28, 40, { size: 24, weight: 700 })
+  if (sub) text(sub, 28, 64, { size: 14, color: C.dim })
+  text('SMC Trading Assistant', W - 28, 40, { size: 13, color: C.faint, align: 'right' })
+}
+
+// ---------------------------------------------------------------- scene 1: how the bot works
+const STAGES = [
+  { n: '1', t: 'Data', c: C.blue, d: ['Candle Binance (publik) disimpan lokal di SQLite', '1m → 3m · 5m · 10m · 15m · 45m · 1h · 2h · 3h · 4h', 'plus open interest, funding, BTC dominance'] },
+  { n: '2', t: 'Detektor SMC', c: C.cyan, d: ['Struktur (swing, BOS), POI: OB, QM, RBS/SBR, OCL Break', 'FVG + liquidity BSL / SSL / equal high-low', 'POI tanpa penyebab (sweep / tap POI HTF) dibuang'] },
+  { n: '3', t: 'Model entry', c: C.purple, d: ['M0 … M10 ubah POI jadi setup', 'arah · entry limit · SL · rencana exit', 'tiap setup dapat tag konfluensi + cerita POI'] },
+  { n: '4', t: 'Saringan', c: C.amber, d: ['scan tiap 5 menit, top 300 crypto', 'konfluensi WAJIB (semua) + OR (salah satu) per model', 'risk guard: kill switch, rugi harian, news USD, blacklist'] },
+  { n: '5', t: 'Eksekusi', c: C.bull, d: ['size = risk % ÷ jarak SL, leverage aman', 'Binance: limit post-only, SL stop-market saat fill', 'paper / shadow untuk model yang masih diuji'] },
+  { n: '6', t: 'Exit & evaluasi', c: C.bear, d: ['1R → BE · 3R → tutup 50% · trailing', 'order flow searah → posisi ditahan', 'statistik → lab backtest IS / OOS → konfluensi baru'] }
+]
+function sceneCaraKerja(t) {
+  const per = 3.6
+  header('Cara kerja bot', 'dari data harga sampai posisi ditutup')
+  const active = Math.min(STAGES.length - 1, Math.floor(Math.max(0, t - 1) / per))
+  const local = Math.max(0, t - 1 - active * per)
+  // left column: stages
+  STAGES.forEach((s, i) => {
+    const y = 92 + i * 70
+    const on = i === active
+    const past = i < active
+    rr(28, y, 300, 56, 10, on ? C.panel2 : C.panel, on ? s.c : past ? C.line : null)
+    g.beginPath(); g.arc(58, y + 28, 15, 0, Math.PI * 2); g.fillStyle = on || past ? s.c : C.line; g.fill()
+    text(s.n, 58, y + 33, { size: 15, weight: 700, color: C.bg, align: 'center' })
+    text(s.t, 86, y + 34, { size: 18, weight: on ? 700 : 500, color: on ? C.white : past ? C.text : C.dim })
+    if (i < STAGES.length - 1) { g.fillStyle = past ? s.c : C.line; g.fillRect(56, y + 56, 4, 14) }
+  })
+  // right: detail of the active stage
+  const s = STAGES[active]
+  const a = ease(local / 0.6)
+  g.globalAlpha = a
+  rr(360, 92, 572, 410, 14, C.panel, null)
+  text(`${s.n} · ${s.t}`, 388, 136, { size: 26, weight: 700, color: s.c })
+  s.d.forEach((line, k) => {
+    const al = ease((local - 0.3 - k * 0.45) / 0.5)
+    g.globalAlpha = a * al
+    g.beginPath(); g.arc(398, 182 + k * 46, 5, 0, Math.PI * 2); g.fillStyle = s.c; g.fill()
+    wrap(line, 414, 188 + k * 46, 500, { size: 17 })
+  })
+  g.globalAlpha = a
+  // stage illustration
+  const ix = 388, iy = 340
+  if (active === 0) {
+    for (let k = 0; k < 18; k++) {
+      const h = 20 + Math.abs(Math.sin(k * 1.7 + t)) * 60, x = ix + k * 28, o = iy + 110 - h
+      g.fillStyle = k % 3 ? C.bull : C.bear
+      g.fillRect(x + 6, o, 12, h); g.fillRect(x + 11, o - 10, 2, h + 20)
+    }
+  } else if (active === 1) {
+    g.fillStyle = 'rgba(79,140,255,.18)'; g.fillRect(ix, iy + 40, 500, 26)
+    text('POI (OB 4h)', ix + 8, iy + 58, { size: 13, color: C.blue })
+    g.setLineDash([6, 5]); g.strokeStyle = C.bear; g.beginPath(); g.moveTo(ix, iy + 110); g.lineTo(ix + 500, iy + 110); g.stroke(); g.setLineDash([])
+    text('SSL (liquidity di bawah low)', ix + 8, iy + 128, { size: 13, color: C.bear })
+    text('✓ disapu dulu → POI punya penyebab', ix + 260, iy + 128, { size: 13, color: C.bull })
+  } else if (active === 2) {
+    ;['M0', 'M2a', 'M4', 'M8', 'M9'].forEach((m, k) => { rr(ix + k * 100, iy + 40, 88, 40, 8, C.panel2, C.purple); text(m, ix + k * 100 + 44, iy + 66, { size: 16, weight: 700, align: 'center' }) })
+    text('setup = entry limit + SL + exit + tag', ix, iy + 118, { size: 14, color: C.dim })
+  } else if (active === 3) {
+    const steps = [['setup terdeteksi', 1], ['konfluensi wajib', 0.45], ['+ OR (salah satu)', 0.25], ['risk guard', 0.2]]
+    steps.forEach(([lab, f], k) => {
+      const w = 460 * f * ease((local - 0.5 - k * 0.35) / 0.5)
+      rr(ix, iy + k * 30, Math.max(w, 2), 22, 5, k === 3 ? C.amber : C.panel2, null)
+      text(lab, ix + Math.max(w, 2) + 10, iy + k * 30 + 16, { size: 13, color: k === 3 ? C.amber : C.text })
+    })
+    text('ilustrasi: lebih sedikit order, kualitas lebih bagus', ix, iy + 140, { size: 13, color: C.dim })
+  } else if (active === 4) {
+    ;[['ENTRY limit', C.blue, 50], ['SL stop-market', C.bear, 100], ['TP / trailing', C.bull, 0]].forEach(([lab, col, dy]) => {
+      g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.moveTo(ix, iy + 20 + dy); g.lineTo(ix + 500, iy + 20 + dy); g.stroke()
+      text(lab, ix + 506 - 8, iy + 16 + dy, { size: 13, color: col, align: 'right' })
+    })
+  } else {
+    const pts = [0, -0.2, 0.6, 1.2, 0.9, 2.1, 3.1, 2.7, 3.8, 4.4, 3.9]
+    g.strokeStyle = C.bull; g.lineWidth = 2.5; g.beginPath()
+    pts.forEach((p, k) => { const x = ix + k * 48, y = iy + 120 - p * 24; k ? g.lineTo(x, y) : g.moveTo(x, y) }); g.stroke()
+    text('+1R → BE', ix + 140, iy + 72, { size: 12, color: C.dim }); text('+3R → 50%', ix + 290, iy + 30, { size: 12, color: C.dim })
+  }
+  g.globalAlpha = 1
+  text('Info, bukan saran keuangan', W - 28, H - 14, { size: 12, color: C.faint, align: 'right' })
+}
+
+// ---------------------------------------------------------------- scene 2: order life cycle (illustration)
+const PATH = (() => {
+  // R multiples over 100 steps: drift down to entry, fill, 1R, pullback, 3R, run, trail exit
+  const k = [[0, 0.8], [12, 0.1], [16, 0], [22, -0.45], [34, 1.05], [40, 0.6], [56, 3.05], [62, 2.6], [76, 5.1], [84, 4.2], [90, 4.6], [100, 3.0]]
+  const out = []
+  for (let i = 0; i <= 100; i++) {
+    let j = 0; while (j < k.length - 2 && k[j + 1][0] < i) j++
+    const [a, va] = k[j], [b, vb] = k[j + 1]
+    const f = (i - a) / (b - a)
+    out.push(va + (vb - va) * f + Math.sin(i * 1.9) * 0.07)
+  }
+  return out
+})()
+function sceneSiklus(t) {
+  header('Siklus hidup satu order', 'ilustrasi LONG · harga dalam R (1R = jarak entry → SL awal)')
+  const X0 = 60, X1 = 690, Y0 = 470, Y1 = 100
+  const yR = (r) => Y0 - ((r + 1.4) / 7) * (Y0 - Y1)
+  const n = Math.min(100, Math.floor(t * 6.5))
+  // state per step
+  let sl = -1, state = 'PENDING', note = 'limit dipasang di entry, nunggu harga turun', closed = null, partial = false, best = 0
+  for (let i = 0; i <= n; i++) {
+    const r = PATH[i]
+    if (state === 'PENDING' && r <= 0) { state = 'OPEN'; note = 'limit terisi → SL langsung dipasang' }
+    if (state === 'PENDING') continue
+    best = Math.max(best, r)
+    if (best >= 1 && sl < 0) { sl = 0.05; state = 'BREAK-EVEN'; note = 'harga 1R → SL ke entry + fee (nggak bisa rugi lagi)' }
+    if (best >= 3 && !partial) { partial = true; sl = 1; state = 'PARTIAL'; note = '3R → tutup 50%, SL ke +1R' }
+    if (partial && best - 2 > sl) { sl = best - 2; state = 'TRAILING'; note = 'SL ngikutin harga: best − 2R' }
+    if (r <= sl) { closed = { i, r: sl }; state = 'UNTUNG'; note = `SL trailing kena → sisa 50% ditutup di +${sl.toFixed(1)}R`; break }
+  }
+  // axes
+  for (const r of [-1, 0, 1, 2, 3, 4, 5]) {
+    g.strokeStyle = C.line; g.lineWidth = 1; g.beginPath(); g.moveTo(X0, yR(r)); g.lineTo(X1, yR(r)); g.stroke()
+    text(`${r > 0 ? '+' : ''}${r}R`, X0 - 10, yR(r) + 4, { size: 12, color: C.faint, align: 'right' })
+  }
+  const xs = (i) => X0 + (i / 100) * (X1 - X0)
+  const last = closed ? closed.i : n
+  // entry + SL lines
+  g.strokeStyle = C.blue; g.lineWidth = 2; g.beginPath(); g.moveTo(X0, yR(0)); g.lineTo(X1, yR(0)); g.stroke()
+  text('ENTRY', X1 + 6, yR(0) + 4, { size: 12, color: C.blue })
+  g.strokeStyle = C.bear; g.setLineDash([7, 5]); g.beginPath(); g.moveTo(X0, yR(sl)); g.lineTo(X1, yR(sl)); g.stroke(); g.setLineDash([])
+  text(`SL ${sl > 0 ? '+' : ''}${sl.toFixed(1)}R`, X1 + 6, yR(sl) + 4, { size: 12, color: C.bear })
+  // price path
+  g.strokeStyle = C.text; g.lineWidth = 2.5; g.beginPath()
+  for (let i = 0; i <= last; i++) { const x = xs(i), y = yR(PATH[i]); i ? g.lineTo(x, y) : g.moveTo(x, y) }
+  g.stroke()
+  g.beginPath(); g.arc(xs(last), yR(PATH[last]), 5, 0, Math.PI * 2); g.fillStyle = C.white; g.fill()
+  if (partial) { const i = PATH.findIndex((r) => r >= 3); g.beginPath(); g.arc(xs(i), yR(3), 6, 0, Math.PI * 2); g.fillStyle = C.amber; g.fill(); text('50%', xs(i), yR(3) - 12, { size: 12, color: C.amber, align: 'center' }) }
+  // state machine panel
+  const states = ['PENDING', 'OPEN', 'BREAK-EVEN', 'PARTIAL', 'TRAILING', 'UNTUNG']
+  rr(740, 100, 192, 300, 12, C.panel, null)
+  states.forEach((s, k) => {
+    const on = s === state, idx = states.indexOf(state)
+    rr(756, 116 + k * 46, 160, 34, 8, on ? C.amber : k < idx ? C.panel2 : C.bg, on ? null : C.line)
+    text(s, 836, 138 + k * 46, { size: 14, weight: on ? 700 : 500, color: on ? C.bg : k < idx ? C.text : C.faint, align: 'center' })
+  })
+  rr(60, 488, 872, 40, 10, C.panel2, null)
+  text(note, 76, 514, { size: 16 })
+  if (closed && t > 17) { rr(740, 412, 192, 66, 12, C.bull, null); text(`+${(1.5 + closed.r / 2).toFixed(1)}R`, 836, 446, { size: 24, weight: 800, color: C.bg, align: 'center' }); text('50% di 3R + 50% trailing', 836, 466, { size: 11, color: C.bg, align: 'center' }) }
+}
+
+// ---------------------------------------------------------------- scenes 3-5: real case studies
+const LESSON = {
+  SEIUSDT: 'Cerita campur: POI tanpa penyebab dan target B nggak jelas, tapi searah trend 4h, 1d dan BTC. Harga turun cepat: 50% ditutup di 3R, sisanya kena TP.',
+  LABUSDT: 'POI kuat (lahir dari sweep SSL 1d + displacement), tapi melawan trend 1d dan BTC. Order flow nahan posisi, SL dikunci di atas entry → ditutup impas.',
+  AEROUSDT: 'Nggak ada penyebab ≥ 1d, nggak ada target B, dan ada BSL 1d tepat di balik SL → diburu dulu. Fakta "tanpa target B" ini yang di lab paling ngerusak, sekarang M8 wajib liqTarget.'
+}
+function evLabel(m) {
+  if (/^LIVE .*limit/.test(m)) return 'limit dipasang'
+  if (/entry terisi/.test(m)) return 'entry terisi → SL dipasang'
+  const sl = m.match(/SL dipindah ke ([\d.]+).*kunci ([+-][\d.]+R)/)
+  if (sl) return `SL dipindah, kunci ${sl[2]}`
+  if (/TP sebagian/.test(m)) return 'TP sebagian 50% di 3R'
+  if (/order flow terkonfirmasi/.test(m)) return 'order flow → posisi ditahan'
+  if (/order flow patah/.test(m)) return 'order flow patah'
+  const cl = m.match(/posisi ditutup \((\w+)\).*\(([+-][\d.]+R) bersih fee\)/)
+  if (cl) return `ditutup (${cl[1]}) ${cl[2]} bersih fee`
+  return null
+}
+function sceneKasus(t, cs) {
+  const bull = cs.direction === 'bullish'
+  const res = cs.events.map((e) => e.msg.match(/\(([+-][\d.]+)R bersih fee\)/)).find(Boolean)
+  const resR = res ? parseFloat(res[1]) : 0
+  const tag = resR > 0.3 ? ['UNTUNG', C.bull] : resR < -0.3 ? ['RUGI', C.bear] : ['IMPAS', C.amber]
+  header(`Studi kasus: ${cs.symbol.replace('USDT', '')} ${bull ? 'LONG' : 'SHORT'} · ${cs.model} · ${cs.poi ? `${cs.poi.kind.replace('_', ' ')} ${cs.poi.tf}` : ''}`,
+    `trade live asli · ${new Date(cs.filledAt).toISOString().slice(0, 16).replace('T', ' ')} UTC · candle 15m`)
+  const all = cs.candles
+  const T_STORY = 9, T_RUN = 18
+  const iKnown = all.findIndex((c) => c[0] >= cs.known)
+  const iEnd = all.length - 1
+  const shown = t < T_STORY ? Math.round(iKnown * ease(t / (T_STORY - 1))) : t < T_RUN ? iKnown : Math.min(iEnd, iKnown + Math.round((iEnd - iKnown) * clamp01((t - T_RUN) / 9)))
+  const X0 = 40, X1 = 600, Y0 = 470, Y1 = 92
+  let lo = Infinity, hi = -Infinity
+  for (const c of all) { lo = Math.min(lo, c[3]); hi = Math.max(hi, c[2]) }
+  for (const v of [cs.entry, cs.sl]) { lo = Math.min(lo, v); hi = Math.max(hi, v) }
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad
+  const y = (p) => Y0 - ((p - lo) / (hi - lo)) * (Y0 - Y1)
+  const cw = (X1 - X0) / all.length
+  const x = (i) => X0 + i * cw + cw / 2
+  rr(X0 - 10, Y1 - 10, X1 - X0 + 20, Y0 - Y1 + 20, 10, C.panel, null)
+  // pools (dashed) + POI line + risk band
+  for (const p of cs.pools) {
+    if (p.price < lo || p.price > hi) continue
+    g.strokeStyle = p.side === 'buy' ? 'rgba(38,166,154,.55)' : 'rgba(239,83,80,.55)'; g.setLineDash([4, 5]); g.lineWidth = 1
+    g.beginPath(); g.moveTo(X0, y(p.price)); g.lineTo(X1, y(p.price)); g.stroke(); g.setLineDash([])
+    text(`${p.side === 'buy' ? 'BSL' : 'SSL'} ${p.kind === 'pdh' ? 'H kemarin' : p.kind === 'pdl' ? 'L kemarin' : p.kind === 'pwh' ? 'H minggu' : p.kind === 'pwl' ? 'L minggu' : p.tf}`, X0 + 4, y(p.price) - 3, { size: 10, color: C.dim })
+  }
+  const st = cs.story
+  if (st?.target && st.target.price > lo && st.target.price < hi) text('B', X1 - 4, y(st.target.price) - 3, { size: 13, weight: 800, color: C.amber, align: 'right' })
+  if (cs.poi) {
+    const xa = Math.max(X0, x(all.findIndex((c) => c[0] >= cs.poi.activeFrom)))
+    g.fillStyle = 'rgba(79,140,255,.16)'; g.fillRect(xa, Math.min(y(cs.entry), y(cs.sl)), X1 - xa, Math.abs(y(cs.entry) - y(cs.sl)))
+    g.strokeStyle = C.blue; g.lineWidth = 2; g.beginPath(); g.moveTo(xa, y(cs.poi.level)); g.lineTo(X1, y(cs.poi.level)); g.stroke()
+    text(`${cs.poi.kind.replace('_', ' ')} ${cs.poi.tf}`, xa + 4, y(cs.poi.level) + (bull ? 14 : -5), { size: 12, weight: 700, color: C.blue })
+  }
+  // candles
+  for (let i = 0; i <= shown && i < all.length; i++) {
+    const [ , o, h, l, c] = all[i]
+    const col = c >= o ? C.bull : C.bear
+    g.fillStyle = col
+    g.fillRect(x(i) - 0.5, y(h), 1.2, Math.max(1, y(l) - y(h)))
+    g.fillRect(x(i) - cw * 0.35, Math.min(y(o), y(c)), Math.max(1, cw * 0.7), Math.max(1, Math.abs(y(o) - y(c))))
+  }
+  // setup known marker
+  if (t >= T_STORY - 0.5) {
+    g.strokeStyle = 'rgba(245,176,65,.6)'; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(x(iKnown), Y1); g.lineTo(x(iKnown), Y0); g.stroke(); g.setLineDash([])
+    text('setup muncul', x(iKnown) + 4, Y1 + 12, { size: 11, color: C.amber })
+  }
+  // trade lines + live SL from events
+  if (t >= T_RUN) {
+    const now = all[Math.min(shown, iEnd)][0] + 15 * 60_000
+    let sl = cs.sl
+    for (const e of cs.events) { const m = e.msg.match(/SL dipindah ke ([\d.]+)/); if (m && e.t <= now) sl = parseFloat(m[1]) }
+    g.strokeStyle = C.white; g.lineWidth = 1.5; g.beginPath(); g.moveTo(X0, y(cs.entry)); g.lineTo(X1, y(cs.entry)); g.stroke()
+    text(`ENTRY ${fmtPx(cs.entry)}`, X1 - 4, y(cs.entry) + (bull ? 14 : -5), { size: 11, weight: 700, color: C.white, align: 'right' })
+    g.strokeStyle = C.bear; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(X0, y(sl)); g.lineTo(X1, y(sl)); g.stroke(); g.setLineDash([])
+    const tight = Math.abs(y(sl) - y(cs.entry)) < 16
+    text(`SL ${fmtPx(sl)}`, tight ? X1 - 150 : X1 - 4, y(sl) + (bull ? 14 : -5), { size: 11, weight: 700, color: C.bear, align: 'right' })
+    if (cs.tp && cs.tp > lo && cs.tp < hi) { g.strokeStyle = C.bull; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(X0, y(cs.tp)); g.lineTo(X1, y(cs.tp)); g.stroke(); g.setLineDash([]); text('TP', X1 - 4, y(cs.tp) + (bull ? -5 : 14), { size: 11, weight: 700, color: C.bull, align: 'right' }) }
+    // event feed
+    const feed = cs.events.filter((e) => e.t <= now).map((e) => evLabel(e.msg)).filter(Boolean)
+    const uniq = feed.filter((v, k) => v !== feed[k - 1]).slice(-4)
+    rr(X0 - 10, Y0 + 18, X1 - X0 + 20, 44, 10, C.panel2, null)
+    text(uniq.at(-1) ?? '', X0 + 4, Y0 + 46, { size: 16, weight: 600 })
+  }
+  // story panel
+  const PX = 628
+  rr(PX, 82, 304, 448, 12, C.panel, null)
+  text('Cerita POI saat setup muncul', PX + 16, 108, { size: 15, weight: 700 })
+  if (st) {
+    text(`+${st.plus} mendukung · −${st.minus} menentang`, PX + 16, 128, { size: 12, color: C.dim })
+    let yy = 152
+    const reveal = clamp01((t - 2) / (T_STORY + 6 - 2))
+    const nShow = Math.ceil(st.facts.length * reveal)
+    st.facts.slice(0, nShow).forEach((f) => {
+      if (yy > 500) return
+      const col = f.sign > 0 ? C.bull : f.sign < 0 ? C.bear : C.dim
+      text(f.sign > 0 ? '✓' : f.sign < 0 ? '✗' : '•', PX + 18, yy, { size: 14, weight: 700, color: col })
+      yy = wrap(f.text, PX + 36, yy, 252, { size: 12.5 }) + 3
+    })
+  }
+  // result card
+  if (t >= T_RUN + 10) {
+    const a = ease((t - T_RUN - 10) / 0.8)
+    g.globalAlpha = a
+    rr(40, 150, 560, 250, 14, 'rgba(15,17,21,.94)', tag[1])
+    text(tag[0], 64, 196, { size: 18, weight: 800, color: tag[1] })
+    text(`${resR > 0 ? '+' : ''}${resR.toFixed(2)}R`, 64, 248, { size: 44, weight: 800, color: tag[1] })
+    text('bersih fee', 64 + g.measureText(`${resR > 0 ? '+' : ''}${resR.toFixed(2)}R`).width + 12, 248, { size: 14, color: C.dim })
+    wrap(LESSON[cs.symbol] ?? '', 64, 288, 510, { size: 15 })
+    g.globalAlpha = 1
+  }
+}
+
+// ---------------------------------------------------------------- GIF encoder (fixed palette, changed-rect frames)
+const PAL_HEX = [C.bg, C.panel, C.panel2, C.line, C.text, C.dim, C.faint, C.bull, C.bear, C.amber, C.blue, C.purple, C.cyan, C.white, '#000000',
+  '#1b3a37', '#3d1f22', '#3a311d', '#1d2a44', '#2b2340', '#16343b', '#12221f', '#2a1416', '#20252f', '#c7cbd1', '#7d838c', '#454b56', '#d9443f',
+  '#1e7d74', '#c38a2e', '#3a6fd0', '#8a5fd0', '#2f97ab', '#0a0c10', '#262a33', '#33384a', '#4a5060', '#b0b5bd', '#88d4cc', '#f4a3a1', '#f9d48f', '#a8c4ff']
+while (PAL_HEX.length < 64) { const v = Math.round((PAL_HEX.length - 42) * 11.5); PAL_HEX.push('#' + [v, v, v].map((n) => n.toString(16).padStart(2, '0')).join('')) }
+const PAL = PAL_HEX.map((h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)))
+const near = new Int8Array(32768).fill(-1)
+function nearest(r, gg, b) {
+  const key = ((r >> 3) << 10) | ((gg >> 3) << 5) | (b >> 3)
+  let v = near[key]
+  if (v >= 0) return v
+  let best = 0, bd = Infinity
+  for (let i = 0; i < PAL.length; i++) { const p = PAL[i], d = (p[0] - r) ** 2 + (p[1] - gg) ** 2 + (p[2] - b) ** 2; if (d < bd) { bd = d; best = i } }
+  near[key] = best
+  return best
+}
+class Gif {
+  constructor(w, h) {
+    this.w = w; this.h = h; this.out = []; this.prev = null
+    const b = this.out
+    const s = 'GIF89a'; for (const ch of s) b.push(ch.charCodeAt(0))
+    this.u16(w); this.u16(h); b.push(0xf5, 0, 0) // GCT, 64 colors
+    for (const p of PAL) b.push(p[0], p[1], p[2])
+    b.push(0x21, 0xff, 0x0b); for (const ch of 'NETSCAPE2.0') b.push(ch.charCodeAt(0)); b.push(3, 1, 0, 0, 0) // loop forever
+  }
+  u16(v) { this.out.push(v & 255, (v >> 8) & 255) }
+  frame(rgba, delayCs) {
+    const { w, h } = this
+    const idx = new Uint8Array(w * h)
+    for (let i = 0, j = 0; i < idx.length; i++, j += 4) idx[i] = nearest(rgba[j], rgba[j + 1], rgba[j + 2])
+    let x0 = 0, y0 = 0, x1 = w - 1, y1 = h - 1
+    if (this.prev) {
+      x0 = w; y0 = h; x1 = -1; y1 = -1
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const i = yy * w + xx; if (idx[i] !== this.prev[i]) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy } }
+      if (x1 < 0) { this.lastDelay += delayCs; this.patchDelay(); return }
+    }
+    const fw = x1 - x0 + 1, fh = y1 - y0 + 1
+    const sub = new Uint8Array(fw * fh)
+    for (let yy = 0; yy < fh; yy++) sub.set(idx.subarray((y0 + yy) * w + x0, (y0 + yy) * w + x0 + fw), yy * fw)
+    const b = this.out
+    this.delayPos = b.length + 4
+    this.lastDelay = delayCs
+    b.push(0x21, 0xf9, 4, 0x04, delayCs & 255, (delayCs >> 8) & 255, 0, 0)
+    b.push(0x2c); this.u16(x0); this.u16(y0); this.u16(fw); this.u16(fh); b.push(0)
+    b.push(6)
+    const data = lzw(sub, 6)
+    for (let i = 0; i < data.length; i += 255) { const n = Math.min(255, data.length - i); b.push(n); for (let k = 0; k < n; k++) b.push(data[i + k]) }
+    b.push(0)
+    this.prev = idx
+  }
+  patchDelay() { const d = Math.min(65535, this.lastDelay); this.out[this.delayPos] = d & 255; this.out[this.delayPos + 1] = (d >> 8) & 255 }
+  bytes() { return Uint8Array.from([...this.out, 0x3b]) }
+}
+function lzw(px, minSize) {
+  const clear = 1 << minSize, eoi = clear + 1
+  const out = []
+  let cur = 0, bits = 0
+  let size = minSize + 1, next = eoi + 1
+  const dict = new Int16Array(4096 * 256).fill(-1)
+  const emit = (code) => { cur |= code << bits; bits += size; while (bits >= 8) { out.push(cur & 255); cur >>= 8; bits -= 8 } }
+  emit(clear)
+  let prefix = px[0]
+  for (let i = 1; i < px.length; i++) {
+    const k = px[i], key = prefix * 256 + k, hit = dict[key]
+    if (hit >= 0) { prefix = hit; continue }
+    emit(prefix)
+    if (next < 4096) { dict[key] = next++; if (next > 1 << size && size < 12) size++ }
+    else { emit(clear); dict.fill(-1); size = minSize + 1; next = eoi + 1 }
+    prefix = k
+  }
+  emit(prefix); emit(eoi)
+  if (bits > 0) out.push(cur & 255)
+  return out
+}
+
+// ---------------------------------------------------------------- run
+const SCENES = {
+  'cara-kerja': { dur: 24, draw: sceneCaraKerja },
+  'siklus-order': { dur: 21, draw: sceneSiklus },
+  'kasus-0': { dur: 34, draw: (t) => sceneKasus(t, CASES[0]), name: 'kasus-untung' },
+  'kasus-1': { dur: 34, draw: (t) => sceneKasus(t, CASES[1]), name: 'kasus-impas' },
+  'kasus-2': { dur: 34, draw: (t) => sceneKasus(t, CASES[2]), name: 'kasus-rugi' }
+}
+async function run() {
+  const sc = SCENES[SCENE]
+  const name = sc.name ?? SCENE
+  // preview: a few PNG stills (?preview=t1,t2,…) instead of the videos
+  if (q.get('preview')) {
+    for (const t of q.get('preview').split(',').map(Number)) {
+      sc.draw(t)
+      fs.writeFileSync(path.join(OUT, `${name}@${t}.png`), Buffer.from(cv.toDataURL('image/png').split(',')[1], 'base64'))
+    }
+    return ipcRenderer.send(`done:${SCENE}`, 'preview ok')
+  }
+  // GIF: 8 fps
+  const fps = 8
+  const gif = new Gif(W, H)
+  for (let f = 0; f <= sc.dur * fps; f++) {
+    sc.draw(f / fps)
+    gif.frame(g.getImageData(0, 0, W, H).data, Math.round(100 / fps))
+    if (f % 16 === 0) await new Promise((r) => setTimeout(r, 0))
+  }
+  const gifBytes = gif.bytes()
+  fs.writeFileSync(path.join(OUT, `${name}.gif`), gifBytes)
+  // WebM: real-time recording at 30 fps
+  const stream = cv.captureStream(30)
+  const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2_500_000 })
+  const chunks = []
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+  const stopped = new Promise((r) => (rec.onstop = r))
+  rec.start(500)
+  const t0 = performance.now()
+  await new Promise((resolve) => {
+    const tick = () => {
+      const t = (performance.now() - t0) / 1000
+      sc.draw(Math.min(t, sc.dur))
+      if (t >= sc.dur + 0.5) return resolve()
+      setTimeout(tick, 1000 / 30)
+    }
+    tick()
+  })
+  rec.stop()
+  await stopped
+  const webm = Buffer.from(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer())
+  fs.writeFileSync(path.join(OUT, `${name}.webm`), webm)
+  ipcRenderer.send(`done:${SCENE}`, `${name}: gif ${(gifBytes.length / 1e6).toFixed(1)} MB, webm ${(webm.length / 1e6).toFixed(1)} MB`)
+}
+run().catch((e) => ipcRenderer.send(`done:${SCENE}`, 'ERROR ' + e.stack))
+</script>
+</body>
+</html>
