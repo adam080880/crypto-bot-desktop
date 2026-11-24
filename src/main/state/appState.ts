@@ -142,6 +142,12 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_story300', true)
     }
+    // user 2026-11-24 ("bot papernya matiin aja, bikin bingung"): no shadow paper next to live, once (re-adding later sticks)
+    if (!readSetting(db, 'migr_no_shadow', z.boolean())) {
+      this.config = { ...this.config, bot: { ...this.config.bot, shadowModels: [] } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_no_shadow', true)
+    }
     // Kill switch persists across restarts: a halted bot stays halted until resumed manually.
     const kill = readSetting(db, 'kill_switch', killSwitchSchema) ?? { active: false, at: null }
     this.status = {

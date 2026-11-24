@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { modelStats, tradeR, tradeStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
+import { canReopen, modelStats, tradeR, tradeStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
 import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import { MODEL_LABEL, setupPath } from '@shared/smc'
@@ -253,6 +253,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
    */
   async retryById(id: string): Promise<void> {
     const t = this.repo.get(id)
+    if (t && canReopen(t, Date.now())) return this.reopen(t)
     if (!t || t.status !== 'cancelled' || t.reason !== 'error') return
     const dir = t.direction === 'bullish' ? 'LONG' : 'SHORT'
     this.repo.save({ ...t, reason: 'retried' })
@@ -271,6 +272,91 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
         this.event('warn', t.symbol, `Retry ${dir}: nggak dipasang (${why})`)
       }
     }
+    this.publish()
+  }
+
+  /**
+   * "Buka ulang" (user 2026-11-23, closed a position by accident): a trade closed by hand (Binance / the UI) shortly
+   * after it filled gets a fresh limit entry with the same SL / TP / exit plan. The entry is the old one, or the
+   * current price when it already moved past it (post-only must rest on the book); qty is re-sized to the same risk.
+   * The setup gates are not re-run: the user chose this trade already.
+   */
+  private async reopen(t: BotTrade): Promise<void> {
+    const dir = t.direction === 'bullish' ? 'LONG' : 'SHORT'
+    const bull = t.direction === 'bullish'
+    const b = this.broker(t.mode)
+    const rules = this.rules.get(t.symbol)
+    if (!b || !rules) return this.event('warn', t.symbol, `Buka ulang ${dir}: ${b ? 'aturan order simbol belum dimuat' : 'mode live belum siap'}`)
+    if (this.repo.active().some((x) => x.symbol === t.symbol && x.mode === t.mode)) return this.event('warn', t.symbol, `Buka ulang ${dir}: sudah ada order/posisi bot di koin ini`)
+    if (this.deps.isKilled()) return this.event('warn', t.symbol, `Buka ulang ${dir}: Kill Switch aktif`)
+    let px = this.lastPx.get(t.symbol) ?? null
+    try {
+      const r = await fetch(`https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${t.symbol}`)
+      const j = (await r.json()) as { bidPrice?: string; askPrice?: string }
+      const q = Number(bull ? j.bidPrice : j.askPrice)
+      if (q > 0) px = q
+    } catch {
+      /* keep the last streamed price */
+    }
+    if (px !== null && (bull ? px <= t.sl : px >= t.sl)) return this.event('warn', t.symbol, `Buka ulang ${dir}: harga ${px} sudah lewat SL ${t.sl}, nggak dipasang`)
+    const entry = px === null ? t.entry : bull ? Math.min(t.entry, px) : Math.max(t.entry, px)
+    const equity = await this.equity(t.mode)
+    const risk = this.deps.getRisk()
+    const bot = this.deps.getBot()
+    const fee = FEES.makerPct + FEES.takerPct + FEES.slippagePct
+    const plan = planOrder({ direction: t.direction, entry, sl: t.slInitial, tp: t.tp, equity, riskPct: bot.riskPerTradePct, riskBase: bot.riskBaseUsdt, maxLeverage: risk.maxLeverage, rules, feePct: fee })
+    if (typeof plan === 'string') return this.event('warn', t.symbol, `Buka ulang ${dir}: ${plan}`)
+    let lev: ReturnType<typeof pickLeverage>
+    try {
+      lev = pickLeverage({ entry: plan.entry, sl: plan.sl, notional: plan.notional, equity, cap: risk.maxLeverage, brackets: await b.leverageBrackets(t.symbol), feePct: fee })
+    } catch (err) {
+      return this.event('error', t.symbol, `Buka ulang ${dir}: bracket leverage gagal (${(err as Error).message})`)
+    }
+    if (typeof lev === 'string') return this.event('warn', t.symbol, `Buka ulang ${dir}: ${lev}`)
+    plan.leverage = lev.leverage
+    this.repo.save({ ...t, reason: 'reopened' })
+    const now = Date.now()
+    const trade: BotTrade = {
+      ...t,
+      id: randomUUID().replace(/-/g, '').slice(0, 20),
+      setupId: `${t.setupId}#re`,
+      entry: plan.entry,
+      sl: plan.sl,
+      slInitial: plan.sl,
+      tp: plan.tp,
+      qty: plan.qty,
+      closedQty: 0,
+      realized: 0,
+      partials: 0,
+      slSeq: 0,
+      exitState: null,
+      equity,
+      riskUsd: plan.riskUsd,
+      leverage: plan.leverage,
+      status: 'pending',
+      reason: null,
+      createdAt: now,
+      expiresAt: Math.max(t.expiresAt, now + 4 * 3_600_000),
+      filledAt: null,
+      filledQty: null,
+      closedAt: null,
+      exitPrice: null,
+      pnl: null,
+      entryOrderId: null,
+      slOrderId: null,
+      tpOrderId: null
+    }
+    try {
+      Object.assign(trade, await b.open(trade, plan, rules))
+    } catch (err) {
+      this.repo.save({ ...trade, status: 'cancelled', reason: 'error', closedAt: Date.now() })
+      this.event('error', t.symbol, `Buka ulang ${dir} gagal dipasang: ${(err as Error).message}`)
+      this.publish()
+      return
+    }
+    this.repo.save(trade)
+    this.event('order', t.symbol, `Buka ulang ${dir} limit ${plan.entry} · SL ${plan.sl} · ${tpText(trade)} · qty ${plan.qty} (${plan.leverage}×) · risk ${plan.riskUsd.toFixed(3)} USDT · ${MODEL_LABEL[t.model]}`)
+    this.updateStreams()
     this.publish()
   }
 
@@ -293,6 +379,20 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     }
     this.updateStreams()
     this.publish()
+  }
+
+  /**
+   * User 2026-11-24 ("cancel cancelin yang paper"): while live, paper trades of models that are no longer shadow
+   * (bot.shadowModels) are leftovers: pending limits are cancelled, open paper positions closed at the last price.
+   */
+  private async dropStrayPaper(): Promise<void> {
+    if (this.mode() !== 'live') return
+    const shadow = this.deps.getBot().shadowModels as string[]
+    const stray = this.repo
+      .active()
+      // an open one waits for a price (otherwise closeNow throws and logs an error every tick)
+      .filter((t) => t.mode === 'paper' && !shadow.includes(t.model) && (t.status === 'pending' || this.lastPx.has(t.symbol)))
+    for (const t of stray) await this.closeById(t.id)
   }
 
   /** Refresh button (Bot page): fresh exchange equity (skips the 30 s cache), sync orders/positions now, publish. */
@@ -700,6 +800,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
   }
 
   private async tickInner(): Promise<void> {
+    await this.dropStrayPaper()
     const active = this.repo.active()
     if (!active.length) {
       this.bars.clear()

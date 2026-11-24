@@ -139,6 +139,11 @@ export class SmcService {
     if (!sym) return null
     const tfs: Timeframe[] = ['15m', '1h', '4h', '1d']
     const analyses = tfs.map((tf) => this.analyzeFull(sym.id, tf, tf === '15m' ? ENTRY_LOOKBACK : POI_LOOKBACK, cfg))
+    // setups also need the model-specific POI timeframes (M8 3h, …): before 2026-11-23 the live path only analysed the
+    // four above, so M8 / M9 POIs on other timeframes were found by the backtest (history() → setupTimeframes) but never live
+    const extra = setupTimeframes(cfg)
+      .filter((tf) => !tfs.includes(tf))
+      .map((tf) => this.analyzeFull(sym.id, tf, POI_LOOKBACK, cfg))
     const last1m = this.repo.latest('1m', sym.id, 1)[0]
     const lastCandle = last1m ?? analyses[0]!.candles.at(-1)
     if (!lastCandle) return null
@@ -148,7 +153,7 @@ export class SmcService {
     const pois: Poi[] = collectAllPois(analyses, cfg).filter((p) => p.invalidT === null && p.activeFrom <= now)
     const liquidity = analyses.flatMap((a) => a.liquidity.filter((l) => l.kind === 'swing' && l.sweptT === null))
     const entry = analyses[0]!
-    const setups = detectSetups({ symbol, entry, poiAnalyses: analyses.slice(1), cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now), smtRef: this.smtRef(symbol, cfg, now), ltf: this.ltf(sym.id, cfg) })
+    const setups = detectSetups({ symbol, entry, poiAnalyses: [...analyses.slice(1), ...extra], cfg, exit, btc: this.btcTrend(cfg, now), flow: this.flow(sym.id), btcDom: btcDomFeed.get(cfg, now), smtRef: this.smtRef(symbol, cfg, now), ltf: this.ltf(sym.id, cfg) })
     const lastBreak = Object.fromEntries(analyses.map((a) => [a.timeframe, a.breaks.at(-1) ?? null]))
     return { price, priceT, trend, pois, liquidity, setups, lastBreak }
   }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RefreshCw, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
-import { tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
+import { canReopen, tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { MODEL_LABEL, setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -116,8 +116,10 @@ export function Bot() {
 
   if (!cfg) return null
   const live = cfg.bot.live
-  const active = (st?.trades ?? []).filter((t) => t.status === 'pending' || t.status === 'open')
-  const done = (st?.trades ?? []).filter((t) => t.status === 'closed' || t.status === 'cancelled')
+  // live: only live trades (old shadow paper trades would mix in and confuse)
+  const trades = (st?.trades ?? []).filter((t) => !live || t.mode === 'live')
+  const active = trades.filter((t) => t.status === 'pending' || t.status === 'open')
+  const done = trades.filter((t) => t.status === 'closed' || t.status === 'cancelled')
   const closed = done.filter((t) => t.status === 'closed' && t.mode === (live ? 'live' : 'paper'))
   const wins = closed.filter((t) => tradeOutcome(t) === 'win').length
   const bes = closed.filter((t) => tradeOutcome(t) === 'be').length
@@ -510,6 +512,17 @@ function TradeTable({ trades, actions }: { trades: BotTrade[]; actions?: boolean
                   onClick={() => void window.api.invoke('bot:retry', { id: t.id })}
                 >
                   <RotateCcw className="size-3" /> Retry
+                </Button>
+              )}
+              {canReopen(t, Date.now()) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  title="Ketutup manual / kepencet? Pasang lagi limit entry dengan SL & TP yang sama (entry ikut harga sekarang kalau sudah lewat), qty dihitung ulang ke risk yang sama"
+                  onClick={() => void window.api.invoke('bot:retry', { id: t.id })}
+                >
+                  <RotateCcw className="size-3" /> Buka ulang
                 </Button>
               )}
             </td>

@@ -185,3 +185,7 @@ export function modelStats(trades: readonly BotTrade[]): ModelStat[] {
     })
     .sort((a, b) => a.model.localeCompare(b.model))
 }
+
+/** "Buka ulang": a filled trade closed by hand (Binance / the UI) in the last 12 h can be re-placed with the same SL / TP. */
+export const canReopen = (t: Pick<BotTrade, 'status' | 'reason' | 'filledAt' | 'closedAt'>, now: number): boolean =>
+  t.status === 'closed' && (t.reason === 'external' || t.reason === 'manual-close') && t.filledAt !== null && t.closedAt !== null && now - t.closedAt < 12 * 3_600_000

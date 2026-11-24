@@ -114,7 +114,8 @@ dites ke exchange beneran.
   tapi puluhan kombinasi dites dan holdout ikut terpakai → perlu forward test paper.
 - **M8 POI HTF searah trend + shadow paper** (2026-11-22, `docs/entry-v2.md §21`): `modelM8` (POI 4h/1d RBS/SBR/OCL Break
   pertama kali disentuh, BTC 4h + trend 1d searah, SL ≥ 1 %, TP 2R). `bot.shadowModels` (default M8) = selalu paper walaupun bot
-  live, tidak pernah order live, cek 1 posisi/koin dan slot dipisah per mode, profil koin tidak dipakai. App 100 koin: +0,09R.
+  live, tidak pernah order live, cek 1 posisi/koin dan slot dipisah per mode, profil koin tidak dipakai. App 100 koin: +0,09R. **Dimatikan 2026-11-24** (user: bikin bingung): `shadowModels` default [] + migrasi sekali `migr_no_shadow`;
+  halaman Bot saat live cuma nampilin trade live; sisa trade paper dibersihkan tiap tick (`dropStrayPaper`: limit dibatalkan, posisi ditutup di harga terakhir).
 - **Tag liquidity** (2026-11-22, `docs/entry-v2.md §22`): `liqHtfBehind` / `liqInPoi` / `cleanApproach` (`liquidityAround`). ML
   sebagai gerbang entry tidak stabil, jadi dibuat tag biasa. Wajib (migrasi sekali `migr_liq_tags`): M0 + `cleanApproach`,
   M1/M7 + `liqHtfBehind`. Efeknya beda per model (`cleanApproach` merusak M1/M2). M0 POI 4h/1d di backtest +0,24R (7/7 bulan),

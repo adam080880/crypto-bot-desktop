@@ -189,8 +189,22 @@ describe('BotService (paper, end to end)', () => {
     expect(db.$client.prepare(`SELECT count(*) FROM bot_trades`).pluck().get()).toBe(2)
   })
 
+  it('live without shadow models: leftover paper limits are cancelled on the next tick', async () => {
+    const cfg: Record<string, unknown> = { requireClaude: false }
+    const { bot, row } = setup({}, cfg)
+    await bot.onScreener([row])
+    const states: import('@shared/bot').BotState[] = []
+    bot.on('state', (s) => states.push(s))
+    await bot.publish()
+    expect(states.at(-1)!.trades[0]).toMatchObject({ mode: 'paper', status: 'pending' })
+    cfg.live = true
+    await bot.tick()
+    await bot.publish()
+    expect(states.at(-1)!.trades[0]).toMatchObject({ mode: 'paper', status: 'cancelled' })
+  })
+
   it('shadow paper: an M8 setup goes to the paper account while the bot is live (never a live order)', async () => {
-    const { bot, row } = setup({}, { requireClaude: false, live: true })
+    const { bot, row } = setup({}, { requireClaude: false, live: true, shadowModels: ['M8'] })
     const m8: ScreenerSetup = { ...SETUP(Date.now()), id: 'set-m8', model: 'M8', sl: 0.98, tp: 1.04, tpLiquidity: null, rr: 2, confluence: ['liqTarget', 'dispStrong'], poi: { kind: 'RBS', timeframe: '4h', origin: null }, child: { kind: 'LEVEL', timeframe: '15m' } }
     const states: import('@shared/bot').BotState[] = []
     bot.on('state', (s) => states.push(s))

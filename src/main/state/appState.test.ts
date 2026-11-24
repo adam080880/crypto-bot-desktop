@@ -57,6 +57,7 @@ describe('inducement/exit lab migration (2026-11-23)', () => {
     writeSetting(db, 'migr_bot_model_conf', true)
     writeSetting(db, 'migr_liq_tags', true)
     writeSetting(db, 'migr_story300', true)
+    writeSetting(db, 'migr_no_shadow', true)
     writeSetting(db, 'app_config', {
       exit: { tpMode: 'liquidity' },
       smc: { breakerTpR: 1, m8TpR: 2 },
@@ -87,5 +88,16 @@ describe('OCL → OCL Break HTF migration (2026-11-20)', () => {
     expect(state.getConfig().smc).toMatchObject({ oclParentTimeframes: [], m0OclBreakTimeframes: ['4h', '1d', '1w'] })
     state.updateConfig(parseConfigPatch({ smc: { m0OclBreakTimeframes: ['1d'] } }))
     expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().smc.m0OclBreakTimeframes).toEqual(['1d'])
+  })
+})
+
+describe('shadow paper off (2026-11-24)', () => {
+  it('empties shadowModels once', () => {
+    const db = openDatabase({ path: ':memory:', migrationsFolder: resolve('drizzle') })
+    writeSetting(db, 'app_config', { bot: { shadowModels: ['M8', 'M9'] } })
+    const state = new AppState(db, { dbPath: ':memory:', version: 't' })
+    expect(state.getConfig().bot.shadowModels).toEqual([])
+    state.updateConfig(parseConfigPatch({ bot: { shadowModels: ['M8'] } }))
+    expect(new AppState(db, { dbPath: ':memory:', version: 't' }).getConfig().bot.shadowModels).toEqual(['M8'])
   })
 })

@@ -675,3 +675,14 @@ lama + 200 koin baru), di atas filter bot baru (§28):
 
 Filosofi M9 sekarang: POI di sisi mahal range 4h (ikut momentum) **dan** entry di "diskon" harian (pullback intraday).
 `dayOpenCheap` cocok 296/296 dengan lab. Migrasi `migr_story300` (§28) juga memasang ini.
+
+**Batas SL M8 (2026-11-23, user: "telat banget, udah naik", KITE):** M8 beli RBS 4h di pucuk kenaikan dengan SL 13 % di bawah
+(ekstrem asal POI jauh). Lab 300 koin, M8 + tag cerita, per lebar SL: 1–3 % +0,22–0,24R, **3–12 % +0,36–0,42R**, **≥ 12 % +0,15R**
+(koin baru +0,07, 20 % dari trade M8). `smc.m8MaxSlPct` (0 = tanpa batas): setup dengan SL lebih lebar dilewati. Dipasang **8** (user: SL lebar bikin slot / modal
+nyangkut berhari-hari, opportunity cost; 8–12 % lemah di IS, +0,12R).
+
+**Revisi 2026-11-23 sore (user):** M0 sepi (0 order sejak `slPoolClear` wajib), jadi `slPoolClear` dipindah ke list OR M0
+(`bbMomentum / ifvg / smt / slPoolClear`). Lab 300 koin dengan kode sekarang (M0 POI 4h/1d, exit trailOF): wajib = +0,83R
+tapi n 97 dalam 7 bulan dan OOS −0,09R; di OR = **+0,25R** (IS +0,22 / OOS +0,27 / koin baru +0,25), n 632 (±90/bulan).
+3 bulan terakhir per 30 hari: +0,09 / +0,34 / −0,15R. **M2a dimatikan** (`bot.models` = M0, M8, M9): 3 bulan lab −0,43 / −0,44 /
++1,34R per trade, live −7R sejak 14 Nov. Diubah langsung di config (tanpa migrasi), default `RECOMMENDED_*` ikut.

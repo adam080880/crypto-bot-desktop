@@ -962,6 +962,8 @@ export function modelM8({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalys
       const sl = bull ? Math.min(sl0, L - minD) : Math.max(sl0, L + minD)
       const risk = Math.abs(L - sl)
       if ((risk / L) * 100 < cfg.m8MinSlPct) continue
+      // user 2026-11-23 (KITE: SL 13 % below an RBS at the top of a run): stops this wide are the weakest M8 bucket
+      if (cfg.m8MaxSlPct > 0 && (risk / L) * 100 > cfg.m8MaxSlPct) continue
       if (Math.abs(x.c - L) > cfg.m8NearR * risk) continue
       if (cfg.m8RequireBtc4h && trendKnownAt(b4!, known) !== p.direction) continue
       if (cfg.m8RequireTrend1d && trendKnownAt(d1!, known) !== p.direction) continue

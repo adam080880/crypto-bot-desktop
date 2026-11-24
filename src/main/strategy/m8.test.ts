@@ -42,6 +42,13 @@ describe('M8 HTF POI with the trend', () => {
     expect(run([106, 104, 102, 101.2], { c: { m8MinSlPct: 2 } })).toHaveLength(0)
   })
 
+  it('skips a POI whose stop would be wider than m8MaxSlPct (0 = no cap)', () => {
+    // SL 1.7 % below the line
+    expect(run([106, 104, 102, 101.2], { c: { m8MaxSlPct: 1.5 } })).toHaveLength(0)
+    expect(run([106, 104, 102, 101.2], { c: { m8MaxSlPct: 2 } })).toHaveLength(1)
+    expect(run([106, 104, 102, 101.2], { c: { m8MaxSlPct: 0 } })).toHaveLength(1)
+  })
+
   it('only the first touch: a touch before the order is armed uses the POI up', () => {
     // #1 wicks to 99.9 before any close came within 1R → that was the first touch; later approaches are ignored
     expect(run([106, 99.9, 104, 101.2, 100.6])).toHaveLength(0)

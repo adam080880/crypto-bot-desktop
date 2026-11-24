@@ -198,6 +198,10 @@ export const smcConfigSchema = z.object({
   m8PoiTimeframes: z.array(z.enum(['45m', '1h', '2h', '3h', '4h', '1d'])).min(1).default(['4h', '1d']),
   m8Kinds: z.array(z.enum(['OB', 'RBS', 'SBR', 'QM', 'OCL', 'OCL_BREAK'])).min(1).default(['RBS', 'SBR', 'OCL_BREAK']),
   m8MinSlPct: z.number().min(0).max(20).default(1),
+  /** Skip M8 setups whose stop is wider than this % (0 = no cap). Lab 300 coins, M8 + story tags: SL ≥ 12 % +0,15R (new
+   *  coins +0,07) vs SL 3–12 % +0,36–0,42R (user 2026-11-23: "telat banget, udah naik", KITE SL 13 %). Set to 8 (user: wide stops
+   *  tie up a slot / capital for days; 8–12 % was weak in-sample, +0,12R). */
+  m8MaxSlPct: z.number().min(0).max(50).default(8),
   m8TpR: z.number().min(0.5).max(10).default(3), // lab 2026-11-23: 3R +0,16R (IS +0,10 / OOS +0,24) vs 2R +0,12R
   m8NearR: z.number().min(0.1).max(10).default(1),
   m8ExpiryCandles: z.number().int().min(1).max(1000).default(32),
@@ -456,7 +460,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   // (IS +0,26 / OOS +0,40) vs +0,24R; M1 + liqHtfBehind +0,07R vs −0,07R; M7 + liqHtfBehind +0,13R vs +0,04R (IS and OOS)
   // inducement lab 2026-11-23 (after the M0 look-ahead fix, bot exit without TP): M0 POI 4h/1d + baitTaken +0,10R (6/7 months)
   // vs +0,07R; M4 fvg + slLiqClear + cleanApproach on the trailing exit +0,44R (IS +0,42 / OOS +0,47, 7/7 months)
-  M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken', 'slPoolClear'], // 300 coins 2026-11-23: + slPoolClear +0,83R vs +0,12R (n 97); 2026-11-19: +0,23R (IS +0,18 / OOS +0,31) vs +0,16R without
+  M0: ['prevOpposite', 'slLiqClear', 'cleanApproach', 'baitTaken'], // user 2026-11-23: slPoolClear moved to the OR list (wajib: +0,83R but n 97 and OOS −0,09; OR: +0,25R, IS +0,22 / OOS +0,27 / new coins +0,25, n 632); 2026-11-19: +0,23R vs +0,16R without
   M1: ['fvg', 'trendParent', 'pdZone', 'liqHtfBehind'],
   M2a: ['trendParent'], // n 39 only; pdZone hurts M2a
   M2b: ['fvg', 'trendParent', 'pdZone'],
@@ -477,7 +481,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
  * M1/M2a/M2b/M7: nothing held up out of sample.
  */
 export const RECOMMENDED_MODEL_CONFLUENCE_ANY: ModelConfluence = {
-  M0: ['bbMomentum', 'ifvg', 'smt'],
+  M0: ['bbMomentum', 'ifvg', 'smt', 'slPoolClear'],
   M1: [],
   M2a: [],
   M2b: [],
@@ -511,8 +515,9 @@ export const botConfigSchema = z.object({
   /**
    * Shadow paper (user 2026-11-22): setups of these models are always traded on the PAPER account, also while the
    * bot is live (never a live order), and do not use live slots / the live daily loss stop. Forward test of M8.
+   * Off by default since 2026-11-24 (user: paper trades next to live are confusing).
    */
-  shadowModels: z.array(z.enum(ENTRY_MODELS)).default(['M8', 'M9']),
+  shadowModels: z.array(z.enum(ENTRY_MODELS)).default([]),
   minScore: z.number().int().min(0).max(20).default(0),
   /** Real orders on Binance USDT-M. Off by default; switched on only via `bot:setLive` + confirmation. */
   live: z.boolean().default(false),
