@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeSmc } from './analyze'
 import { atrSeries } from './atr'
-import { detectSetups, liquidityBehindSl, poiLiqIntact, stackedTfs, trendKnownAt, type Poi } from './setups'
+import { detectSetups, liquidityBehindSl, oclKidOf, poiLiqIntact, stackedTfs, trendKnownAt, type Poi } from './setups'
 import { at, bars, cfg } from './testkit'
 
 type Row = [number, number, number, number]
@@ -176,5 +176,35 @@ describe('stackedTfs (poiStack)', () => {
       P({ kind: 'OCL_BREAK' })
     ]
     expect(stackedTfs(pois, parent, 'bullish', 20_000_000, 0.3)).toEqual([])
+  })
+})
+
+describe('M11 oclKidOf (OB HTF + OCL Break on a lower TF inside the OB candle)', () => {
+  const H = 3_600_000
+  const D0 = Date.UTC(2026, 10, 1)
+  const ob: Poi = { kind: 'OB', timeframe: '1d', direction: 'bullish', level: 10, t: D0, activeFrom: D0 + 24 * H, invalidT: null, origin: null, extreme: 9 }
+  const kid = (o: Partial<Poi>): Poi => ({ kind: 'OCL_BREAK', timeframe: '4h', direction: 'bullish', level: 10.2, t: D0 + 4 * H, originT: D0 + 8 * H, activeFrom: D0 + 20 * H, invalidT: null, origin: null, ...o })
+  const at = D0 + 30 * H
+
+  it('finds a same-direction OCL Break on 4h / 2h born inside the 1d OB candle', () => {
+    expect(oclKidOf(ob, [kid({})], at)?.timeframe).toBe('4h')
+    expect(oclKidOf(ob, [kid({ timeframe: '2h' })], at)?.timeframe).toBe('2h')
+  })
+
+  it('ignores other kinds, directions, timeframes, origins outside the candle, unknown and invalid kids', () => {
+    expect(oclKidOf(ob, [kid({ kind: 'OB' })], at)).toBeNull()
+    expect(oclKidOf(ob, [kid({ direction: 'bearish' })], at)).toBeNull()
+    expect(oclKidOf(ob, [kid({ timeframe: '1h' })], at)).toBeNull()
+    expect(oclKidOf(ob, [kid({ originT: D0 + 24 * H })], at)).toBeNull()
+    expect(oclKidOf(ob, [kid({ originT: D0 - H })], at)).toBeNull()
+    expect(oclKidOf(ob, [kid({ activeFrom: at + H })], at)).toBeNull()
+    // invalidated by a 4h candle that closed before `at`
+    expect(oclKidOf(ob, [kid({ invalidT: D0 + 24 * H })], at)).toBeNull()
+    // the invalidating 4h candle is still open at `at` → not known yet
+    expect(oclKidOf(ob, [kid({ invalidT: D0 + 28 * H })], at)?.timeframe).toBe('4h')
+  })
+
+  it('has no kids for a timeframe without a mapping', () => {
+    expect(oclKidOf({ ...ob, timeframe: '1h' }, [kid({ timeframe: '15m' })], at)).toBeNull()
   })
 })

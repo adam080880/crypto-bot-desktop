@@ -191,8 +191,10 @@ export type SetupStatus = 'pending' | 'triggered' | 'win' | 'loss' | 'invalid' |
  *  M9  bait → POI behind (user 2026-11-23, docs/smc-rules.md §11): a same-direction POI without origin in front of a
  *      1h/4h/1d POI got touched (the bait) → limit at the POI behind it, SL beyond it, fixed TP. Shadow paper by default.
  *  M10 HTF POI hit → entry-TF QM confirms (head inside the POI) → limit at the QM level, SL beyond the head (user 2026-11-23).
+ *  M11 stacked OB (user 2026-11-25, lab15): first touch of a 1d OB whose candle also produced a same-direction OCL Break on
+ *      a lower TF (1d → 4h/2h, 4h → 2h/1h), with the M8 machinery (BTC 4h + 1d trend, SL beyond the OB, TP max(3R, B)).
  */
-export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10'] as const
+export const ENTRY_MODELS = ['M0', 'M1', 'M2a', 'M2b', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11'] as const
 export type EntryModel = (typeof ENTRY_MODELS)[number]
 export const MODEL_LABEL: Record<EntryModel, string> = {
   M0: 'M0 lama (POI → OB valid)',
@@ -205,7 +207,8 @@ export const MODEL_LABEL: Record<EntryModel, string> = {
   M7: 'M7 MSNR level A/V fresh',
   M8: 'M8 POI HTF searah trend',
   M9: 'M9 umpan → POI di belakangnya',
-  M10: 'M10 POI HTF kena → QM konfirmasi'
+  M10: 'M10 POI HTF kena → QM konfirmasi',
+  M11: 'M11 OB HTF + OCL Break di TF turunan'
 }
 
 export type ChildKind = 'OB' | 'QM' | 'BREAKER' | 'BREAKOUT' | 'LEVEL'
@@ -294,6 +297,10 @@ export type Confluence =
   /** Entry on the cheap side of the UTC daily open (long below it, short above): Power of 3 / intraday discount
    *  (lab 300 coins: M9 + pdPremium +0,54R vs +0,12R). Filter tag. */
   | 'dayOpenCheap'
+  /** Golden ratio / OTE (user 2026-11-27): entry retraces smc.oteLow–oteHigh (0,618–0,786) of the last leg of the
+   *  smc.oteLookback closed smc.oteTimeframe candles (legRetrace). Lab M8 1 year: +0,48R vs +0,23R per trade, but as a
+   *  required tag it cuts too many trades → used for a bigger risk (bot.oteRiskMult). Filter tag. */
+  | 'ote'
 
 /** Confluences a user can require (bot settings, coin profiles, backtest filter). */
 export const REQUIRABLE_CONFLUENCES = [
@@ -335,7 +342,8 @@ export const REQUIRABLE_CONFLUENCES = [
   'liqTarget',
   'slPoolClear',
   'pdPremium',
-  'dayOpenCheap'
+  'dayOpenCheap',
+  'ote'
 ] as const satisfies readonly Confluence[]
 
 /** Confluences that can be required, with UI labels. */
@@ -378,7 +386,8 @@ export const CONFLUENCE_CHOICES: { key: Confluence; label: string }[] = [
   { key: 'liqTarget', label: 'cerita POI: ada liquidity B ≥ 1R di depan' },
   { key: 'slPoolClear', label: 'cerita POI: nggak ada liquidity ≤ 1R di balik SL POI' },
   { key: 'pdPremium', label: 'POI di sisi mahal (long di premium / short di discount)' },
-  { key: 'dayOpenCheap', label: 'entry di sisi murah open harian (long di bawah open UTC)' }
+  { key: 'dayOpenCheap', label: 'entry di sisi murah open harian (long di bawah open UTC)' },
+  { key: 'ote', label: 'golden ratio / OTE: entry di 0,618–0,786 kaki terakhir' }
 ]
 
 /** A candidate entry (never an order by itself). */

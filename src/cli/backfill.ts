@@ -11,6 +11,7 @@
  *   --verify               compare resampled 5m/15m/1h/4h with Binance native klines
  *   --sources 1m,1d,1w     which source timeframes to fetch (default all)
  *   --concurrency N        parallel symbols (default from config: 4)
+ *   --days N               1m history window in days (default data.oneMinuteRetentionDays 183; for a separate lab --db)
  *   --db PATH              database file (default: the app's database)
  *
  * Runs under Electron-as-Node (see package.json) so better-sqlite3 uses the Electron build.
@@ -42,6 +43,7 @@ const { values: args } = parseArgs({
     flow: { type: 'boolean', default: false },
     sources: { type: 'string' },
     concurrency: { type: 'string' },
+    days: { type: 'string' },
     db: { type: 'string' }
   }
 })
@@ -69,7 +71,10 @@ async function main(): Promise<void> {
   installCloudflareDns()
   const dbPath = resolve(args.db ?? defaultDbPath())
   const db = openDatabase({ path: dbPath, migrationsFolder: resolve('drizzle') })
-  const data = dataConfigSchema.parse({ concurrency: args.concurrency ? Number(args.concurrency) : undefined })
+  const data = dataConfigSchema.parse({
+    concurrency: args.concurrency ? Number(args.concurrency) : undefined,
+    oneMinuteRetentionDays: args.days ? Number(args.days) : undefined
+  })
   const client = new BinanceFuturesClient()
   const backfiller = new Backfiller(db, client)
   console.log(`DB: ${dbPath}`)

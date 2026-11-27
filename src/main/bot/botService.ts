@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { canReopen, modelStats, tradeR, tradeStats, type BotEventLevel, type BotState, type BotTrade } from '@shared/bot'
-import type { BotConfig, ExitConfig, NewsConfig, RiskConfig, SmcConfig } from '@shared/config'
+import { riskPctFor, type BotConfig, type ExitConfig, type NewsConfig, type RiskConfig, type SmcConfig } from '@shared/config'
 import type { Candle } from '@shared/candles'
 import { MODEL_LABEL, setupPath } from '@shared/smc'
 import type { ScreenerRow } from '@shared/screener'
@@ -304,7 +304,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
     const risk = this.deps.getRisk()
     const bot = this.deps.getBot()
     const fee = FEES.makerPct + FEES.takerPct + FEES.slippagePct
-    const plan = planOrder({ direction: t.direction, entry, sl: t.slInitial, tp: t.tp, equity, riskPct: bot.riskPerTradePct, riskBase: bot.riskBaseUsdt, maxLeverage: risk.maxLeverage, rules, feePct: fee })
+    const plan = planOrder({ direction: t.direction, entry, sl: t.slInitial, tp: t.tp, equity, riskPct: riskPctFor(bot, t.model, t.confluence), riskBase: bot.riskBaseUsdt, maxLeverage: risk.maxLeverage, rules, feePct: fee })
     if (typeof plan === 'string') return this.event('warn', t.symbol, `Buka ulang ${dir}: ${plan}`)
     let lev: ReturnType<typeof pickLeverage>
     try {
@@ -681,7 +681,7 @@ export class BotService extends EventEmitter<{ state: [BotState] }> {
       sl: c.setup.sl,
       tp: planTpFor(c.setup, c.direction === 'bullish', exit),
       equity,
-      riskPct: bot.riskPerTradePct,
+      riskPct: riskPctFor(bot, c.setup.model, c.setup.confluence),
       riskBase: bot.riskBaseUsdt,
       maxLeverage: risk.maxLeverage,
       rules,

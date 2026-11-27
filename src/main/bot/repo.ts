@@ -55,6 +55,16 @@ export class BotRepo {
       .get(setupId, mode)
   }
 
+  /** Dashboard: every trade of a mode that was filled or is still waiting (cancelled-without-fill rows left out). */
+  dashboard(mode: string): BotTrade[] {
+    return (
+      this.c
+        .prepare(`SELECT payload FROM bot_trades WHERE mode = ? AND (status IN ('pending', 'open', 'closed') OR json_extract(payload, '$.filledAt') IS NOT NULL) ORDER BY created_at`)
+        .pluck()
+        .all(mode) as string[]
+    ).map((p) => normalizeTrade(JSON.parse(p)))
+  }
+
   get(id: string): BotTrade | null {
     const p = this.c.prepare(`SELECT payload FROM bot_trades WHERE id = ?`).pluck().get(id) as string | undefined
     return p ? normalizeTrade(JSON.parse(p)) : null

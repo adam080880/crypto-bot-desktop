@@ -3,7 +3,7 @@ import type { SmcConfig } from '@shared/config'
 import type { SmcAnalysis } from '@shared/smc'
 import type { Timeframe } from '@shared/timeframes'
 import { detectFvgs, type FvgIdx } from './fvg'
-import { detectLiquidity } from './liquidity'
+import { detectLiquidity, detectLuxLiquidity, type LuxPool } from './liquidity'
 import { detectOcls } from './ocl'
 import { detectOrderBlocks, type OrderBlockIdx } from './orderBlocks'
 import { detectQms } from './qm'
@@ -21,6 +21,8 @@ export interface SmcAnalysisFull extends SmcAnalysis {
   fvgsIdx: FvgIdx[]
   /** Raw pivots (cfg.pivot), before the alternating filter (needed to see which swing got swept). */
   pivots: Pivot[]
+  /** LuxAlgo BSL/SSL pools (only when cfg.m2Liquidity = 'lux', else empty). */
+  luxLiq: LuxPool[]
   /** Small-structure pivots (cfg.ltfPivot) for CHoCH on the entry TF. */
   ltfPivots: Pivot[]
   atr: number[]
@@ -59,6 +61,7 @@ export function analyzeSmc(candles: readonly Candle[], timeframe: Timeframe, cfg
     fvgsIdx: fvgs,
     pivots,
     ltfPivots: cfg.ltfPivot === cfg.pivot ? pivots : findPivots(candles, cfg.ltfPivot),
+    luxLiq: cfg.m2Liquidity === 'lux' ? detectLuxLiquidity(candles) : [],
     atr
   }
 }
@@ -73,7 +76,7 @@ export function toPublic(a: SmcAnalysisFull): SmcAnalysis {
     trendChanges: a.trendChanges,
     swings: a.swings,
     breaks: a.breaks,
-    orderBlocks: a.orderBlocks.map((o) => strip(o, ['i', 'confirmedAt'])),
+    orderBlocks: a.orderBlocks.map((o) => strip(o, ['i', 'confirmedAt', 'fvgKnownAt'])),
     fvgs: a.fvgs.map((f) => strip(f, ['i'])),
     srFlips: a.srFlips.map((f) => strip(f, ['breakAt'])),
     ocls: a.ocls,

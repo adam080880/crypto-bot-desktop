@@ -116,6 +116,21 @@ export interface ConnTestResult {
 
 export type BotOutcome = 'win' | 'be' | 'loss'
 
+/** Display names of BotTrade.reason. */
+export const EXIT_REASON_LABEL: Record<string, string> = {
+  tp: 'TP',
+  sl: 'SL',
+  trail: 'SL profit (BE/trailing)',
+  missed: 'lewat TP',
+  expired: 'expired',
+  kill: 'kill switch',
+  manual: 'dibatalkan',
+  error: 'error',
+  retried: 'error (sudah di-retry)',
+  'manual-close': 'close manual',
+  external: 'di luar bot'
+}
+
 /** |R| below this counts as break-even (fees / slippage around a BE stop). */
 export const BE_BAND_R = 0.15
 

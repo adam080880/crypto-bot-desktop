@@ -4,6 +4,7 @@ import type { LiveCandleEvent, LiveState } from './live'
 import type { Setup, SmcAnalysis } from './smc'
 import type { BacktestParams, BacktestProgress, BacktestResult, CoinProfile } from './backtest'
 import type { BotState, ConnTestResult } from './bot'
+import type { DashboardData } from './dashboard'
 import type { ClaudeAnalysis, ClaudeRun, ClaudeState } from './claude'
 import type { ScreenerState } from './screener'
 import type { RotationCommand, RotationState } from './rotation'
@@ -71,6 +72,7 @@ export interface IpcInvokeMap {
   'bot:refresh': { req: void; res: void }
   'bot:resetPaper': { req: void; res: void }
   'bot:testConnection': { req: void; res: ConnTestResult }
+  'dashboard:get': { req: void; res: DashboardData }
   'config:get': { req: void; res: AppConfig }
   'config:update': { req: ConfigPatch; res: AppConfig }
   'secrets:list': { req: void; res: SecretStatus[] }
@@ -169,6 +171,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'bot:refresh',
   'bot:resetPaper',
   'bot:testConnection',
+  'dashboard:get',
   'config:get',
   'config:update',
   'secrets:list',

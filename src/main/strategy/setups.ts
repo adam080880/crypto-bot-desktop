@@ -5,7 +5,7 @@ import { POI_LABEL } from '@shared/smc'
 import { TF_MS, type Timeframe } from '@shared/timeframes'
 import type { SmcAnalysisFull } from './analyze'
 import { bodyHi, bodyLo } from './candle'
-import type { OrderBlockIdx } from './orderBlocks'
+import { obFvgAt, type OrderBlockIdx } from './orderBlocks'
 import type { Pivot } from './swings'
 import { atrSeries, emaSeries } from './atr'
 import { flowConfluence, type FlowData } from './flow'
@@ -17,7 +17,7 @@ import { detectQms } from './qm'
 import { cisdIn, ifvgIn, smtAt } from './confirm'
 import { drawTarget, legDisplacement, liquidityPools, poolBehindSl } from './story'
 import type { LiqPool } from '@shared/story'
-import { bbMomentumAt, bollinger, inTradeZone, rangePosition, type Bollinger } from './premium'
+import { bbMomentumAt, bollinger, inTradeZone, legRetrace, rangePosition, type Bollinger } from './premium'
 
 /** A point of interest from any timeframe, normalised. */
 export interface Poi {
@@ -233,6 +233,7 @@ export function detectSetups(input: SetupInput): Setup[] {
   if (models.has('M6')) drafts.push(...modelM6(input, all))
   if (models.has('M7')) drafts.push(...modelM7(input, all))
   if (models.has('M8')) drafts.push(...modelM8(input, all, pois))
+  if (models.has('M11')) drafts.push(...modelM11(input, all, pois))
   const idx = new InducementIndex(entry, all, pois, { baitDays: cfg.baitDays, windowAtr: cfg.idmWindowAtr })
   if (models.has('M9')) drafts.push(...modelM9(input, all, pois, idx))
 
@@ -242,7 +243,7 @@ export function detectSetups(input: SetupInput): Setup[] {
   const best = new Map<string, Setup>()
   const poolCache = new Map<number, LiqPool[]>()
   for (const d0 of drafts) {
-    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' && d0.model !== 'M8' && d0.model !== 'M9' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
+    const d = atr && d0.model !== 'M5' && d0.model !== 'M6' && d0.model !== 'M7' && d0.model !== 'M8' && d0.model !== 'M11' && d0.model !== 'M9' ? widenSl(d0, cfg.minSlAtr * atr[Math.min(d0.knownIdx, c.length - 1)]!) : d0
     const s = finalize(input, all, d, vol1h, pois, idx, poolCache)
     if (!s) continue
     const prev = best.get(s.id)
@@ -344,7 +345,7 @@ export function modelM0(input: SetupInput, _pois: readonly Poi[]): Draft[] {
       model: 'M0',
       dir: poi.direction,
       poi: poiRef(poi, c[hitIdx]!.t),
-      child: { kind: 'OB', timeframe: entry.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: ob.hasFvg, origin: null },
+      child: { kind: 'OB', timeframe: entry.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: obFvgAt(ob, ob.confirmedAt), origin: null },
       entry: ob.line,
       sl,
       knownIdx: ob.confirmedAt,
@@ -545,7 +546,8 @@ export function refine(entry: SmcAnalysisFull, cfg: SmcConfig, dir: Dir, hitIdx:
     let ob: OrderBlockIdx | null = null
     for (const o of entry.orderBlocksIdx) {
       if (o.direction !== dir || o.i < ext - 1 || o.i > j) continue
-      if (!ob || (o.hasFvg && !ob.hasFvg) || (o.hasFvg === ob.hasFvg && (bull ? o.wickEnd < ob.wickEnd : o.wickEnd > ob.wickEnd))) ob = o
+      const of = obFvgAt(o, j), bf = ob !== null && obFvgAt(ob, j)
+      if (!ob || (of && !bf) || (of === bf && (bull ? o.wickEnd < ob.wickEnd : o.wickEnd > ob.wickEnd))) ob = o
     }
     if (!ob) return null
     knownIdx = Math.max(j, ob.confirmedAt)
@@ -555,7 +557,7 @@ export function refine(entry: SmcAnalysisFull, cfg: SmcConfig, dir: Dir, hitIdx:
       t: ob.t,
       level: ob.line,
       extreme: bull ? Math.min(extreme, ob.wickEnd) : Math.max(extreme, ob.wickEnd),
-      hasFvg: ob.hasFvg || legFvg,
+      hasFvg: obFvgAt(ob, j) || legFvg,
       origin: null
     }
     if (ob.prevOpposite) confluence.push('prevOpposite')
@@ -615,6 +617,18 @@ function modelM2(input: SetupInput, all: readonly SmcAnalysisFull[], pois: reado
       let best: { price: number; knownT: number; equal: boolean; tf: Timeframe } | null = null
       for (const b of all) {
         if (TF_RANK[b.timeframe] > TF_RANK[a.timeframe]) continue
+        if (cfg.m2Liquidity === 'lux') {
+          // LuxAlgo SSL (bull) / BSL (bear) pool born after the OB, nearest in front of it
+          for (const q of b.luxLiq) {
+            if (q.side !== (bull ? 'sell' : 'buy') || b.candles[q.startIdx]!.t <= ob.t || q.knownIdx >= b.candles.length) continue
+            const price = q.level
+            const inFront = bull ? price > ob.line && price <= ob.line * (1 + dist) : price < ob.line && price >= ob.line * (1 - dist)
+            if (!inFront) continue
+            if (best && (bull ? price >= best.price : price <= best.price)) continue
+            best = { price, knownT: closeTime(b.candles[q.knownIdx]!.t, b.timeframe), equal: true, tf: b.timeframe }
+          }
+          continue
+        }
         for (const p of b.alternating) {
           if (p.kind !== (bull ? 'low' : 'high')) continue
           const k = b.candles[p.i]!
@@ -640,7 +654,9 @@ function modelM2(input: SetupInput, all: readonly SmcAnalysisFull[], pois: reado
 
       const confluence: Confluence[] = ['sweep']
       if (best.equal) confluence.push('equalLiq')
-      if (ob.hasFvg) confluence.push('fvg')
+      // FVG counts only once its third candle has closed by T (OB itself is fresh at its own close)
+      const fvgNow = ob.fvgKnownAt !== null && closeTime(a.candles[ob.fvgKnownAt]!.t, a.timeframe) <= T
+      if (fvgNow) confluence.push('fvg')
       if (ob.prevOpposite) confluence.push('prevOpposite')
       const poi: Setup['poi'] = { kind: 'OB', timeframe: a.timeframe, level: ob.line, t: ob.t, hitT: null, origin }
       const liqName = `${bull ? 'SSL' : 'BSL'} ${best.tf} ${best.price}${best.equal ? ' (equal)' : ''}`
@@ -651,7 +667,7 @@ function modelM2(input: SetupInput, all: readonly SmcAnalysisFull[], pois: reado
           model: 'M2a',
           dir: ob.direction,
           poi,
-          child: { kind: 'OB', timeframe: a.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: ob.hasFvg, origin },
+          child: { kind: 'OB', timeframe: a.timeframe, t: ob.t, level: ob.line, extreme: ob.wickEnd, hasFvg: fvgNow, origin },
           entry: ob.line,
           sl: bull ? ob.wickEnd * (1 - buf) : ob.wickEnd * (1 + buf),
           knownIdx,
@@ -930,17 +946,55 @@ function modelM7({ entry, cfg }: SetupInput, all: readonly SmcAnalysisFull[]): D
  * close within m8NearR × risk of the line; after an unfilled limit expires the POI re-arms while it is untouched.
  * Only the first touch counts: once a wick reaches the line the POI is done.
  */
-export function modelM8({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[]): Draft[] {
+export function modelM8(input: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[]): Draft[] {
+  const kinds = new Set<PoiKind>(input.cfg.m8Kinds)
+  return htfPoiModel('M8', input, all, pois, new Set<Timeframe>(input.cfg.m8PoiTimeframes), (p) => kinds.has(p.kind), null)
+}
+
+// ---------- M11: stacked OB (user 2026-11-25, lab15, docs/entry-v2.md §30) ----------
+
+/** M11: lower TFs where a same-direction OCL Break born inside the HTF OB candle makes the OB "stacked". */
+export const M11_KID_TFS: Partial<Record<Timeframe, readonly Timeframe[]>> = { '4h': ['2h', '1h'], '1d': ['4h', '2h'] }
+
+/** Same-direction OCL Break on one of `ob`'s kid TFs whose origin candle lies inside the OB candle, known and still valid at `known`. */
+export function oclKidOf(ob: Poi, pois: readonly Poi[], known: number): Poi | null {
+  const kids = M11_KID_TFS[ob.timeframe]
+  if (!kids) return null
+  const t1 = ob.t + TF_MS[ob.timeframe]
+  for (const q of pois) {
+    if (q.kind !== 'OCL_BREAK' || q.direction !== ob.direction || !kids.includes(q.timeframe)) continue
+    const o = q.originT ?? q.t
+    if (o >= ob.t && o < t1 && q.activeFrom <= known && (q.invalidT === null || closeTime(q.invalidT, q.timeframe) > known)) return q
+  }
+  return null
+}
+
+/** M11: an M8-style order at the first touch of an m11PoiTimeframes OB that has an OCL Break kid (oclKidOf). */
+export function modelM11(input: SetupInput, all: readonly SmcAnalysisFull[], pois: readonly Poi[]): Draft[] {
+  return htfPoiModel('M11', input, all, pois, new Set<Timeframe>(input.cfg.m11PoiTimeframes), (p) => p.kind === 'OB', (p, known) => {
+    const k = oclKidOf(p, pois, known)
+    return k ? `OCL Break ${k.timeframe} searah lahir di dalam candle OB ${p.timeframe}` : null
+  })
+}
+
+/** Shared engine of M8 / M11. `extra` (per armed candle) returns a reason line, or null to skip that candle. */
+function htfPoiModel(
+  model: 'M8' | 'M11',
+  { entry, cfg, btc }: SetupInput,
+  all: readonly SmcAnalysisFull[],
+  pois: readonly Poi[],
+  tfs: ReadonlySet<Timeframe>,
+  keep: (p: Poi) => boolean,
+  extra: ((p: Poi, known: number) => string | null) | null
+): Draft[] {
   const c = entry.candles
   const d1 = all.find((a) => a.timeframe === '1d')
   const b4 = btc?.['4h']
   if ((cfg.m8RequireTrend1d && !d1) || (cfg.m8RequireBtc4h && !b4)) return []
-  const tfs = new Set<Timeframe>(cfg.m8PoiTimeframes)
-  const kinds = new Set<PoiKind>(cfg.m8Kinds)
   const atrOf = new Map<Timeframe, number[]>()
   const out: Draft[] = []
   for (const p of pois) {
-    if (!tfs.has(p.timeframe) || !kinds.has(p.kind)) continue
+    if (!tfs.has(p.timeframe) || !keep(p)) continue
     const a = all.find((x) => x.timeframe === p.timeframe)
     if (!a) continue
     let atr = atrOf.get(p.timeframe)
@@ -967,8 +1021,10 @@ export function modelM8({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalys
       if (Math.abs(x.c - L) > cfg.m8NearR * risk) continue
       if (cfg.m8RequireBtc4h && trendKnownAt(b4!, known) !== p.direction) continue
       if (cfg.m8RequireTrend1d && trendKnownAt(d1!, known) !== p.direction) continue
+      const why = extra ? extra(p, known) : ''
+      if (why === null) continue
       out.push({
-        model: 'M8',
+        model,
         dir: p.direction,
         poi: poiRef(p, null),
         child: { kind: 'LEVEL', timeframe: entry.timeframe, t: x.t, level: L, extreme: sl, hasFvg: false, origin: null },
@@ -979,7 +1035,8 @@ export function modelM8({ entry, cfg, btc }: SetupInput, all: readonly SmcAnalys
         confluence: [],
         reasons: [
           `${POI_LABEL[p.kind]} ${p.timeframe} belum pernah disentuh, harga mendekat (≤ ${cfg.m8NearR}R)`,
-          `searah${cfg.m8RequireBtc4h ? ' BTC 4h' : ''}${cfg.m8RequireTrend1d ? ' + trend 1d koin' : ''}, SL di balik POI (${((risk / L) * 100).toFixed(2)}%), TP ${cfg.m8TpR}R`
+          ...(why ? [why] : []),
+          `searah${cfg.m8RequireBtc4h ? ' BTC 4h' : ''}${cfg.m8RequireTrend1d ? ' + trend 1d koin' : ''}, SL di balik POI (${((risk / L) * 100).toFixed(2)}%), TP ${cfg.m8TpToTarget ? `max(${cfg.m8TpR}R, target liquidity B)` : `${cfg.m8TpR}R`}`
         ],
         expiry: cfg.m8ExpiryCandles
       })
@@ -1227,7 +1284,8 @@ const CONF_LABEL: Record<Confluence, string> = {
   liqTarget: 'ada liquidity B ≥ 1R di depan POI',
   slPoolClear: 'di balik SL POI (1R) nggak ada liquidity',
   pdPremium: 'POI di sisi mahal range (ikut momentum)',
-  dayOpenCheap: 'entry di sisi murah open harian'
+  dayOpenCheap: 'entry di sisi murah open harian',
+  ote: 'entry di golden ratio / OTE (0,618–0,786) kaki terakhir'
 }
 
 /** Bollinger bands per candle array (WeakMap cache; key includes the settings). */
@@ -1291,6 +1349,7 @@ function finalize(
   }
   // POI story tags (layer 3 lab 2026-11-23): leg displacement of the parent POI, liquidity B in front of it
   const storyA = parent ? all.find((x) => x.timeframe === parent.timeframe) : undefined
+  let storyTarget: number | null = null
   if (parent && storyA) {
     const leg = legDisplacement(parent, storyA)
     if (leg && leg.disp >= cfg.storyDispAtr) conf.add('dispStrong')
@@ -1300,7 +1359,10 @@ function finalize(
       poolCache?.set(known, pools)
     }
     const dt = drawTarget(parent, storyA, pools, known)
-    if (dt.target) conf.add('liqTarget')
+    if (dt.target) {
+      conf.add('liqTarget')
+      storyTarget = dt.target.price
+    }
     if (dt.risk > 0 && !poolBehindSl(parent, pools, dt.sl, dt.risk)) conf.add('slPoolClear')
     // same measure as the story's pdBad: the parent POI's line in the pdTimeframe range
     const pdS = all.find((x) => x.timeframe === cfg.pdTimeframe)
@@ -1327,6 +1389,13 @@ function finalize(
       if (st.manipulation) conf.add('manipulation')
     } else conf.add('wyckoffAgainst')
     break
+  }
+
+  // golden ratio / OTE (user 2026-11-27): entry inside oteLow–oteHigh of the last leg of the oteTimeframe candles closed by then
+  const oteA = all.find((x) => x.timeframe === cfg.oteTimeframe)
+  if (oteA) {
+    const rt = legRetrace(oteA.candles, lastClosedBy(oteA.candles, oteA.timeframe, known), cfg.oteLookback, d.entry, d.dir)
+    if (rt !== null && rt >= cfg.oteLow && rt < cfg.oteHigh) conf.add('ote')
   }
 
   // Power of 3 / intraday discount: entry vs the UTC daily open of the day the setup became known (same as extra.ts
@@ -1362,9 +1431,11 @@ function finalize(
 
   // M5 has no target: trailing only (TP far away so status/cancel rules never fire on it)
   const trailOnly = d.model === 'M5' || d.model === 'M6'
-  const tpLiquidity = trailOnly ? null : (d.tp ?? nearestTarget(all, bull, d.entry, known))
-  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : d.model === 'M7' ? msnrExit() : d.model === 'M8' ? m8Exit(cfg) : d.model === 'M9' ? m9Exit(cfg) : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
+  const exit = trailOnly ? { tpMode: 'trail' as const, tpR: 20 } : d.model === 'M7' ? msnrExit() : d.model === 'M8' || d.model === 'M11' ? m8Exit(cfg) : d.model === 'M9' ? m9Exit(cfg) : ((d.model === 'M4' ? breakerExit(cfg) : null) ?? input.exit ?? { tpMode: 'liquidity', tpR: 5 })
   const fixed = bull ? d.entry + exit.tpR * risk : d.entry - exit.tpR * risk
+  // M8 / M11 (user 2026-11-24): TP at the story's liquidity target B when it lies beyond m8TpR, else m8TpR
+  const m8Tp = (): number => (storyTarget !== null && (bull ? storyTarget > fixed : storyTarget < fixed) ? storyTarget : fixed)
+  const tpLiquidity = trailOnly ? null : d.model === 'M8' || d.model === 'M11' ? m8Tp() : (d.tp ?? nearestTarget(all, bull, d.entry, known))
   const tp = exit.tpMode === 'liquidity' && tpLiquidity !== null ? tpLiquidity : fixed
   const rr = Math.abs(tp - d.entry) / risk
   if (d.model === 'M0' && (tpLiquidity === null || Math.abs(tpLiquidity - d.entry) / risk < cfg.minRR)) return null

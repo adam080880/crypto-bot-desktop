@@ -686,3 +686,21 @@ nyangkut berhari-hari, opportunity cost; 8–12 % lemah di IS, +0,12R).
 tapi n 97 dalam 7 bulan dan OOS −0,09R; di OR = **+0,25R** (IS +0,22 / OOS +0,27 / koin baru +0,25), n 632 (±90/bulan).
 3 bulan terakhir per 30 hari: +0,09 / +0,34 / −0,15R. **M2a dimatikan** (`bot.models` = M0, M8, M9): 3 bulan lab −0,43 / −0,44 /
 +1,34R per trade, live −7R sejak 14 Nov. Diubah langsung di config (tanpa migrasi), default `RECOMMENDED_*` ikut.
+
+## 30. M11 OB HTF + OCL Break di TF turunan (permintaan user, 2026-11-25)
+
+User: "OB 4h, 2h kebentuk OB juga, 1h kebentuk OCL Break" → lab14/15 → model. **M11** (`modelM11`, mesin sama dengan M8 lewat
+`htfPoiModel`): OB `smc.m11PoiTimeframes` (default **1d**, pilihan user) yang pertama kali disentuh, dan di dalam candle OB itu lahir
+OCL Break searah di TF turunan (`M11_KID_TFS`: 1d → 4h/2h, 4h → 2h/1h), sudah diketahui dan belum invalid saat order dipasang
+(`oclKidOf`). Sisanya ikut setting M8: dekat ≤ `m8NearR`, BTC 4h + trend 1d searah, SL di balik ujung OB + 0,1 ATR (1–8 %), TP
+max(`m8TpR`, target B), expiry `m8ExpiryCandles`. Wajib default (migrasi `migr_m11`): `liqTarget` + `dispStrong`. **Tidak** di
+`bot.models` (user: backtest dulu).
+
+Lab (scratchpad, fee + 1m, TP max(3R, B)):
+- `lab15` (OB 4h/1d, entry di sentuhan pertama, 300 koin, DB 1 tahun): OB + BTC 4h + trend 1d +0,15–0,20R (n ±17 rb, 8–9/12 bulan).
+  Resep M8 penuh: OB 4h/1d + OCL Break +0,22R (n 787) vs tanpa OCL Break +0,04R; OB 1d + OCL Break +0,70R (n 122, menang 30 %).
+- `lab16` (mesin app, `detectSetups` M11, 300 koin, Des 2025–Nov 2026): semua setup **+0,32R** (n 875, 10/12 bulan, Des–Mei +0,34 /
+  Jun–Nov +0,30), dengan `dispStrong + liqTarget` +1,09R tapi n 76 dan 5 trade terbesar = 48 dari 83R.
+  **Tapi di 100 koin teratas (universe bot) ≈ +0,05R** (n 276); profitnya dari 200 koin kecil (+0,44R).
+- Replay portofolio bareng M8 (40 slot, 1 posisi/koin): M11 kebanyakan muncul di koin yang lagi dipegang M8. Top 100: M8 saja
+  +540R vs M8 + M11 +506–533R (tidak menambah). 300 koin: M8 + M11 tanpa tag +635R vs +527R (110 trade M11 masuk, +0,41R).

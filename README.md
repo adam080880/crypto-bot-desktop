@@ -165,7 +165,7 @@ satu per satu di **Settings → Bot entry**, dan dibandingkan di halaman **Backt
 | **M5** trend 4h (bukan SMC) | Close 4h tembus high/low 20 candle dan di sisi benar EMA200 → limit di close itu | 3× ATR | Trailing saja, tanpa BE/TP |
 | **M6** radar pump (bukan SMC) | Radar bunyi (volume 24j ≥ 8× median, atau funding ≤ −0,05% + volume ≥ 3×) → close 1h tembus box 24 jam → limit di close itu. Long saja | 3× ATR 1h | **Tanpa TP: ambil profit manual**, SL trailing |
 | **M7** MSNR (bukan dari materi) | Level A/V fresh dari close 4h (line chart) searah storyline harian (EMA20) → limit di level saat harga mendekat | 1× ATR 4h di balik level | **TP di level fresh berikutnya** |
-| **M8** POI HTF searah trend | POI 4h/1d (RBS/SBR/OCL Break) pertama kali disentuh, BTC 4h + trend 1d searah → limit di garis POI | Di balik ujung POI (+0,1 ATR, min 1%) | **TP 3R** |
+| **M8** POI HTF searah trend ⭐ | POI 4h/1d (RBS/SBR/OCL Break) pertama kali disentuh, BTC 4h + trend 1d searah, wajib `dispStrong + liqTarget + liqInPoi + cisd` → limit di garis POI | Di balik ujung POI (+0,1 ATR, min 1%) | **TP = max(3R, target liquidity B)** |
 | **M9** umpan → POI di belakangnya | POI searah tanpa penyebab (umpan) di depan OB/QM 1h–1d sudah kena → limit di OB/QM di belakangnya | Di balik ujung POI | Bertingkat tanpa TP (trailing) |
 | **M10** POI HTF → QM konfirmasi | POI HTF kena → QM terbentuk di TF kecil (1m/3m/5m/10m) dengan head di dalam POI → limit di level QM | Di balik head | Bertingkat (lab: rugi, tidak dipakai bot) |
 
@@ -251,10 +251,48 @@ screener. URL webhook itu rahasia, jangan dibagikan.
 
 Titik awal dari hasil lab (bukan jaminan). Semua ada di **Settings**, kecuali saklar live di halaman **Bot**.
 
+### Kombinasi terbaik sekarang: M8 saja
+
+Dari semua model yang dites, **M8 satu-satunya yang untung konsisten** di backtest 1 tahun (300 koin, mesin app,
+fee + slippage, fill di 1m). Setelan yang dipakai bot live sekarang:
+
+| Setting | Nilai |
+|---|---|
+| Model bot (`bot.models`) | **M8** saja |
+| TF POI M8 (`smc.m8PoiTimeframes`) | **4h + 1d** (3h dibuang: sering zona yang sama dengan 4h → rebutan slot) |
+| Konfluensi wajib M8 | `liqTarget` + `dispStrong` + `liqInPoi` + `cisd` |
+| TP | `smc.m8TpToTarget` = max(3R, target liquidity B) |
+| Golden ratio / OTE | `bot.oteRiskMult` **1,5** untuk M8: entry di 0,618–0,786 kaki terakhir (30 candle 4h) → risk 1,5× |
+| Posisi terbuka (`risk.maxOpenPositions`) | **30** |
+| Batas posisi searah | 0 (mati). Memangkas untung lebih banyak daripada DD |
+| Risk per trade | 1–2 %, dengan patokan risk tetap (`bot.riskBaseUsdt`) |
+
+Backtest M8 1 tahun (Des 2025 – Nov 2026, 300 koin, 30 slot, 1 posisi/koin, blacklist 3 SL / 7 hari), dalam R
+(1R = rugi kalau kena SL). Paruh 1 = Des–Mei, paruh 2 = Jun–Nov:
+
+| Setelan | Trade | Menang | Avg R | Total R | Paruh 1 / 2 | DD maks | 30 hari terburuk | Bulan + |
+|---|---|---|---|---|---|---|---|---|
+| M8 dasar (`dispStrong + liqTarget`, POI 3h/4h/1d) | 2.996 | 24 % | +0,11 | +335 | +162 / +173 | −124 | −96 | 10/13 |
+| + `liqInPoi` + `cisd` | 2.430 | 27 % | +0,18 | +432 | +180 / +251 | −81 | −66 | 10/13 |
+| + buang POI 3h | 2.197 | 28 % | +0,23 | +510 | +183 / +327 | −79 | −54 | 10/12 |
+| **+ OTE risk ×1,5 (setelan live)** | 2.197 | 28 % | +0,23 | **+571** | +211 / +360 | −82 | −56 | **11/12** |
+| sama, 40 slot | 2.768 | 28 % | +0,24 | +752 | +262 / +489 | −108 | −57 | 10/12 |
+
+> [!IMPORTANT]
+> Menang cuma ±28 %. Profitnya dari sedikit trade yang lari jauh ke target B. Drawdown setahun **80–110R**:
+> dengan modal 100 USDT dan 1R = 1 USDT, replay yang sama **bangkrut di Des 2025**. Pilih 1R supaya DD 100R masih
+> bisa ditanggung (mis. 1R ≤ 0,5 % modal), atau kurangi slot. SL M8 kebanyakan terjadi saat BTC berbalik arah setelah
+> fill (BTC melawan > 3 % dalam 24 jam → 93 % kena SL), jadi kerugian sering datang bareng.
+
+Golden ratio cuma dipakai di M8. Di model lain efeknya beda: M7 naik (+0,17 vs +0,07R/trade), M4 dan M5 malah turun,
+yang lain sampelnya terlalu kecil.
+
+### Setting umum
+
 | Setting | Rekomendasi | Alasan |
 |---|---|---|
 | Mode | **Paper dulu**, live setelah beberapa minggu hasil paper sesuai backtest | Live belum pernah dites lewat testnet |
-| Model bot | **M0, M2a, M4** | Lab 100 koin × 6 bulan (bot asli + fee): ±+0,39R/trade, IS +0,40 / OOS +0,38. M1 negatif di semua kombinasi |
+| Model bot | **M8** (lihat di atas) | M0/M2a/M4 dulu ±+0,39R/trade di lab 6 bulan, tapi setelah fix look-ahead M0 dan OB cuma M8 yang bertahan di 1 tahun 300 koin |
 | TF POI induk (`bot.poiTimeframes`) | **4h + 1d** | Lab 40 koin: POI 1d paling kuat (+0,31R, OOS +0,41); M0 di 4h+1d +0,12R |
 | Konfluensi wajib | Tombol **Rekomendasi** di Settings: M0 `prevOpposite+slLiqClear`, M4 `fvg+oiConfirm+slLiqClear`, M5 `btc1h+anomaly` | Lab 60–300 koin, positif di IS dan OOS |
 | Exit | Bertingkat + order flow, **SL tidak digeser** saat order flow | M0 +0,26 → +0,35R, M2a +0,28 → +0,37R |
@@ -269,6 +307,11 @@ Titik awal dari hasil lab (bukan jaminan). Semua ada di **Settings**, kecuali sa
 ## Hasil riset (jujur)
 
 Backtest lab 2 tahun dengan fee + slippage, fill di candle 1m (detail di [`docs/entry-v2.md`](docs/entry-v2.md)):
+
+- **M8 (POI HTF searah trend)** = satu-satunya model yang untung di 1 tahun 300 koin: +0,23R/trade, +510–571R/thn
+  di 30 slot, kedua paruh positif, 10–11/12 bulan positif (tabel di [Rekomendasi setting](#rekomendasi-setting)). Yang
+  ngangkat: searah BTC 4h + trend 1d, POI yang punya penyebab (`dispStrong`), ada target liquidity B, liquidity di
+  dalam POI, dan CISD. Live baru berjalan ±2 minggu, belum cukup buat menilai.
 
 - Model SMC (M1/M2b) kira-kira **impas sampai sedikit rugi** setelah fee. Breaker 15m jelas rugi (−0,25R/trade),
   jadi breaker dibatasi ke 1h/4h dengan TP 1R (+0,08R in-sample dan out-of-sample, 3 koin).

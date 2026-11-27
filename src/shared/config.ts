@@ -47,8 +47,17 @@ export type DataConfig = z.infer<typeof dataConfigSchema>
 export const smcConfigSchema = z.object({
   /** §1 Q1: candles left/right for a swing pivot. */
   pivot: z.number().int().min(1).max(10).default(3),
-  /** §3 Q6: price must close beyond the OB candle's extreme within N candles. */
+  /** §3 Q6: price must close beyond the OB candle's extreme within N candles (only when obConfirm = 'move'). */
   obMoveCandles: z.number().int().min(1).max(50).default(5),
+  /** §3 Q6: 'move' (default; user 2026-11-25 went back to it: 'close' put OBs in every sideways range, lab17 no better) =
+   *  swing pivot confirmed on both sides + close beyond the OB extreme within obMoveCandles. 'close' = fresh as soon as the
+   *  candle closes with the OB shape and its wick is the extreme of the `pivot` candles on its left.
+   *  'lux' (lab 2026-11-25, LuxAlgo ICT Concepts): a close beyond the latest `obSwingLength` swing high (low) makes the candle
+   *  with the lowest body bottom (highest body top) since that swing the OB; no shape/colour rule; box = body, line = far body
+   *  edge (bull: body top), breaker = a body beyond the box. */
+  obConfirm: z.enum(['close', 'move', 'lux']).default('move'),
+  /** obConfirm 'lux': swing = high (low) beyond the next N candles (LuxAlgo "Swing Lookback"). */
+  obSwingLength: z.number().int().min(3).max(50).default(10),
   /** §3 Q5c: minimum body/range ratio (doji filter). */
   minBodyRatio: z.number().min(0).max(1).default(0.1),
   /** §4 Q8: FVG may start up to N candles after the OB candle. */
@@ -105,6 +114,9 @@ export const smcConfigSchema = z.object({
   sweepReclaimCandles: z.number().int().min(0).max(10).default(2),
   /** M2: the OB must sit at most N % beyond the liquidity in front of it. */
   grabObDistPct: z.number().min(0.05).max(10).default(1),
+  /** M2a/M2b liquidity in front of the OB: 'swing' (default) = nearest unswept alternating swing; 'lux' (lab 2026-11-25) =
+   *  LuxAlgo BSL/SSL pool (≥ 3 zigzag swings within ±ATR(10)/2.5, `detectLuxLiquidity`). */
+  m2Liquidity: z.enum(['swing', 'lux']).default('swing'),
   /** Origin: a HTF POI counts as tapped when the reaction candle reaches within N % of it. */
   originNearPct: z.number().min(0).max(5).default(0.15),
   /** Origin: how many previous swings of the same side may be the swept liquidity. */
@@ -203,10 +215,21 @@ export const smcConfigSchema = z.object({
    *  tie up a slot / capital for days; 8–12 % was weak in-sample, +0,12R). */
   m8MaxSlPct: z.number().min(0).max(50).default(8),
   m8TpR: z.number().min(0.5).max(10).default(3), // lab 2026-11-23: 3R +0,16R (IS +0,10 / OOS +0,24) vs 2R +0,12R
+  /** TP = the POI story's liquidity target B (drawTarget) when it lies beyond m8TpR, else m8TpR (user 2026-11-24, lab 300 coins
+   *  Jun–Nov: +0,24R → +0,30R, IS/OOS/holdout all better; replay 40 slots 500 USDT 1 %: +297R → +483R). false = fixed m8TpR. */
+  m8TpToTarget: z.boolean().default(true),
   m8NearR: z.number().min(0.1).max(10).default(1),
   m8ExpiryCandles: z.number().int().min(1).max(1000).default(32),
   m8RequireBtc4h: z.boolean().default(true),
   m8RequireTrend1d: z.boolean().default(true),
+  /**
+   * M11 stacked OB (user 2026-11-25, lab15, docs/entry-v2.md §30): an OB on these TFs whose candle also produced a same-direction
+   * OCL Break on a lower TF (1d → 4h/2h, 4h → 2h/1h, `M11_KID_TFS`), known by the time the order is armed. Everything else
+   * (arming, BTC 4h + 1d trend, SL beyond the OB, min/max SL, TP max(m8TpR, B), expiry) uses the M8 settings.
+   * Lab 1 year 300 coins, + dispStrong + liqTarget: 1d +0,70R (n 122/yr, win 30 %, 7/12 months, Dec–May +0,35R; tail-heavy),
+   * 4h + 1d +0,22R (n 787). User picked 1d only.
+   */
+  m11PoiTimeframes: z.array(z.enum(['4h', '1d'])).min(1).default(['1d']),
   /**
    * Inducement (docs/smc-rules.md §11, own research 2026-11-23): bait = same-direction POI without origin in front of a
    * POI, touched within baitDays; strict IDM, extreme and decisional POI windows in ATR of the POI's timeframe.
@@ -260,6 +283,11 @@ export const smcConfigSchema = z.object({
   pdLookback: z.number().int().min(10).max(500).default(60),
   /** Long only below (and short only above) this fraction of the range; 0.5 = equilibrium. */
   pdLevel: z.number().min(0.2).max(0.8).default(0.5),
+  /** Golden ratio / OTE tag (user 2026-11-27): entry retrace of the last leg of the oteLookback closed candles of this TF. */
+  oteTimeframe: z.enum(['1h', '4h', '1d']).default('4h'),
+  oteLookback: z.number().int().min(10).max(500).default(30),
+  oteLow: z.number().min(0).max(1).default(0.618),
+  oteHigh: z.number().min(0).max(2).default(0.786),
   bbTimeframe: z.enum(['15m', '1h', '4h']).default('1h'),
   bbPeriod: z.number().int().min(5).max(100).default(20),
   bbStdDev: z.number().min(0.5).max(4).default(2),
@@ -470,6 +498,7 @@ export const RECOMMENDED_MODEL_CONFLUENCE: ModelConfluence = {
   M7: ['liqHtfBehind'], // MSNR: the level + storyline is the signal
   M8: ['liqTarget', 'dispStrong'], // POI story lab 2026-11-23: with OR anomaly +0,40R → +0,58R [IS +0,54 / OOS +0,64] 6/6, n 527 → 353
   M10: ['btc4h', 'slLiqClear'], // lab 2026-11-23 (POI 4h/1d, trailing): +0,15R [IS +0,11 / OOS +0,20] n 254, 4/7; without −0,05R
+  M11: ['liqTarget', 'dispStrong'], // lab15 1 year: OB 1d + OCL Break kid +0,70R with these vs +0,20R without (n 1.161)
   M9: ['cleanApproach', 'pdPremium', 'dayOpenCheap'], // 300 coins: + pdPremium +0,33R [IS +0,37 / OOS +0,45 / new +0,29] vs −0,05R; + dayOpenCheap +0,54R [+0,78 / +0,72 / new +0,42] vs +0,12R; lab 2026-11-23: + trailing +0,23R (IS +0,26 / OOS +0,19), n 6.2k, 6/7 months; without it OOS ±0
 }
 
@@ -491,7 +520,8 @@ export const RECOMMENDED_MODEL_CONFLUENCE_ANY: ModelConfluence = {
   M7: [],
   M8: [], // 300 coins: anomaly adds nothing on new coins (+0,34R n 1.594 vs +0,30R n 11.417 without)
   M9: ['bbMomentum', 'liqHtfBehind'],
-  M10: []
+  M10: [],
+  M11: []
 }
 
 export const botConfigSchema = z.object({
@@ -533,6 +563,13 @@ export const botConfigSchema = z.object({
    * limits still use the real equity.
    */
   riskBaseUsdt: z.number().min(0).max(1e9).default(0),
+  /** Risk % per entry model (user 2026-11-25: M11 trades rarely, so it gets its own size); a missing model uses
+   *  riskPerTradePct. Same base (riskBaseUsdt / equity). */
+  modelRiskPct: z.partialRecord(z.enum(ENTRY_MODELS), z.number().positive().max(100)).default({}),
+  /** Golden ratio (user 2026-11-27): setups with the 'ote' tag of these models risk oteRiskMult × their risk %
+   *  (lab M8 1 year, 30 slots: ×1,5 → +12 % PnL, DD −39,5 → −41,1). 1 = off. */
+  oteRiskMult: z.number().min(1).max(3).default(1.5),
+  oteRiskModels: z.array(z.enum(ENTRY_MODELS)).default(['M8']),
   /** Only the N most traded crypto perpetuals (24h quote volume); no TradFi/commodities/indices. */
   topVolume: z.number().int().min(5).max(300).default(100),
   /** M0/M1/M2a/M2b: the parent POI (the reason) must come from these timeframes. M4/M5/M6 are not limited. */
@@ -558,6 +595,17 @@ export const botConfigSchema = z.object({
   paperEquity: z.number().positive().max(1e9).default(10)
 })
 export type BotConfig = z.infer<typeof botConfigSchema>
+
+/** Risk % of one order of `model`: its own bot.modelRiskPct, else bot.riskPerTradePct; × bot.oteRiskMult when the setup has
+ *  the 'ote' tag and the model is in bot.oteRiskModels. */
+export function riskPctFor(
+  bot: Pick<BotConfig, 'riskPerTradePct'> & Partial<Pick<BotConfig, 'modelRiskPct' | 'oteRiskMult' | 'oteRiskModels'>>,
+  model: EntryModel,
+  confluence: readonly string[] = []
+): number {
+  const base = bot.modelRiskPct?.[model] ?? bot.riskPerTradePct
+  return confluence.includes('ote') && bot.oteRiskModels?.includes(model) ? base * (bot.oteRiskMult ?? 1) : base
+}
 
 /**
  * Pump radar (docs/entry-v2.md §12): notify only, never orders. Lab 2y, 346 coins: a 24h quote
@@ -621,8 +669,9 @@ export function m6Exit(smc: Pick<SmcConfig, 'm6TrailGapR' | 'm6TrailStepR'>): Pi
 }
 
 /** Exit of M8 (HTF POI with the trend): fixed TP, no ladder / break-even / trailing — as in the POI lab. */
-export function m8Exit(smc: Pick<SmcConfig, 'm8TpR'>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold' | 'tightSlPct'> {
-  return { tpMode: 'fixedR', tpR: smc.m8TpR, ladder: [], trailStepR: 0, orderFlowHold: false, tightSlPct: 0 }
+export function m8Exit(smc: Pick<SmcConfig, 'm8TpR'> & Partial<Pick<SmcConfig, 'm8TpToTarget'>>): Pick<ExitConfig, 'tpMode' | 'tpR' | 'ladder' | 'trailStepR' | 'orderFlowHold' | 'tightSlPct'> {
+  // 'liquidity' = the setup's tpLiquidity, which finalize() sets to max(m8TpR, story target B) for M8
+  return { tpMode: smc.m8TpToTarget === false ? 'fixedR' : 'liquidity', tpR: smc.m8TpR, ladder: [], trailStepR: 0, orderFlowHold: false, tightSlPct: 0 }
 }
 
 /** Exit of M9 (bait → POI behind): m9TpR > 0 = fixed TP without ladder/BE/trailing; 0 = the global tiered exit without a TP. */

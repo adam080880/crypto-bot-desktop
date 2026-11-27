@@ -386,7 +386,7 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
   const [msg, setMsg] = useState<string | null>(null)
   // Keep the form in sync when config changes elsewhere (Bot page Start/Stop, other windows)
   useEffect(() => setB(config.bot), [config.bot])
-  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'riskBaseUsdt' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours' | 'maxSameDirection', label: string, step: number) => (
+  const num = (k: 'minScore' | 'minConfidence' | 'riskPerTradePct' | 'riskBaseUsdt' | 'topVolume' | 'maxSetupAgeMin' | 'maxAnalysisAgeMin' | 'paperEquity' | 'slBlacklistCount' | 'slBlacklistHours' | 'maxSameDirection' | 'oteRiskMult', label: string, step: number) => (
     <>
       <Label htmlFor={`bot-${k}`}>{label}</Label>
       <Input id={`bot-${k}`} type="number" step={step} className="num text-right" value={b[k]} onChange={(e) => setB({ ...b, [k]: Number(e.target.value) })} />
@@ -405,6 +405,32 @@ function BotSettings({ config, onSaved }: { config: AppConfig; onSaved: (c: AppC
         <div className="grid grid-cols-[1fr_140px] items-center gap-3">
           {num('riskPerTradePct', 'Risk per order (% equity yang rela hilang kalau kena SL)', 0.1)}
           {num('riskBaseUsdt', `Patokan risk (USDT). 0 = saldo saat ini (ikut naik-turun); > 0 = modal tetap → 1R = ${b.riskPerTradePct}% × ${b.riskBaseUsdt || 'saldo'}${b.riskBaseUsdt > 0 ? ` = ${((b.riskBaseUsdt * b.riskPerTradePct) / 100).toFixed(2)} USDT` : ''}`, 1)}
+          <div className="col-span-2 space-y-1">
+            <Label>Risk khusus per model (% per order, patokan sama). Kosong = ikut risk umum {b.riskPerTradePct}%</Label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {ENTRY_MODELS.map((m) => (
+                <label key={m} className="flex items-center gap-1" title={MODEL_LABEL[m]}>
+                  {m}
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    className="num h-7 w-16 text-right"
+                    placeholder={String(b.riskPerTradePct)}
+                    value={b.modelRiskPct[m] ?? ''}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      const next = { ...b.modelRiskPct }
+                      if (e.target.value === '' || !(v > 0)) delete next[m]
+                      else next[m] = v
+                      setB({ ...b, modelRiskPct: next })
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          {num('oteRiskMult', `Pengali risk setup golden ratio / OTE (tag ote, model ${b.oteRiskModels.join('/') || '—'}). 1 = mati; 1,5 = risk ${(b.riskPerTradePct * b.oteRiskMult).toFixed(2)}%`, 0.1)}
           {num('minScore', 'Min skor setup (0 = mati; skor = 3 + jumlah konfluensi). Profil koin dari Backtest punya min skor sendiri', 1)}
           {num('minConfidence', 'Min confidence Claude (0–100, cuma dipakai kalau "Claude wajib" nyala)', 1)}
           {num('maxAnalysisAgeMin', 'Umur maks analisis Claude (menit)', 5)}

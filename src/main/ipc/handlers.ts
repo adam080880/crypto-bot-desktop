@@ -22,6 +22,7 @@ import { ClaudeRepo } from '../claude/repo'
 import { testBinanceConnection } from '../net/binanceCheck'
 import type { DiscordNotifier } from '../notify/discord'
 import { isDiscordWebhook } from '../notify/format'
+import { BotRepo } from '../bot/repo'
 
 const log = logger('ipc')
 
@@ -49,6 +50,7 @@ export function registerIpcHandlers(deps: {
   btcDomFeed.enable() // chart / setup views tag btcDom too (fetched lazily)
   const news = new NewsRepo(db)
   const claude = new ClaudeRepo(db)
+  const botRepo = new BotRepo(db)
 
   const handle = <C extends InvokeChannel>(channel: C, fn: Handler<C>): void => {
     ipcMain.handle(channel, async (event, req: unknown) => {
@@ -75,6 +77,16 @@ export function registerIpcHandlers(deps: {
     return state.getStatus()
   })
   handle('bot:get', () => data.getBot())
+  handle('dashboard:get', () => {
+    const trades = botRepo.dashboard('live') // user: live data only
+    const marks: Record<string, { price: number; t: number }> = {}
+    for (const s of new Set(trades.filter((t) => t.status === 'open').map((t) => t.symbol))) {
+      const sym = symbolByName(db, s)
+      const k = sym ? candles.latest('1m', sym.id, 1)[0] : undefined
+      if (k) marks[s] = { price: k.c, t: k.t + 60_000 }
+    }
+    return { trades, marks }
+  })
   handle('bot:setLive', (req) => {
     const r = z.object({ live: z.boolean(), confirm: z.string().optional() }).strict().parse(req)
     // real-money switch: needs the typed confirmation and both Binance keys

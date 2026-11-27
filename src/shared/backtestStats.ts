@@ -28,7 +28,7 @@ export function applyFilter(setups: readonly BtSetup[], f: BtFilter): BtSetup[] 
       (!f.pois.length || f.pois.includes(poiKey(s))) &&
       (!f.childKinds.length || f.childKinds.includes(s.childKind)) &&
       // SMC models and M5 have separate required lists (same rule as the bot gate)
-      (s.model === 'M5' ? (f.trendConf ?? []) : s.model === 'M6' || s.model === 'M7' || s.model === 'M8' || s.model === 'M9' ? [] : f.conf).every((k) => s.conf.includes(k)) &&
+      (s.model === 'M5' ? (f.trendConf ?? []) : s.model === 'M6' || s.model === 'M7' || s.model === 'M8' || s.model === 'M11' || s.model === 'M9' ? [] : f.conf).every((k) => s.conf.includes(k)) &&
       (!f.confAny?.length || f.confAny.some((k) => s.conf.includes(k))) &&
       s.score >= f.minScore
   )

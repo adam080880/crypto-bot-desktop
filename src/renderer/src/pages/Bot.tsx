@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bot as BotIcon, CandlestickChart, CircleCheck, CircleMinus, CircleX, Loader2, Pause, Play, RefreshCw, RotateCcw, ShieldAlert, Wifi, X } from 'lucide-react'
-import { canReopen, tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
+import { canReopen, EXIT_REASON_LABEL as REASON, tradeOutcome, tradeR, type BotEvent, type BotState, type BotTrade, type ConnTestResult, type ModelStat, type TradeStat } from '@shared/bot'
 import type { AppConfig } from '@shared/config'
 import { MODEL_LABEL, setupPoiLabel } from '@shared/smc'
 import { Badge } from '@/components/ui/badge'
@@ -14,19 +14,6 @@ import { useAppStore } from '@/stores/appStore'
 
 const px = (n: number): string => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(5))
 const usd = (n: number | null, d = 2): string => (n === null ? '—' : `${n >= 0 ? '' : '−'}${Math.abs(n).toFixed(d)}`)
-const REASON: Record<string, string> = {
-  tp: 'TP',
-  sl: 'SL',
-  trail: 'SL profit (BE/trailing)',
-  missed: 'lewat TP',
-  expired: 'expired',
-  kill: 'kill switch',
-  manual: 'dibatalkan',
-  error: 'error',
-  retried: 'error (sudah di-retry)',
-  'manual-close': 'close manual',
-  external: 'di luar bot'
-}
 /** ms → value of a datetime-local input (local time). */
 const toLocalInput = (t: number): string => {
   const d = new Date(t)
@@ -181,6 +168,19 @@ export function Bot() {
             <div className="text-lg font-semibold">
               {cfg.bot.riskPerTradePct}%{cfg.bot.riskBaseUsdt > 0 ? ` × ${cfg.bot.riskBaseUsdt} USDT = ${((cfg.bot.riskBaseUsdt * cfg.bot.riskPerTradePct) / 100).toFixed(2)} USDT` : ' saldo'} · maks {cfg.risk.maxLeverage}× · {cfg.risk.maxOpenPositions} posisi
             </div>
+            {Object.keys(cfg.bot.modelRiskPct).length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                khusus:{' '}
+                {Object.entries(cfg.bot.modelRiskPct)
+                  .map(([m, p]) => `${m} ${p}%${cfg.bot.riskBaseUsdt > 0 ? ` (${((cfg.bot.riskBaseUsdt * p) / 100).toFixed(2)} USDT)` : ''}`)
+                  .join(' · ')}
+              </div>
+            )}
+            {cfg.bot.oteRiskMult > 1 && cfg.bot.oteRiskModels.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                golden ratio / OTE ({cfg.bot.oteRiskModels.join('/')}): risk × {cfg.bot.oteRiskMult}
+              </div>
+            )}
           </div>
           <div className="text-xs text-muted-foreground sm:col-span-2 lg:col-span-4">
             {kill ? (

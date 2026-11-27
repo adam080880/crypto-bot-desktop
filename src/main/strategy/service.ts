@@ -5,7 +5,7 @@ import { CandleRepo } from '../db/candles'
 import type { Db } from '../db/client'
 import { symbolByName } from '../db/symbolsRepo'
 import { analyzeSmc, toPublic, type SmcAnalysisFull } from './analyze'
-import { collectAllPois, detectSetups, type Poi, type SetupInput } from './setups'
+import { collectAllPois, detectSetups, M11_KID_TFS, type Poi, type SetupInput } from './setups'
 import { liquidityPools, poiStory } from './story'
 import { InducementIndex } from './inducement'
 import type { StoryResult } from '@shared/story'
@@ -27,7 +27,7 @@ const BTC_CACHE_MS = 30_000
 
 /** Timeframes analysed for setups: entry + POI timeframes (+1d for origin checks, + the M5 trend TF). */
 export function setupTimeframes(cfg: SmcConfig): Timeframe[] {
-  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe, ...(cfg.models.includes('M6') ? (['1h'] as const) : []), ...(cfg.models.includes('M7') ? [cfg.msnrTimeframe] : []), ...(cfg.models.includes('M8') ? cfg.m8PoiTimeframes : []), ...(cfg.models.includes('M9') ? cfg.m9PoiTimeframes : [])])]
+  return [...new Set<Timeframe>([cfg.entryTimeframe, ...cfg.poiTimeframes, '1d', cfg.trendTimeframe, cfg.oteTimeframe, ...(cfg.models.includes('M6') ? (['1h'] as const) : []), ...(cfg.models.includes('M7') ? [cfg.msnrTimeframe] : []), ...(cfg.models.includes('M8') ? cfg.m8PoiTimeframes : []), ...(cfg.models.includes('M9') ? cfg.m9PoiTimeframes : []), ...(cfg.models.includes('M11') ? cfg.m11PoiTimeframes.flatMap((tf) => [tf, ...(M11_KID_TFS[tf] ?? [])]) : [])])]
 }
 
 export class SmcService {

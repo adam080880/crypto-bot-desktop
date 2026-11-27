@@ -116,8 +116,10 @@ Candle `i` adalah **bullish OB** jika:
    +1 skor kalau ada.
 ❓ **Q5c. Kalau candle doji** (body sangat kecil, misal < 10% range)? Usulan default: **tidak dihitung
    sebagai OB**.
-❓ **Q6. Seberapa jauh harga harus meninggalkan OB** supaya OB dianggap sah? Usulan default:
-   OB sah kalau dalam 5 candle setelahnya ada close di atas `h[i]` (bullish) / di bawah `l[i]` (bearish).
+✅ **Q6. Kapan OB sah**: swing kanan-kiri + close di atas high OB dalam `obMoveCandles` (`smc.obConfirm = 'move'`, default).
+   Sempat diganti 2026-11-25 jadi "langsung saat candle OB close" (`'close'`: low lebih rendah dari `pivot` candle kirinya), lalu
+   **dibalikin ke `move` di hari yang sama** (user: OB jadi muncul di sideways; lab17: syarat "terjun dari atas + nyentuh POI" juga
+   tidak menambah edge). `'close'` masih bisa dipilih lewat config. FVG OB baru dihitung setelah candle ketiganya close (`fvgKnownAt`).
 ❓ **Q7. Entry & SL.** Materi bilang "limit entry di OB". Usulan default: limit di garis OB (ujung
    body), **SL di luar ujung wick + buffer kecil** (0,1% atau 0,1×ATR).
 

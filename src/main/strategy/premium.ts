@@ -74,3 +74,28 @@ export function bbMomentumAt(c: readonly Candle[], bb: Bollinger, i: number, dir
   const sloped = bull ? m > m0 : m < m0
   return side && sloped && w > w0
 }
+
+/**
+ * Golden ratio / OTE (user 2026-11-27): how deep `price` retraces the last leg of the `lookback` closed candles
+ * ending at index `i`. Long: leg = lowest low before the window's highest high → that high; 0 = at the high, 1 = back
+ * at the leg's low, > 1 = beyond it. Short mirrored. null = not enough candles / flat leg.
+ */
+export function legRetrace(c: readonly Candle[], i: number, lookback: number, price: number, dir: Dir): number | null {
+  if (i < 0 || i >= c.length) return null
+  const i0 = Math.max(0, i - lookback + 1)
+  if (i - i0 + 1 < Math.ceil(lookback / 2)) return null
+  if (dir === 'bullish') {
+    let ih = i0
+    for (let m = i0; m <= i; m++) if (c[m]!.h > c[ih]!.h) ih = m
+    let lo = Infinity
+    for (let m = i0; m <= ih; m++) lo = Math.min(lo, c[m]!.l)
+    const top = c[ih]!.h
+    return top > lo ? (top - price) / (top - lo) : null
+  }
+  let il = i0
+  for (let m = i0; m <= i; m++) if (c[m]!.l < c[il]!.l) il = m
+  let hi = -Infinity
+  for (let m = i0; m <= il; m++) hi = Math.max(hi, c[m]!.h)
+  const bot = c[il]!.l
+  return hi > bot ? (price - bot) / (hi - bot) : null
+}

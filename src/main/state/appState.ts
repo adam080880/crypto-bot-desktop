@@ -44,7 +44,7 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
     this.config = readSetting(db, 'app_config', appConfigSchema) ?? defaultAppConfig
     // smc.models has no UI: configs saved before M5 existed get the new model detected (the bot still
     // only trades what bot.models allows)
-    for (const m of ['M5', 'M6', 'M7', 'M8', 'M9', 'M10'] as const)
+    for (const m of ['M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11'] as const)
       if (!this.config.smc.models.includes(m)) this.config = { ...this.config, smc: { ...this.config.smc, models: [...this.config.smc.models, m] } }
     // M9 (user, 2026-11-23) is forward-tested as shadow paper next to M8, once; removing it later sticks
     if (!readSetting(db, 'migr_shadow_m9', z.boolean())) {
@@ -116,6 +116,12 @@ export class AppState extends EventEmitter<{ status: [AppStatus]; config: [AppCo
       this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: { ...this.config.bot.modelConfluence, M10: ['btc4h', 'slLiqClear'] } } }
       writeSetting(db, 'app_config', this.config)
       writeSetting(db, 'migr_m10', true)
+    }
+    // M11 (user 2026-11-25, stacked OB) gets its lab required list once; backtest first, not traded until added to bot.models
+    if (!readSetting(db, 'migr_m11', z.boolean())) {
+      this.config = { ...this.config, bot: { ...this.config.bot, modelConfluence: { ...this.config.bot.modelConfluence, M11: ['liqTarget', 'dispStrong'] } } }
+      writeSetting(db, 'app_config', this.config)
+      writeSetting(db, 'migr_m11', true)
     }
     // user 2026-11-23: M8 also on 3h POIs (lab: 3h +0,16R ≈ 4h +0,18R; with anomaly 4h+1d+3h +0,31R n 873 vs +0,40R n 519),
     // once; unticking it later in Settings sticks

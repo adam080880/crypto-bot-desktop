@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appConfigSchema, defaultAppConfig, riskConfigSchema } from './config'
+import { appConfigSchema, defaultAppConfig, m8Exit, riskConfigSchema, riskPctFor } from './config'
 
 describe('config schema', () => {
   it('defaults to paper mode with a risk guard', () => {
@@ -65,5 +65,38 @@ describe('symbol filter', () => {
     expect(isSymbolAllowed('USDCUSDT', data)).toBe(false)
     expect(isSymbolAllowed('币安人生USDT', data)).toBe(false)
     expect(isSymbolAllowed('币安人生USDT', { ...data, excludeNonAscii: false })).toBe(true)
+  })
+})
+
+describe('m8Exit', () => {
+  it('TP at the story target (tpLiquidity) by default, fixed R when m8TpToTarget is off', () => {
+    expect(defaultAppConfig.smc.m8TpToTarget).toBe(true)
+    expect(m8Exit({ m8TpR: 3, m8TpToTarget: true })).toMatchObject({ tpMode: 'liquidity', tpR: 3 })
+    expect(m8Exit({ m8TpR: 3, m8TpToTarget: false })).toMatchObject({ tpMode: 'fixedR', tpR: 3 })
+  })
+})
+
+describe('risk per model (bot.modelRiskPct)', () => {
+  it('defaults to the global risk and uses a model override when set', () => {
+    expect(defaultAppConfig.bot.modelRiskPct).toEqual({})
+    expect(riskPctFor({ riskPerTradePct: 1, modelRiskPct: {} }, 'M11')).toBe(1)
+    expect(riskPctFor({ riskPerTradePct: 1, modelRiskPct: { M11: 3 } }, 'M11')).toBe(3)
+    expect(riskPctFor({ riskPerTradePct: 1, modelRiskPct: { M11: 3 } }, 'M8')).toBe(1)
+  })
+
+  it('golden ratio: × oteRiskMult for an ote setup of an oteRiskModels model only', () => {
+    expect(defaultAppConfig.bot.oteRiskMult).toBe(1.5)
+    expect(defaultAppConfig.bot.oteRiskModels).toEqual(['M8'])
+    const b = { riskPerTradePct: 1, modelRiskPct: {}, oteRiskMult: 1.5, oteRiskModels: ['M8' as const] }
+    expect(riskPctFor(b, 'M8', ['liqTarget', 'ote'])).toBe(1.5)
+    expect(riskPctFor(b, 'M8', ['liqTarget'])).toBe(1)
+    expect(riskPctFor(b, 'M0', ['ote'])).toBe(1)
+    expect(riskPctFor({ ...b, modelRiskPct: { M8: 2 } }, 'M8', ['ote'])).toBe(3)
+  })
+
+  it('keeps the override through a patch and rejects non-positive values', async () => {
+    const { parseConfigPatch } = await import('./config')
+    expect(parseConfigPatch({ bot: { modelRiskPct: { M11: 2.5 } } })).toEqual({ bot: { modelRiskPct: { M11: 2.5 } } })
+    expect(() => parseConfigPatch({ bot: { modelRiskPct: { M11: 0 } } })).toThrow()
   })
 })

@@ -574,7 +574,7 @@ function Meta({ r, setups, filter, onSave }: { r: BacktestResult; setups: BtSetu
       savedAt: Date.now(),
       models: [row.model],
       pois: [row.poi],
-      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' || row.model === 'M7' || row.model === 'M8' || row.model === 'M9' ? [] : filter.conf,
+      requireConfluence: row.model === 'M5' ? (filter.trendConf ?? []) : row.model === 'M6' || row.model === 'M7' || row.model === 'M8' || row.model === 'M11' || row.model === 'M9' ? [] : filter.conf,
       anyConfluence: filter.confAny ?? [],
       minScore: filter.minScore,
       plan: r.plans[row.plan]!,

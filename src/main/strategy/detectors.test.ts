@@ -18,11 +18,38 @@ describe('order block (§3)', () => {
     const a = analyzeSmc(bars(OB_BULL), '15m', cfg())
     const ob = a.orderBlocks.find((o) => o.direction === 'bullish')!
     expect(ob).toMatchObject({ t: at(3), line: 8.0, wickEnd: 6.5, bodyFar: 8.4, hasFvg: true, prevOpposite: true })
-    expect(ob.confirmedT).toBe(at(5))
+    expect(ob.confirmedT).toBe(at(5)) // default obConfirm 'move': pivot on both sides + close beyond the OB high
     // wick liquidity zone of the OB
     expect(a.liquidity).toContainEqual(
       expect.objectContaining({ kind: 'wick', side: 'sell', top: 8.0, bottom: 6.5, t: at(3), sweptT: null })
     )
+  })
+
+  it("obConfirm 'close': OB exists right at the close of the OB candle, before any candle on its right", () => {
+    const a = analyzeSmc(bars(OB_BULL.slice(0, 4)), '15m', cfg({ obConfirm: 'close' }))
+    expect(a.orderBlocks.find((o) => o.direction === 'bullish')).toMatchObject({ t: at(3), confirmedT: at(3), hasFvg: false })
+  })
+
+  it("obConfirm 'lux': close above the swing high → lowest-body candle since the swing is the OB (any colour), body box, body breaker", () => {
+    const rows: [number, number, number, number][] = [
+      [10, 10.5, 9.5, 10.2], [10.2, 11, 10, 10.8], [10.8, 12, 10.6, 11.0], // swing high 12 at 2
+      [11.0, 11.2, 10.0, 10.2], [10.2, 10.4, 9.0, 9.2], [9.3, 9.6, 8.5, 9.5], [9.5, 10.5, 9.4, 10.4], [10.4, 11.5, 10.3, 11.4],
+      [11.4, 12.5, 11.3, 12.4], // close 12.4 > 12 → break
+      [12.4, 12.5, 10.0, 10.1], // touches the body top 10.2, body stays above 9.2
+      [10.1, 10.2, 8.9, 9.0] // body below 9.2 → breaker
+    ]
+    const ob = analyzeSmc(bars(rows), '15m', cfg({ obConfirm: 'lux', obSwingLength: 3 })).orderBlocks.find((o) => o.direction === 'bullish')
+    expect(ob).toMatchObject({ t: at(4), line: 10.2, wickEnd: 9.0, bodyFar: 9.2, confirmedT: at(8), hitT: at(9), invalidT: at(10) })
+  })
+
+  it("obConfirm 'move' (default) needs the right side: no OB with only 4 candles", () => {
+    expect(analyzeSmc(bars(OB_BULL.slice(0, 4)), '15m', cfg()).orderBlocks.filter((o) => o.direction === 'bullish')).toHaveLength(0)
+  })
+
+  it('a candle whose low is not the lowest of the pivot candles on its left is not an OB', () => {
+    const rows = OB_BULL.map((r) => [...r] as [number, number, number, number])
+    rows[1] = [9.2, 9.4, 6.4, 8.2] // candle 1 already went lower than the OB candle's 6.5
+    expect(analyzeSmc(bars(rows), '15m', cfg()).orderBlocks.filter((o) => o.t === at(3))).toHaveLength(0)
   })
 
   it('rejects the same shape when the candle is red (colour matters, Q5)', () => {
@@ -214,5 +241,18 @@ describe('QM (§7)', () => {
     const wickOnly = [9, 9.5, 10, 11.5, 13, 12, 11, 12.5, 14, 12.5, 11.5, 10.98, 11.6, 11.8, 12.6, 13.1, 12.2, 11.5]
     expect(analyzeSmc(path(wickOnly), '15m', cfg()).qms.filter((x) => x.direction === 'bearish')).toHaveLength(0)
     expect(analyzeSmc(path(wickOnly), '15m', cfg({ qmRequireCloseBreak: false })).qms.filter((x) => x.direction === 'bearish')).toHaveLength(1)
+  })
+})
+
+describe('LuxAlgo liquidity pools', () => {
+  it('3 zigzag swing highs within ±ATR/2.5 → one BSL pool, known at the close after the third swing', async () => {
+    const { detectLuxLiquidity } = await import('./liquidity')
+    const rows: [number, number, number, number][] = [
+      [8, 8.5, 7.5, 8], [8, 8.8, 7.8, 8.5], [8.5, 10, 8.4, 9.5], [9.5, 9.6, 8, 8.2], [8.2, 8.4, 7.6, 7.8], [7.8, 9, 7.7, 8.8],
+      [8.8, 10.1, 8.7, 9.8], [9.8, 9.9, 8.1, 8.3], [8.3, 8.5, 7.6, 7.9], [7.9, 9.1, 7.7, 9.0], [9.0, 9.95, 8.9, 9.6], [9.6, 9.7, 8.5, 8.7]
+    ]
+    const buy = detectLuxLiquidity(bars(rows), 2).filter((p) => p.side === 'buy')
+    expect(buy).toHaveLength(1)
+    expect(buy[0]).toMatchObject({ level: 10.1, startIdx: 2, knownIdx: 11, count: 3 })
   })
 })
